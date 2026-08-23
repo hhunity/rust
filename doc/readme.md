@@ -1,4 +1,84 @@
 
+## Yoctoビルド用Ubuntu環境 (doc/yocto-urls.txt)
+
+Ubuntu 24.04 (noble) / amd64 上で Yocto Project (bitbake) をオフラインで
+ビルドできるようにするための、ビルドホストに必要な apt パッケージ一式
+(および依存パッケージ)のダウンロード URL 一覧です。
+
+対象パッケージ(Yocto公式ドキュメントの "Build Host Packages" 相当):
+- gawk, wget, git, diffstat, unzip, texinfo (基本ツール)
+- build-essential, chrpath, socat, cpio (ビルド・パッケージング関連)
+- python3, python3-pip, python3-pexpect, python3-git, python3-jinja2,
+  python3-subunit (bitbakeの実行に必要なPython関連)
+- xz-utils, zstd, liblz4-tool, lz4, file (アーカイブ/圧縮ツール)
+- debianutils, iputils-ping, locales, libacl1 (その他依存)
+
+このうち `chrpath` / `texinfo` / `python3-pip` / `python3-subunit` /
+`liblz4-tool` / `lz4` は Ubuntu の `universe` リポジトリに属するため、
+オフライン環境側の `/etc/apt/sources.list` (または `.sources`) で
+`universe` コンポーネントを有効にしておく必要があります
+(パッケージファイル自体はダウンロード済みのものを `dpkg -i` で入れるだけ
+なので有効化必須ではありませんが、依存解決のため apt 経由でインストール
+する場合は該当行に `universe` を追記してください)。
+
+生成コマンド(`universe` を有効にした Ubuntu 24.04 amd64 環境で実行):
+```
+apt-get install --print-uris -y -o Dir::State::status=/dev/null \
+  gawk wget git diffstat unzip texinfo build-essential chrpath socat cpio \
+  python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping \
+  python3-git python3-jinja2 python3-subunit zstd liblz4-tool file locales \
+  libacl1 lz4 \
+  | grep -oP "(?<=')[^']+(?=')" | grep '^http' | sort -u > yocto-urls.txt
+```
+
+### Windows側での一括ダウンロード手順
+
+1. Windows上でPowerShellを開き、`doc/yocto-urls.txt` を同じフォルダに置く
+2. 以下を実行して全 `.deb` をダウンロード:
+   ```powershell
+   $outDir = ".\yocto-offline-debs"
+   New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+   Get-Content yocto-urls.txt | ForEach-Object {
+       $fileName = Split-Path $_ -Leaf
+       Invoke-WebRequest -Uri $_ -OutFile (Join-Path $outDir $fileName)
+   }
+   ```
+3. `yocto-offline-debs` フォルダをUSBメモリ等でオフラインのUbuntu環境へコピー
+
+### オフライン環境(Ubuntu)側でのインストール
+
+```
+cd yocto-offline-debs
+sudo dpkg -i *.deb
+sudo apt-get install -f   # 依存関係の不足があれば解消(ネット不要、同フォルダのdebを使う)
+```
+
+`locales` パッケージ導入後は、Yoctoが要求する `en_US.UTF-8` ロケールを
+生成しておく:
+```
+sudo locale-gen en_US.UTF-8
+sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+```
+
+### 補足: Yocto本体とレシピのソースについて
+
+上記はあくまで**ビルドホスト(Ubuntu)側に必要なツール類**のURL一覧です。
+Yoctoのビルドではこれとは別に以下も必要になるため、完全オフラインで
+ビルドしたい場合は併せて準備してください:
+
+- **Yocto (poky) 本体**: `git clone https://git.yoctoproject.org/poky` を
+  ネットのある端末で実行し、`.git` ごとオフライン環境へコピーする
+  (もしくは release tarball を https://downloads.yoctoproject.org/releases/yocto/
+  から取得)
+- **各レシピが取得するソースアーカイブ (`DL_DIR`)**: ネットに繋がる端末で
+  対象ターゲットを一度 `bitbake <target>` してビルドし、生成される
+  `downloads/` ディレクトリを丸ごとオフライン環境へコピーして
+  `local.conf` の `DL_DIR` に指定する。`bitbake <target> --runall=fetch` を
+  使うと実際のビルドをせずにダウンロードだけ済ませられる
+- **sstate-cache**: 同様にビルド成果物のキャッシュ (`sstate-cache/`) を
+  コピーしておくと、オフライン環境での再ビルドが高速化できる(必須ではない)
+
 ## Rust開発環境用 (doc/rust-urls.txt)
 
 Ubuntu 24.04 (noble) / amd64 上で Rust のコードをオフラインでビルドできるように
