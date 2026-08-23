@@ -26,6 +26,30 @@ rustc/cargo 本体は apt ではなく、上記でダウンロードした curl 
 [rustup](https://rustup.rs/) でインストールすることを推奨します
 (バージョン管理がしやすいため)。
 
+## Rust本体を完全オフラインで入れる場合 (doc/rust-toolchain-urls.txt)
+
+インターネットに繋がらない環境にインストールする場合は、rustup経由ではなく
+static.rust-lang.org が配布している**単体installer(tarball)** を使うのが簡単です。
+これ1ファイルに rustc / cargo / 標準ライブラリ / インストールスクリプト
+(`install.sh`) が全部入っているので、rustup 自体は不要です。
+
+手順:
+1. ネットワークのある端末で `doc/rust-toolchain-urls.txt` 先頭の
+   `rust-<version>-x86_64-unknown-linux-gnu.tar.xz` をダウンロードし、
+   sha256sum でハッシュ値を照合する(コメントに記載)
+2. オフライン環境に転送し、展開してインストール:
+   ```
+   tar xf rust-1.98.0-x86_64-unknown-linux-gnu.tar.xz
+   cd rust-1.98.0-x86_64-unknown-linux-gnu
+   sudo ./install.sh                    # /usr/local に入れる場合
+   # もしくは ./install.sh --prefix=$HOME/.local --destdir=  # 非rootの場合
+   ```
+3. `rustc --version` / `cargo --version` で確認
+
+このリストのバージョン(1.98.0, 2026-08-20時点のstable)は時間が経つと古くなります。
+最新化したい場合は `https://static.rust-lang.org/dist/channel-rust-stable.toml`
+を取得し、`[pkg.rust.target.x86_64-unknown-linux-gnu]` のURLを参照してください。
+
 Invoke-WebRequest -Uri "http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-13/gcc-13_13.2.0-4ubuntu3_amd64.deb" -OutFile "gcc-13_13.2.0-4ubuntu3_amd64.deb"
 
 ---
