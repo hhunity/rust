@@ -50,6 +50,54 @@ static.rust-lang.org が配布している**単体installer(tarball)** を使う
 最新化したい場合は `https://static.rust-lang.org/dist/channel-rust-stable.toml`
 を取得し、`[pkg.rust.target.x86_64-unknown-linux-gnu]` のURLを参照してください。
 
+## ライブラリ(crate)を集めてWindows→Linuxへ持っていく方法
+
+crates.io上の依存ライブラリ(crate)は個別にURLをダウンロードするのではなく、
+cargo標準機能の `cargo vendor` でソースごとまとめて集めるのが基本です。
+バイナリではなくソースコード一式なので、Windows上で集めてそのままLinuxへ
+コピーすればOKです(クロスコンパイルやOS変換は不要)。
+
+### 手順
+
+1. **Windows側の準備**
+   - Rust(cargo)がインストール済みで、かつネットに繋がっている状態が必要
+     (vendorする=ダウンロードする作業なので、この時だけはオンラインが必要)
+   - 対象プロジェクトの `Cargo.toml`(使うcrate一覧)を用意する
+
+2. **Windows側でvendorを実行**(プロジェクトのルートディレクトリで)
+   ```
+   mkdir .cargo
+   cargo vendor > .cargo/config.toml
+   ```
+   - `vendor/` フォルダに、依存する全crateのソース一式がダウンロード・展開される
+   - `.cargo/config.toml` には、cargoにvendorディレクトリを見に行かせるための
+     設定(`source.crates-io` を `vendor/` に差し替える設定)が書き込まれる
+
+3. **Linuxへ転送**
+   USBメモリ等で以下をまとめてコピーする(この4点セットで完結):
+   - `Cargo.toml`
+   - `Cargo.lock`
+   - `vendor/`
+   - `.cargo/config.toml`
+
+4. **Linux側でビルド**
+   ```
+   cargo build --offline
+   ```
+   ネット接続なしでビルドできる。
+
+### 補足
+
+- `Cargo.lock` にはOS条件付き依存(`cfg(windows)` / `cfg(unix)` など)も
+  **全プラットフォーム分**記録されるため、Windows上で`cargo vendor`しても
+  Linux用の依存(`libc`等)はちゃんと含まれる。クロスコンパイルの心配は不要。
+- `openssl-sys` など、ネイティブCライブラリにリンクするcrateはソース自体は
+  vendorできるが、リンク先のOS側ライブラリ(`libssl-dev`等)は別途必要。
+  これは `doc/rust-urls.txt` のaptパッケージ一覧でカバー済み。
+- 依存crateを追加/変更するたびに、Windows側で `Cargo.toml` を編集して
+  `cargo vendor` を再実行し、`vendor/` を作り直してLinuxへ再転送する必要がある。
+- `cargo vendor` はcargo組み込みのサブコマンドなので追加インストール不要。
+
 Invoke-WebRequest -Uri "http://archive.ubuntu.com/ubuntu/pool/main/g/gcc-13/gcc-13_13.2.0-4ubuntu3_amd64.deb" -OutFile "gcc-13_13.2.0-4ubuntu3_amd64.deb"
 
 ---
