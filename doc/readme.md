@@ -1,4 +1,109 @@
 
+## RadonPy (git) を使うのに必要なファイル (doc/radonpy-files.md)
+
+ポリマー物性の全自動計算ライブラリ RadonPy (https://github.com/RadonPy/RadonPy)
+を動かすために必要な一式(本体の git clone、依存Conda/PyPIパッケージ、
+LAMMPS/Psi4等の外部エンジン、オフライン環境への持っていき方)をまとめたもの。
+詳細は `doc/radonpy-files.md` を参照。
+
+## Yoctoビルド用Ubuntu環境 (doc/yocto-urls.txt, doc/yocto-urls-jammy.txt)
+
+Yocto Project (bitbake) をオフラインでビルドできるようにするための、
+ビルドホストに必要な apt パッケージ一式(および依存パッケージ)の
+ダウンロード URL 一覧です。amd64 向けに以下の2バージョン分を用意しています
+(オフライン環境のUbuntuのバージョンと合っていないと、依存パッケージの
+バージョン不一致でインストールに失敗するため、対象環境に合わせて使い分けて
+ください):
+
+| ファイル | 対象Ubuntuバージョン |
+|---|---|
+| `doc/yocto-urls.txt` | Ubuntu 24.04 (noble) |
+| `doc/yocto-urls-jammy.txt` | Ubuntu 22.04 (jammy) |
+
+対象パッケージ(Yocto公式ドキュメントの "Build Host Packages" 相当、
+両バージョン共通)は以下の通りです。
+- gawk, wget, git, diffstat, unzip, texinfo (基本ツール)
+- build-essential, chrpath, socat, cpio (ビルド・パッケージング関連)
+- python3, python3-pip, python3-pexpect, python3-git, python3-jinja2,
+  python3-subunit (bitbakeの実行に必要なPython関連)
+- xz-utils, zstd, liblz4-tool, lz4, file (アーカイブ/圧縮ツール)
+- debianutils, iputils-ping, locales, libacl1 (その他依存)
+
+このうち `chrpath` / `texinfo` / `python3-pip` / `python3-subunit` /
+`liblz4-tool` / `lz4` は Ubuntu の `universe` リポジトリに属するため、
+オフライン環境側の `/etc/apt/sources.list` (または `.sources`) で
+`universe` コンポーネントを有効にしておく必要があります
+(パッケージファイル自体はダウンロード済みのものを `dpkg -i` で入れるだけ
+なので有効化必須ではありませんが、依存解決のため apt 経由でインストール
+する場合は該当行に `universe` を追記してください)。
+
+生成コマンド(`universe` を有効にした対象バージョンの Ubuntu amd64 環境で実行。
+noble以外で生成する場合は、`apt-get`のsourcelistを対象コードネームの
+リポジトリに向けた上で実行してください):
+```
+apt-get install --print-uris -y -o Dir::State::status=/dev/null \
+  gawk wget git diffstat unzip texinfo build-essential chrpath socat cpio \
+  python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping \
+  python3-git python3-jinja2 python3-subunit zstd liblz4-tool file locales \
+  libacl1 lz4 \
+  | grep -oP "(?<=')[^']+(?=')" | grep '^http' | sort -u > yocto-urls.txt
+```
+
+`doc/yocto-urls-jammy.txt` はこれと同じパッケージ一式を、jammy(22.04)の
+main/universe(+ updates/security)のパッケージインデックスに対して解決した
+ものです(パッケージバージョンがnoble版と異なります。例:
+binutils 2.42→2.38, python3-pip 24.0→22.0.2, texinfo 7.1→6.8 など)。
+
+### Windows側での一括ダウンロード手順
+
+1. Windows上でPowerShellを開き、対象バージョンのURL一覧
+   (`doc/yocto-urls.txt` または `doc/yocto-urls-jammy.txt`) を
+   同じフォルダに `yocto-urls.txt` としてコピーする
+2. 以下を実行して全 `.deb` をダウンロード:
+   ```powershell
+   $outDir = ".\yocto-offline-debs"
+   New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+   Get-Content yocto-urls.txt | ForEach-Object {
+       $fileName = Split-Path $_ -Leaf
+       Invoke-WebRequest -Uri $_ -OutFile (Join-Path $outDir $fileName)
+   }
+   ```
+3. `yocto-offline-debs` フォルダをUSBメモリ等でオフラインのUbuntu環境へコピー
+
+### オフライン環境(Ubuntu)側でのインストール
+
+```
+cd yocto-offline-debs
+sudo dpkg -i *.deb
+sudo apt-get install -f   # 依存関係の不足があれば解消(ネット不要、同フォルダのdebを使う)
+```
+
+`locales` パッケージ導入後は、Yoctoが要求する `en_US.UTF-8` ロケールを
+生成しておく:
+```
+sudo locale-gen en_US.UTF-8
+sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+```
+
+### 補足: Yocto本体とレシピのソースについて
+
+上記はあくまで**ビルドホスト(Ubuntu)側に必要なツール類**のURL一覧です。
+Yoctoのビルドではこれとは別に以下も必要になるため、完全オフラインで
+ビルドしたい場合は併せて準備してください:
+
+- **Yocto (poky) 本体**: `git clone https://git.yoctoproject.org/poky` を
+  ネットのある端末で実行し、`.git` ごとオフライン環境へコピーする
+  (もしくは release tarball を https://downloads.yoctoproject.org/releases/yocto/
+  から取得)
+- **各レシピが取得するソースアーカイブ (`DL_DIR`)**: ネットに繋がる端末で
+  対象ターゲットを一度 `bitbake <target>` してビルドし、生成される
+  `downloads/` ディレクトリを丸ごとオフライン環境へコピーして
+  `local.conf` の `DL_DIR` に指定する。`bitbake <target> --runall=fetch` を
+  使うと実際のビルドをせずにダウンロードだけ済ませられる
+- **sstate-cache**: 同様にビルド成果物のキャッシュ (`sstate-cache/`) を
+  コピーしておくと、オフライン環境での再ビルドが高速化できる(必須ではない)
+
 ## Rust開発環境用 (doc/rust-urls-<コードネーム>.txt)
 
 Rust のコードをオフラインでビルドできるようにするための apt パッケージ一式

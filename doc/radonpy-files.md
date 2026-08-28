@@ -1,0 +1,182 @@
+
+# RadonPy (git) を使うのに必要なファイル
+
+RadonPy (https://github.com/RadonPy/RadonPy) はポリマー物性の全自動計算を行う
+Python製ライブラリ。本体はGit/PyPIで配布されるが、実行には外部の分子動力学(MD)・
+量子化学計算(QM)エンジンが別途必要になる。ここではそれらをまとめる。
+
+## 1. RadonPy本体 (git)
+
+```
+git clone https://github.com/RadonPy/RadonPy.git
+```
+
+オフライン環境へは `.git` ごとコピーするか、`pip download radonpy-pypi` で
+取得したwheel/sdistを転送する。
+
+対応Pythonバージョン: 3.9 〜 3.13 (バージョンによって上限が変わるためREADME要確認)。
+ライセンスはBSD-3。
+
+## 2. 必須の外部ツール・依存パッケージ
+
+conda (`conda-forge` / `psi4` チャンネル) 経由でのインストールが推奨。
+
+| パッケージ | 用途 |
+|---|---|
+| rdkit (>=2020.03) | 化学構造処理・ポリマー鎖生成 |
+| psi4 (>=1.5) | 量子化学計算(QM、構造最適化・電荷計算) |
+| resp | RESP電荷計算 |
+| dftd3-python | 分散力補正(DFT-D3) |
+| lammps (>=2020.03.03) | 分子動力学(MD)計算本体 |
+| mdtraj (>=1.9) | MD軌跡の解析 |
+| numpy / scipy | 数値計算 |
+| pandas | データ処理 |
+| matplotlib | 可視化 |
+| psutil | プロセス/リソース監視 |
+
+これはRadonPyリポジトリ同梱の `requirements.txt` の内容と対応:
+```
+pandas
+numpy
+scipy
+psutil
+matplotlib
+rdkit>=2020.03
+mdtraj>=1.9
+lammps>=2020.03.03
+```
+
+### オプション(生体高分子: ペプチド・多糖類を扱う場合のみ)
+
+- ambertools
+- intermol
+
+## 3. Conda環境ファイル (リポジトリ同梱: yaml/rnpy37.yml, rnpy38.yml, rnpy39.yml)
+
+RadonPyリポジトリの `yaml/` ディレクトリに、Pythonバージョンごとの
+Conda環境定義ファイルが同梱されている。チャンネルは `psi4`, `conda-forge`, `defaults`。
+これをそのまま使えば依存関係を一括solveできる:
+```
+conda env create -f yaml/rnpy39.yml
+```
+
+## 4. インストール手順(ネットに繋がる環境)
+
+```
+conda create -n radonpy python=3.11 -c conda-forge
+conda activate radonpy
+conda install -c conda-forge -c psi4 rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip
+conda install -c conda-forge lammps
+pip install radonpy-pypi
+```
+
+LAMMPSを含めてPyPIだけで揃えたい場合(Psi4がインストールできない環境向けの制限構成):
+```
+pip install radonpy-pypi[lammps]
+```
+
+## 5. オフライン環境へ持っていく方法
+
+condaパッケージはaptの `.deb` と違い単純なURL一覧ダウンロードでは揃わないため、
+以下のいずれかを使う。
+
+- **conda-pack** (推奨): オンライン環境で作った環境を丸ごと固めてコピー
+  ```
+  conda install -c conda-forge conda-pack
+  conda-pack -n radonpy -o radonpy_env.tar.gz
+  ```
+  オフライン環境側では展開して `conda-unpack` を実行するだけで使える。
+
+  再現用スクリプト: `doc/radonpy-jammy-conda-pack.sh`
+  (Ubuntu 22.04 jammy上でRadonPy用conda環境を作り、conda-packで
+  1個のtarballに固めるところまでを自動化したもの)。
+
+  **glibcバージョンに注意**: conda-forge製バイナリはlibstdc++等は
+  同梱するが、glibcだけはOS側のものを動的リンクするため、
+  新しいOS(新しいglibc)で固めた環境を古いOSへ持っていくと
+  `GLIBC_2.XX not found` のようなエラーで動かないことがある。
+  配布先の環境と同じ(または配布先以下の)glibcバージョンの
+  OS上で `conda-pack` することが望ましい。Dockerが使えない環境では
+  `debootstrap` + `chroot` でターゲットOSのrootfsを作りその中で
+  実行する方法でも同様の結果が得られる。
+
+- **conda create --download-only**: パッケージ本体のみキャッシュ (`pkgs/`) に
+  落として、そのディレクトリごとオフライン環境へ転送し、
+  `conda install --offline` でインストールする。
+
+- **RadonPy本体(pip)側**は
+  `pip download radonpy-pypi -d ./radonpy_wheels` でwheelを集め、
+  オフライン側で
+  `pip install --no-index --find-links=./radonpy_wheels radonpy-pypi` する
+  (`doc/rust-urls.txt` のvendor手法と同じ考え方)。
+
+## 5.5 Windows単体(WSL/Docker不要)で集める方法
+
+Docker/WSLが使えない場合、Windows上のcondaだけで**Linux(linux-64)向けの
+パッケージファイルをダウンロードだけ**行うことができる
+(`CONDA_SUBDIR=linux-64` + `conda create --download-only`)。
+実際の環境構築(link)はターゲットのUbuntu 22.04実機側で`--offline`で行う。
+
+- Windows側: `doc/radonpy-windows-download.ps1`
+- オフライン実機側: `doc/radonpy-offline-install.sh`
+
+動作検証済み(RDKit/Psi4/LAMMPSとも実際に実行できることを確認)。
+ただし注意点として、condaの`--offline`は圧縮された`.conda`ファイルだけでは
+不十分で、通常は**展開済みディレクトリ一式**(`<miniconda>\pkgs\` 配下)を
+まるごと転送する必要があり、この場合RadonPyのフルパッケージセットで
+**転送量は約7GB**になる(`conda index`でローカルchannel化し
+`CONDA_SOLVER=classic`を使えば圧縮ファイルのみ・約1.2GBに縮小できる
+可能性があるが、フルパッケージセットでの依存解決がまだ安定しておらず未確定)。
+
+### 5.5.1 Windows側での作業
+
+1. Minicondaをインストールしておく(ネットに繋がっている状態)
+2. `doc/radonpy-windows-download.ps1` をPowerShellで実行
+   → カレントディレクトリに `radonpy_wheels\`、
+     `Miniconda3-latest-Linux-x86_64.sh` が生成される
+3. `conda info --base` で表示されるMinicondaのインストール先の
+   `pkgs\` フォルダ(スクリプト実行後にコンソールへパスが表示される)を
+   まるごとコピーしておく
+
+### 5.5.2 Linux実機(オフラインのUbuntu 22.04)への転送・構築
+
+USBメモリ等で以下をこのコピー先へまとめて持っていく(3点セット):
+
+- `Miniconda3-latest-Linux-x86_64.sh`
+- Windows側の `<miniconda>\pkgs\` フォルダ全体 → `pkgs/` という名前で配置
+- `radonpy_wheels\` フォルダ
+
+`doc/radonpy-offline-install.sh` と同じ場所に上記3点セットを置いた上で
+実行すると、以下がネットワーク不要で自動的に行われる:
+
+```
+bash radonpy-offline-install.sh
+```
+
+内部でやっていることは:
+1. `Miniconda3-latest-Linux-x86_64.sh` からMinicondaをインストール
+   (`$HOME/miniconda3`)
+2. 持ち込んだ `pkgs/` の中身を `$HOME/miniconda3/pkgs/` へコピー
+   (これでconda側が「もうダウンロード済み」と認識する)
+3. `conda create -n radonpy --offline -c conda-forge -c psi4 python=3.11
+   rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip
+   lammps` でネットワークなしに環境を構築
+4. `pip install --no-index --find-links=./radonpy_wheels radonpy-pypi`
+   でRadonPy本体を追加
+
+完了後は通常通り:
+```
+conda activate radonpy
+python -c "import radonpy"
+```
+で使い始められる。
+
+## 6. まとめ(オフライン転送時に必要な4点セット)
+
+USBメモリ等でまとめてコピーする対象:
+- RadonPy本体の `.git` (または wheel/sdist)
+- `yaml/rnpyXX.yml` (使うPythonバージョンのもの)
+- `conda-pack` で固めた環境 tarball (`radonpy_env.tar.gz`)、
+  もしくは `conda create --download-only` の `pkgs/` 一式
+- RadonPy本体のwheel (`pip download` した分、conda環境にRadonPy自体が
+  含まれない場合)
