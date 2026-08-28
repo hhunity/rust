@@ -17,6 +17,19 @@ Ubuntuのバージョン(コードネーム)ごとに中身もURLも異なるの
 cat /etc/os-release   # または: lsb_release -a
 ```
 
+### インストール方法の注意: `dpkg -i` ではなく `apt-get install ./*.deb` を使う
+
+ダウンロードした.debをまとめて入れる際、`dpkg -i *.deb` だと依存関係の
+解決順序を考慮してくれないため、`dependency problems - leaving unconfigured`
+のようなエラーが大量に出ることがある(パッケージが足りていなくても起きるが、
+足りていても順序の問題だけで起きる)。代わりに以下を使うこと:
+```
+cd rust-offline-debs
+sudo apt-get install ./*.deb
+```
+apt がローカルの.debファイルだけを見て正しいインストール順序を自動計算して
+くれるため、ネット接続なしでも一発で通る。
+
 対象パッケージ:
 - build-essential (gcc, g++, make 等。C ツールチェーンは多くの crate のビルドに必要)
 - pkg-config (native crate のビルド設定検出に必要)
