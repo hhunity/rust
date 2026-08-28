@@ -22,12 +22,17 @@
 #   # USB等で転送後、オフライン機側で:
 #   docker load < radonpy-image.tar.gz
 #
-# レジストリ(Docker Hub等)にpushして使う場合:
+# GitHub Container Registry (ghcr.io) にpushして使う場合:
 #
-#   docker tag radonpy:latest <dockerhubユーザー名>/radonpy:latest
-#   docker push <dockerhubユーザー名>/radonpy:latest
-#   # オフライン機側がレジストリに到達できるなら:
-#   docker pull <dockerhubユーザー名>/radonpy:latest
+#   echo <GitHubのPAT(write:packages)> | docker login ghcr.io -u <ユーザー名> --password-stdin
+#   docker tag radonpy:latest ghcr.io/<ユーザー名>/radonpy:latest
+#   docker push ghcr.io/<ユーザー名>/radonpy:latest
+#   # push後、GitHubのPackages画面でVisibilityをPublicにするとストレージ/帯域無料
+#
+# 実機にDockerを入れたくない場合は、Docker daemon不要の`crane`コマンドで
+# イメージの中身(/opt/miniconda3以下)だけをtarとして取り出し、実機へは
+# ただのファイルとして配置する方法もある。詳細はdoc/radonpy-files.mdの
+# 5.4.1節を参照。
 
 FROM ubuntu:22.04
 

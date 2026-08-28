@@ -124,15 +124,63 @@ Docker自身がこれらを正しく扱う形式なので、この2つの不確�
 `--platform linux/amd64` を指定すること
 (Apple Silicon Macはデフォルトでarm64向けにビルドしてしまうため)。
 
-```
-docker build --platform linux/amd64 -f doc/Dockerfile.radonpy -t radonpy:latest .
-docker save radonpy:latest | gzip > radonpy-image.tar.gz
-# USB等で転送 → オフライン機側で:
-docker load < radonpy-image.tar.gz
+### 5.4.1 手順まとめ(Mac + GitHub Container Registry、実機にDocker不要)
+
+Dockerは**ビルド用(Mac)にだけ**使い、実機には一切インストールしない構成。
+実機側は素のUbuntu 22.04のまま、condaで作った環境をファイルとして
+展開するだけで使えるようにする。
+
+**1. Macでイメージをビルド**(Apple Siliconは`--platform`必須)
+```bash
+docker build --platform linux/amd64 -f doc/Dockerfile.radonpy \
+  -t ghcr.io/hhunity/radonpy:latest .
 ```
 
-レジストリ(Docker Hub等)を経由してもよい。詳細は
-`doc/Dockerfile.radonpy` 冒頭のコメントを参照。
+**2. GitHub Container Registry (ghcr.io) へpush**
+```bash
+# GitHubのPersonal Access Token (write:packages 権限) でログイン
+echo <YOUR_GITHUB_TOKEN> | docker login ghcr.io -u hhunity --password-stdin
+docker push ghcr.io/hhunity/radonpy:latest
+```
+push後、GitHubの Packages 画面でこのパッケージの可視性を
+"Public" に変更しておく(publicならストレージ・帯域無料、
+privateだと500MB/月1GBまでの無料枠しかない)。
+
+**3. 中身だけを取り出す(Docker不要、`crane`を使う)**
+
+ネットに繋がる適当な端末(Macでも可)で、`crane`という単体バイナリ
+(daemon不要)を使ってイメージの中身をtarとして取り出す:
+```bash
+brew install crane   # または https://github.com/google/go-containerregistry/releases から取得
+
+# opt/miniconda3 ディレクトリだけを取り出す(base OS部分は不要なので除外)
+mkdir -p radonpy-extract
+crane export ghcr.io/hhunity/radonpy:latest - \
+  | tar -x -C radonpy-extract opt/miniconda3
+```
+
+**4. オフライン実機へ転送・配置**
+
+USB等で `radonpy-extract/opt/miniconda3` を実機へコピーし、
+**ビルド時と同じパス** `/opt/miniconda3` に配置する
+(conda環境内部のスクリプトのshebangがこの絶対パスを直接参照しているため、
+別の場所には置けない点に注意):
+```bash
+sudo mkdir -p /opt/miniconda3
+sudo cp -a radonpy-extract/opt/miniconda3/. /opt/miniconda3/
+```
+
+**5. 実機での利用**
+```bash
+export PATH=/opt/miniconda3/envs/radonpy/bin:$PATH
+python -c "import radonpy; print('ok')"
+# もしくは: /opt/miniconda3/bin/conda run -n radonpy python -c "import radonpy"
+```
+
+### 5.4.2 実機でDockerコンテナとして動かす場合
+
+`doc/Dockerfile.radonpy` 冒頭のコメントに、`docker save`/`docker load`や
+`docker pull`での手順を記載している。この場合は実機にもDockerが必要。
 
 ## 5.5 Windows単体(WSL/Docker不要)で集める方法
 
