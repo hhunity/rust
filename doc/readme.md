@@ -6,13 +6,22 @@
 LAMMPS/Psi4等の外部エンジン、オフライン環境への持っていき方)をまとめたもの。
 詳細は `doc/radonpy-files.md` を参照。
 
-## Yoctoビルド用Ubuntu環境 (doc/yocto-urls.txt)
+## Yoctoビルド用Ubuntu環境 (doc/yocto-urls.txt, doc/yocto-urls-jammy.txt)
 
-Ubuntu 24.04 (noble) / amd64 上で Yocto Project (bitbake) をオフラインで
-ビルドできるようにするための、ビルドホストに必要な apt パッケージ一式
-(および依存パッケージ)のダウンロード URL 一覧です。
+Yocto Project (bitbake) をオフラインでビルドできるようにするための、
+ビルドホストに必要な apt パッケージ一式(および依存パッケージ)の
+ダウンロード URL 一覧です。amd64 向けに以下の2バージョン分を用意しています
+(オフライン環境のUbuntuのバージョンと合っていないと、依存パッケージの
+バージョン不一致でインストールに失敗するため、対象環境に合わせて使い分けて
+ください):
 
-対象パッケージ(Yocto公式ドキュメントの "Build Host Packages" 相当):
+| ファイル | 対象Ubuntuバージョン |
+|---|---|
+| `doc/yocto-urls.txt` | Ubuntu 24.04 (noble) |
+| `doc/yocto-urls-jammy.txt` | Ubuntu 22.04 (jammy) |
+
+対象パッケージ(Yocto公式ドキュメントの "Build Host Packages" 相当、
+両バージョン共通)は以下の通りです。
 - gawk, wget, git, diffstat, unzip, texinfo (基本ツール)
 - build-essential, chrpath, socat, cpio (ビルド・パッケージング関連)
 - python3, python3-pip, python3-pexpect, python3-git, python3-jinja2,
@@ -28,7 +37,9 @@ Ubuntu 24.04 (noble) / amd64 上で Yocto Project (bitbake) をオフライン�
 なので有効化必須ではありませんが、依存解決のため apt 経由でインストール
 する場合は該当行に `universe` を追記してください)。
 
-生成コマンド(`universe` を有効にした Ubuntu 24.04 amd64 環境で実行):
+生成コマンド(`universe` を有効にした対象バージョンの Ubuntu amd64 環境で実行。
+noble以外で生成する場合は、`apt-get`のsourcelistを対象コードネームの
+リポジトリに向けた上で実行してください):
 ```
 apt-get install --print-uris -y -o Dir::State::status=/dev/null \
   gawk wget git diffstat unzip texinfo build-essential chrpath socat cpio \
@@ -38,9 +49,16 @@ apt-get install --print-uris -y -o Dir::State::status=/dev/null \
   | grep -oP "(?<=')[^']+(?=')" | grep '^http' | sort -u > yocto-urls.txt
 ```
 
+`doc/yocto-urls-jammy.txt` はこれと同じパッケージ一式を、jammy(22.04)の
+main/universe(+ updates/security)のパッケージインデックスに対して解決した
+ものです(パッケージバージョンがnoble版と異なります。例:
+binutils 2.42→2.38, python3-pip 24.0→22.0.2, texinfo 7.1→6.8 など)。
+
 ### Windows側での一括ダウンロード手順
 
-1. Windows上でPowerShellを開き、`doc/yocto-urls.txt` を同じフォルダに置く
+1. Windows上でPowerShellを開き、対象バージョンのURL一覧
+   (`doc/yocto-urls.txt` または `doc/yocto-urls-jammy.txt`) を
+   同じフォルダに `yocto-urls.txt` としてコピーする
 2. 以下を実行して全 `.deb` をダウンロード:
    ```powershell
    $outDir = ".\yocto-offline-debs"
