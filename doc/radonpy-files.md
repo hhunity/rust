@@ -121,12 +121,23 @@ Docker/WSLが使えない場合、Windows上のcondaだけで**Linux(linux-64)�
 - オフライン実機側: `doc/radonpy-offline-install.sh`
 
 動作検証済み(RDKit/Psi4/LAMMPSとも実際に実行できることを確認)。
-ただし注意点として、condaの`--offline`は圧縮された`.conda`ファイルだけでは
-不十分で、通常は**展開済みディレクトリ一式**(`<miniconda>\pkgs\` 配下)を
-まるごと転送する必要があり、この場合RadonPyのフルパッケージセットで
-**転送量は約7GB**になる(`conda index`でローカルchannel化し
-`CONDA_SOLVER=classic`を使えば圧縮ファイルのみ・約1.2GBに縮小できる
-可能性があるが、フルパッケージセットでの依存解決がまだ安定しておらず未確定)。
+
+**転送量について**: condaの`--offline`は圧縮された`.conda`ファイルだけでは
+不十分で、**展開済みディレクトリ一式**(`<miniconda>\pkgs\` 配下)を
+まるごと転送する必要があり、RadonPyのフルパッケージセットで
+**転送量は約7GB**になる。圧縮ファイルのみ(約1.2GB)に縮小する方法
+(`conda index`でローカルchannel化 + `CONDA_SOLVER=classic`、または
+`conda list --explicit`形式)もいくつか試したが、いずれもcondaの
+パッケージキャッシュの仕組み上「展開済みである証拠」がないと
+オフラインでは使えないと判定されてしまい、RadonPyのフル依存関係では
+安定して動かせなかった。**現状は7GB版が唯一確実に動作する方法。**
+
+**glibcバージョンについて**: Windows上では実機(Ubuntu 22.04 jammy)の
+実際のglibcバージョンを自動検出できないため、`CONDA_OVERRIDE_GLIBC`環境変数で
+明示的に指定する必要がある(`doc/radonpy-windows-download.ps1`に反映済み)。
+これを指定しない場合、開発環境側のOSがjammyより新しいと、より新しいglibcを
+前提としたパッケージ(例: `sysroot_linux-64`のバージョン)が選ばれてしまい、
+実機のjammyで動かない可能性があることを実際に確認した。
 
 ### 5.5.1 Windows側での作業
 

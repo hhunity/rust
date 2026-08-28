@@ -28,6 +28,17 @@ conda config --set channel_priority strict
 # ターゲットプラットフォームをlinux-64に固定してダウンロードのみ実行
 $env:CONDA_SUBDIR = "linux-64"
 
+# 重要: Windows上ではターゲット(Ubuntu 22.04 jammy)の実際のglibc/CPU情報を
+# condaが自動取得できない(Windowsなので当然)。指定しないと、Windows実行時に
+# たまたまconda側が想定するデフォルト値(実機より新しいglibcを前提にする等)で
+# 依存解決してしまい、選ばれたパッケージが実機のjammy(glibc 2.35系)で
+# `GLIBC_2.xx not found` のように動かない可能性がある。
+# 必ずjammyの実際のglibcバージョンに合わせて明示指定すること。
+$env:CONDA_OVERRIDE_GLIBC = "2.35"
+# CPU依存の最適化ビルドを避け、より汎用的なビルドを選ばせることで
+# 実機のCPUと異なっていても動く可能性を上げる(0=最適化なしを強制)。
+$env:CONDA_OVERRIDE_ARCHSPEC = "0"
+
 conda create -n radonpy_dl -y --override-channels -c conda-forge -c psi4 --download-only `
   python=3.11 rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip lammps
 
@@ -37,6 +48,8 @@ conda create -n radonpy_dl -y --override-channels -c conda-forge -c psi4 --downl
 #     "libblas=*=*openblas" python=3.11 rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip lammps
 
 Remove-Item Env:CONDA_SUBDIR
+Remove-Item Env:CONDA_OVERRIDE_GLIBC
+Remove-Item Env:CONDA_OVERRIDE_ARCHSPEC
 
 # RadonPy本体(pure Pythonのwheel。プラットフォーム非依存なのでWindows上でDL可)
 pip download radonpy-pypi --no-deps -d .\radonpy_wheels
