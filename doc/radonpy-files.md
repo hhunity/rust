@@ -128,6 +128,49 @@ Docker/WSLが使えない場合、Windows上のcondaだけで**Linux(linux-64)�
 `CONDA_SOLVER=classic`を使えば圧縮ファイルのみ・約1.2GBに縮小できる
 可能性があるが、フルパッケージセットでの依存解決がまだ安定しておらず未確定)。
 
+### 5.5.1 Windows側での作業
+
+1. Minicondaをインストールしておく(ネットに繋がっている状態)
+2. `doc/radonpy-windows-download.ps1` をPowerShellで実行
+   → カレントディレクトリに `radonpy_wheels\`、
+     `Miniconda3-latest-Linux-x86_64.sh` が生成される
+3. `conda info --base` で表示されるMinicondaのインストール先の
+   `pkgs\` フォルダ(スクリプト実行後にコンソールへパスが表示される)を
+   まるごとコピーしておく
+
+### 5.5.2 Linux実機(オフラインのUbuntu 22.04)への転送・構築
+
+USBメモリ等で以下をこのコピー先へまとめて持っていく(3点セット):
+
+- `Miniconda3-latest-Linux-x86_64.sh`
+- Windows側の `<miniconda>\pkgs\` フォルダ全体 → `pkgs/` という名前で配置
+- `radonpy_wheels\` フォルダ
+
+`doc/radonpy-offline-install.sh` と同じ場所に上記3点セットを置いた上で
+実行すると、以下がネットワーク不要で自動的に行われる:
+
+```
+bash radonpy-offline-install.sh
+```
+
+内部でやっていることは:
+1. `Miniconda3-latest-Linux-x86_64.sh` からMinicondaをインストール
+   (`$HOME/miniconda3`)
+2. 持ち込んだ `pkgs/` の中身を `$HOME/miniconda3/pkgs/` へコピー
+   (これでconda側が「もうダウンロード済み」と認識する)
+3. `conda create -n radonpy --offline -c conda-forge -c psi4 python=3.11
+   rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip
+   lammps` でネットワークなしに環境を構築
+4. `pip install --no-index --find-links=./radonpy_wheels radonpy-pypi`
+   でRadonPy本体を追加
+
+完了後は通常通り:
+```
+conda activate radonpy
+python -c "import radonpy"
+```
+で使い始められる。
+
 ## 6. まとめ(オフライン転送時に必要な4点セット)
 
 USBメモリ等でまとめてコピーする対象:
