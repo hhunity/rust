@@ -87,6 +87,19 @@ condaパッケージはaptの `.deb` と違い単純なURL一覧ダウンロー�
   ```
   オフライン環境側では展開して `conda-unpack` を実行するだけで使える。
 
+  再現用スクリプト: `doc/radonpy-jammy-conda-pack.sh`
+  (Ubuntu 22.04 jammy上でRadonPy用conda環境を作り、conda-packで
+  1個のtarballに固めるところまでを自動化したもの)。
+
+  **glibcバージョンに注意**: conda-forge製バイナリはlibstdc++等は
+  同梱するが、glibcだけはOS側のものを動的リンクするため、
+  新しいOS(新しいglibc)で固めた環境を古いOSへ持っていくと
+  `GLIBC_2.XX not found` のようなエラーで動かないことがある。
+  配布先の環境と同じ(または配布先以下の)glibcバージョンの
+  OS上で `conda-pack` することが望ましい。Dockerが使えない環境では
+  `debootstrap` + `chroot` でターゲットOSのrootfsを作りその中で
+  実行する方法でも同様の結果が得られる。
+
 - **conda create --download-only**: パッケージ本体のみキャッシュ (`pkgs/`) に
   落として、そのディレクトリごとオフライン環境へ転送し、
   `conda install --offline` でインストールする。
