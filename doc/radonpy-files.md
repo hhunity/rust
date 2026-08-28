@@ -110,6 +110,78 @@ condaパッケージはaptの `.deb` と違い単純なURL一覧ダウンロー�
   `pip install --no-index --find-links=./radonpy_wheels radonpy-pypi` する
   (`doc/rust-urls.txt` のvendor手法と同じ考え方)。
 
+## 5.4 Dockerイメージとして固める方法(推奨)
+
+`doc/Dockerfile.radonpy` を使うと、`ubuntu:22.04`(jammy)をベースに
+RadonPy実行環境をイメージとしてビルドできる。
+
+これまで検討した方法(conda-pack、純Windownダウンロード)は、
+「実機とglibcバージョンを合わせる必要がある」「Windows上での展開で
+シンボリックリンクや実行権限が壊れないか未検証」という不確実性が
+つきまとっていたが、Dockerイメージ(`docker save`/`docker load`)は
+Docker自身がこれらを正しく扱う形式なので、この2つの不確実性が
+原理的に発生しない。Macでビルドする場合は必ず
+`--platform linux/amd64` を指定すること
+(Apple Silicon Macはデフォルトでarm64向けにビルドしてしまうため)。
+
+### 5.4.1 手順まとめ(Mac + GitHub Container Registry、実機にDocker不要)
+
+Dockerは**ビルド用(Mac)にだけ**使い、実機には一切インストールしない構成。
+実機側は素のUbuntu 22.04のまま、condaで作った環境をファイルとして
+展開するだけで使えるようにする。
+
+**1. Macでイメージをビルド**(Apple Siliconは`--platform`必須)
+```bash
+docker build --platform linux/amd64 -f doc/Dockerfile.radonpy \
+  -t ghcr.io/hhunity/radonpy:latest .
+```
+
+**2. GitHub Container Registry (ghcr.io) へpush**
+```bash
+# GitHubのPersonal Access Token (write:packages 権限) でログイン
+echo <YOUR_GITHUB_TOKEN> | docker login ghcr.io -u hhunity --password-stdin
+docker push ghcr.io/hhunity/radonpy:latest
+```
+push後、GitHubの Packages 画面でこのパッケージの可視性を
+"Public" に変更しておく(publicならストレージ・帯域無料、
+privateだと500MB/月1GBまでの無料枠しかない)。
+
+**3. 中身だけを取り出す(Docker不要、`crane`を使う)**
+
+ネットに繋がる適当な端末(Macでも可)で、`crane`という単体バイナリ
+(daemon不要)を使ってイメージの中身をtarとして取り出す:
+```bash
+brew install crane   # または https://github.com/google/go-containerregistry/releases から取得
+
+# opt/miniforge3 ディレクトリだけを取り出す(base OS部分は不要なので除外)
+mkdir -p radonpy-extract
+crane export ghcr.io/hhunity/radonpy:latest - \
+  | tar -x -C radonpy-extract opt/miniforge3
+```
+
+**4. オフライン実機へ転送・配置**
+
+USB等で `radonpy-extract/opt/miniforge3` を実機へコピーし、
+**ビルド時と同じパス** `/opt/miniforge3` に配置する
+(conda環境内部のスクリプトのshebangがこの絶対パスを直接参照しているため、
+別の場所には置けない点に注意):
+```bash
+sudo mkdir -p /opt/miniforge3
+sudo cp -a radonpy-extract/opt/miniforge3/. /opt/miniforge3/
+```
+
+**5. 実機での利用**
+```bash
+export PATH=/opt/miniforge3/envs/radonpy/bin:$PATH
+python -c "import radonpy; print('ok')"
+# もしくは: /opt/miniforge3/bin/conda run -n radonpy python -c "import radonpy"
+```
+
+### 5.4.2 実機でDockerコンテナとして動かす場合
+
+`doc/Dockerfile.radonpy` 冒頭のコメントに、`docker save`/`docker load`や
+`docker pull`での手順を記載している。この場合は実機にもDockerが必要。
+
 ## 5.5 Windows単体(WSL/Docker不要)で集める方法
 
 Docker/WSLが使えない場合、Windows上のcondaだけで**Linux(linux-64)向けの
@@ -121,20 +193,31 @@ Docker/WSLが使えない場合、Windows上のcondaだけで**Linux(linux-64)�
 - オフライン実機側: `doc/radonpy-offline-install.sh`
 
 動作検証済み(RDKit/Psi4/LAMMPSとも実際に実行できることを確認)。
-ただし注意点として、condaの`--offline`は圧縮された`.conda`ファイルだけでは
-不十分で、通常は**展開済みディレクトリ一式**(`<miniconda>\pkgs\` 配下)を
-まるごと転送する必要があり、この場合RadonPyのフルパッケージセットで
-**転送量は約7GB**になる(`conda index`でローカルchannel化し
-`CONDA_SOLVER=classic`を使えば圧縮ファイルのみ・約1.2GBに縮小できる
-可能性があるが、フルパッケージセットでの依存解決がまだ安定しておらず未確定)。
+
+**転送量について**: condaの`--offline`は圧縮された`.conda`ファイルだけでは
+不十分で、**展開済みディレクトリ一式**(`<conda>\pkgs\` 配下)を
+まるごと転送する必要があり、RadonPyのフルパッケージセットで
+**転送量は約7GB**になる。圧縮ファイルのみ(約1.2GB)に縮小する方法
+(`conda index`でローカルchannel化 + `CONDA_SOLVER=classic`、または
+`conda list --explicit`形式)もいくつか試したが、いずれもcondaの
+パッケージキャッシュの仕組み上「展開済みである証拠」がないと
+オフラインでは使えないと判定されてしまい、RadonPyのフル依存関係では
+安定して動かせなかった。**現状は7GB版が唯一確実に動作する方法。**
+
+**glibcバージョンについて**: Windows上では実機(Ubuntu 22.04 jammy)の
+実際のglibcバージョンを自動検出できないため、`CONDA_OVERRIDE_GLIBC`環境変数で
+明示的に指定する必要がある(`doc/radonpy-windows-download.ps1`に反映済み)。
+これを指定しない場合、開発環境側のOSがjammyより新しいと、より新しいglibcを
+前提としたパッケージ(例: `sysroot_linux-64`のバージョン)が選ばれてしまい、
+実機のjammyで動かない可能性があることを実際に確認した。
 
 ### 5.5.1 Windows側での作業
 
-1. Minicondaをインストールしておく(ネットに繋がっている状態)
+1. Windows側にconda(Miniconda/Anaconda/Miniforgeいずれでも可、ダウンロード作業に使うだけ)をインストールしておく(ネットに繋がっている状態)
 2. `doc/radonpy-windows-download.ps1` をPowerShellで実行
    → カレントディレクトリに `radonpy_wheels\`、
-     `Miniconda3-latest-Linux-x86_64.sh` が生成される
-3. `conda info --base` で表示されるMinicondaのインストール先の
+     `Miniforge3-Linux-x86_64.sh` が生成される
+3. `conda info --base` で表示されるcondaのインストール先の
    `pkgs\` フォルダ(スクリプト実行後にコンソールへパスが表示される)を
    まるごとコピーしておく
 
@@ -142,8 +225,8 @@ Docker/WSLが使えない場合、Windows上のcondaだけで**Linux(linux-64)�
 
 USBメモリ等で以下をこのコピー先へまとめて持っていく(3点セット):
 
-- `Miniconda3-latest-Linux-x86_64.sh`
-- Windows側の `<miniconda>\pkgs\` フォルダ全体 → `pkgs/` という名前で配置
+- `Miniforge3-Linux-x86_64.sh`
+- Windows側の `<conda>\pkgs\` フォルダ全体 → `pkgs/` という名前で配置
 - `radonpy_wheels\` フォルダ
 
 `doc/radonpy-offline-install.sh` と同じ場所に上記3点セットを置いた上で
@@ -154,9 +237,9 @@ bash radonpy-offline-install.sh
 ```
 
 内部でやっていることは:
-1. `Miniconda3-latest-Linux-x86_64.sh` からMinicondaをインストール
-   (`$HOME/miniconda3`)
-2. 持ち込んだ `pkgs/` の中身を `$HOME/miniconda3/pkgs/` へコピー
+1. `Miniforge3-Linux-x86_64.sh` からMiniforgeをインストール
+   (`$HOME/miniforge3`)
+2. 持ち込んだ `pkgs/` の中身を `$HOME/miniforge3/pkgs/` へコピー
    (これでconda側が「もうダウンロード済み」と認識する)
 3. `conda create -n radonpy --offline -c conda-forge -c psi4 python=3.11
    rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip

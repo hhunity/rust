@@ -1,0 +1,83 @@
+# RadonPy用の実行環境イメージ。
+#
+# Ubuntu 22.04(jammy)をベースにするので、glibcバージョンはビルド時点で
+# ターゲット(実機のjammy)と一致する。Windows上でconda環境を直接組み立てる
+# 場合に問題になった「glibc版数合わせ」「展開時のシンボリックリンク/権限
+# 崩れ」は、Dockerのイメージ形式(save/load)自体が正しく扱うため発生しない。
+#
+# condaディストリビューションは Miniconda(Anaconda社製)ではなく
+# **Miniforge**(conda-forgeプロジェクト製)を使う。Minicondaはデフォルトで
+# Anaconda社の`defaults`チャンネル(pkgs/main, pkgs/r)を前提にしており、
+# これは利用規約上、一定規模以上の商用利用で有料ライセンスが必要になった。
+# Miniforgeは最初からconda-forgeのみを使う構成なので、この問題が
+# そもそも発生しない。
+#
+# ビルド(Mac/Apple Siliconの場合は必ず --platform を明示すること。
+# 指定しないとMacのCPUアーキテクチャ(arm64)向けにビルドされてしまい、
+# x86_64のUbuntu実機で動かなくなる):
+#
+#   docker build --platform linux/amd64 -f doc/Dockerfile.radonpy -t radonpy:latest .
+#
+# 動作確認:
+#
+#   docker run --rm --platform linux/amd64 radonpy:latest \
+#     conda run -n radonpy python -c "import rdkit, radonpy; print('ok')"
+#
+# 保存してオフライン機へ転送する場合(レジストリを使わない方法):
+#
+#   docker save radonpy:latest | gzip > radonpy-image.tar.gz
+#   # USB等で転送後、オフライン機側で:
+#   docker load < radonpy-image.tar.gz
+#
+# GitHub Container Registry (ghcr.io) にpushして使う場合:
+#
+#   echo <GitHubのPAT(write:packages)> | docker login ghcr.io -u <ユーザー名> --password-stdin
+#   docker tag radonpy:latest ghcr.io/<ユーザー名>/radonpy:latest
+#   docker push ghcr.io/<ユーザー名>/radonpy:latest
+#   # push後、GitHubのPackages画面でVisibilityをPublicにするとストレージ/帯域無料
+#
+# 実機にDockerを入れたくない場合は、Docker daemon不要の`crane`コマンドで
+# イメージの中身(/opt/miniforge3以下)だけをtarとして取り出し、実機へは
+# ただのファイルとして配置する方法もある。詳細はdoc/radonpy-files.mdの
+# 5.4.1節を参照。
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates bzip2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Miniforge導入(conda-forge専用ディストリビューション。Anaconda社の
+# defaultsチャンネルを一切経由しない)
+RUN curl -fsSL -o /tmp/miniforge.sh \
+    https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
+    && bash /tmp/miniforge.sh -b -p /opt/miniforge3 \
+    && rm /tmp/miniforge.sh
+
+ENV PATH=/opt/miniforge3/bin:$PATH
+
+RUN conda config --set always_yes true \
+    && conda config --set channel_priority strict
+
+RUN conda create -n radonpy python=3.11 --override-channels -c conda-forge -y
+
+# RadonPyが要求する外部ツール・依存パッケージ一式(doc/radonpy-files.md参照)
+RUN conda install -n radonpy --override-channels -c conda-forge -c psi4 \
+    rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip lammps -y \
+    && conda clean -afy
+
+# RadonPy本体
+RUN conda run -n radonpy pip install --no-cache-dir radonpy-pypi
+
+# ビルド時点で最低限の動作確認をしておく(壊れていればここでビルド自体が失敗する)
+RUN conda run -n radonpy python -c "import rdkit, radonpy; print('rdkit', rdkit.__version__)" \
+    && conda run -n radonpy psi4 --version \
+    && conda run -n radonpy lmp -h > /dev/null
+
+# コンテナに入った時点でradonpy環境がデフォルトになるようにしておく
+ENV PATH=/opt/miniforge3/envs/radonpy/bin:$PATH
+
+WORKDIR /work
+CMD ["/bin/bash"]

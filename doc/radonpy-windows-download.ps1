@@ -6,7 +6,8 @@
 #
 # 実行後、以下をUSB等でオフラインのUbuntu 22.04(jammy)実機へコピーする:
 #   - <miniconda>\pkgs\ 以下の *.conda / *.tar.bz2 (このスクリプトでDLしたもの)
-#   - Miniconda3-latest-Linux-x86_64.sh
+#   - Miniforge3-Linux-x86_64.sh (実機側にインストールするのはMiniforge。
+#     Anaconda社のdefaultsチャンネルを経由しないため)
 #   - radonpy_wheels\ フォルダ
 #
 # 実機側では doc/radonpy-offline-install.sh を使ってオフライン構築する。
@@ -28,6 +29,17 @@ conda config --set channel_priority strict
 # ターゲットプラットフォームをlinux-64に固定してダウンロードのみ実行
 $env:CONDA_SUBDIR = "linux-64"
 
+# 重要: Windows上ではターゲット(Ubuntu 22.04 jammy)の実際のglibc/CPU情報を
+# condaが自動取得できない(Windowsなので当然)。指定しないと、Windows実行時に
+# たまたまconda側が想定するデフォルト値(実機より新しいglibcを前提にする等)で
+# 依存解決してしまい、選ばれたパッケージが実機のjammy(glibc 2.35系)で
+# `GLIBC_2.xx not found` のように動かない可能性がある。
+# 必ずjammyの実際のglibcバージョンに合わせて明示指定すること。
+$env:CONDA_OVERRIDE_GLIBC = "2.35"
+# CPU依存の最適化ビルドを避け、より汎用的なビルドを選ばせることで
+# 実機のCPUと異なっていても動く可能性を上げる(0=最適化なしを強制)。
+$env:CONDA_OVERRIDE_ARCHSPEC = "0"
+
 conda create -n radonpy_dl -y --override-channels -c conda-forge -c psi4 --download-only `
   python=3.11 rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip lammps
 
@@ -37,13 +49,18 @@ conda create -n radonpy_dl -y --override-channels -c conda-forge -c psi4 --downl
 #     "libblas=*=*openblas" python=3.11 rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip lammps
 
 Remove-Item Env:CONDA_SUBDIR
+Remove-Item Env:CONDA_OVERRIDE_GLIBC
+Remove-Item Env:CONDA_OVERRIDE_ARCHSPEC
 
 # RadonPy本体(pure Pythonのwheel。プラットフォーム非依存なのでWindows上でDL可)
 pip download radonpy-pypi --no-deps -d .\radonpy_wheels
 
-# Miniconda Linuxインストーラ本体も取得しておく
-Invoke-WebRequest -Uri "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh" `
-  -OutFile ".\Miniconda3-latest-Linux-x86_64.sh"
+# 実機にインストールするのはMiniforge(conda-forge専用ディストリビューション)。
+# Windows側で今使っているconda自体がMiniconda/Anacondaでも問題ない
+# (ダウンロード作業に使っているだけで、実機側にインストールされるのは
+# 別途取得するこのMiniforgeインストーラのため)。
+Invoke-WebRequest -Uri "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh" `
+  -OutFile ".\Miniforge3-Linux-x86_64.sh"
 
 $pkgsDir = (conda info --base) + "\pkgs"
 Write-Host "=== 完了 ==="
@@ -51,5 +68,5 @@ Write-Host "以下をオフライン環境へコピーしてください:"
 Write-Host "  - $pkgsDir  (中の *.conda 等のパッケージファイルに加えて"
 Write-Host "               pkgs\cache\ 以下のrepodataキャッシュも必須。"
 Write-Host "               フォルダごとまるごとコピーすること)"
-Write-Host "  - .\Miniconda3-latest-Linux-x86_64.sh"
+Write-Host "  - .\Miniforge3-Linux-x86_64.sh"
 Write-Host "  - .\radonpy_wheels\"

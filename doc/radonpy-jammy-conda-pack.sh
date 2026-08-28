@@ -20,27 +20,28 @@
 set -euxo pipefail
 
 export HOME="${HOME:-/root}"
-export PATH="/opt/miniconda3/bin:$PATH"
+export PATH="/opt/miniforge3/bin:$PATH"
 
-echo "=== step: download miniconda ==="
-if [ ! -f "$HOME/miniconda.sh" ]; then
-  curl -fsSL -o "$HOME/miniconda.sh" \
-    https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+# condaディストリビューションはMiniconda(Anaconda社製)ではなく
+# Miniforge(conda-forgeプロジェクト製)を使う。Minicondaはデフォルトで
+# Anaconda社のdefaultsチャンネル(pkgs/main, pkgs/r)を前提にしており、
+# これは利用規約上、一定規模以上の商用利用で有料ライセンスが必要になった。
+# Miniforgeは最初からconda-forgeのみの構成なのでこの問題がそもそも発生しない。
+
+echo "=== step: download miniforge ==="
+if [ ! -f "$HOME/miniforge.sh" ]; then
+  curl -fsSL -o "$HOME/miniforge.sh" \
+    https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
 fi
 
-echo "=== step: install miniconda ==="
-if [ ! -d /opt/miniconda3 ]; then
-  bash "$HOME/miniconda.sh" -b -p /opt/miniconda3
+echo "=== step: install miniforge ==="
+if [ ! -d /opt/miniforge3 ]; then
+  bash "$HOME/miniforge.sh" -b -p /opt/miniforge3
 fi
 
-source /opt/miniconda3/etc/profile.d/conda.sh
+source /opt/miniforge3/etc/profile.d/conda.sh
 
 conda config --set always_yes true
-
-# defaults (pkgs/main, pkgs/r) はAnaconda社のToS同意が必要になったため使わず、
-# conda-forgeのみを使う。
-conda config --remove channels defaults || true
-conda config --add channels conda-forge
 conda config --set channel_priority strict
 
 echo "=== step: create radonpy env (python 3.11) ==="
