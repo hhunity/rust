@@ -110,6 +110,24 @@ condaパッケージはaptの `.deb` と違い単純なURL一覧ダウンロー�
   `pip install --no-index --find-links=./radonpy_wheels radonpy-pypi` する
   (`doc/rust-urls.txt` のvendor手法と同じ考え方)。
 
+## 5.5 Windows単体(WSL/Docker不要)で集める方法
+
+Docker/WSLが使えない場合、Windows上のcondaだけで**Linux(linux-64)向けの
+パッケージファイルをダウンロードだけ**行うことができる
+(`CONDA_SUBDIR=linux-64` + `conda create --download-only`)。
+実際の環境構築(link)はターゲットのUbuntu 22.04実機側で`--offline`で行う。
+
+- Windows側: `doc/radonpy-windows-download.ps1`
+- オフライン実機側: `doc/radonpy-offline-install.sh`
+
+動作検証済み(RDKit/Psi4/LAMMPSとも実際に実行できることを確認)。
+ただし注意点として、condaの`--offline`は圧縮された`.conda`ファイルだけでは
+不十分で、通常は**展開済みディレクトリ一式**(`<miniconda>\pkgs\` 配下)を
+まるごと転送する必要があり、この場合RadonPyのフルパッケージセットで
+**転送量は約7GB**になる(`conda index`でローカルchannel化し
+`CONDA_SOLVER=classic`を使えば圧縮ファイルのみ・約1.2GBに縮小できる
+可能性があるが、フルパッケージセットでの依存解決がまだ安定しておらず未確定)。
+
 ## 6. まとめ(オフライン転送時に必要な4点セット)
 
 USBメモリ等でまとめてコピーする対象:
