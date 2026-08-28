@@ -110,6 +110,30 @@ condaパッケージはaptの `.deb` と違い単純なURL一覧ダウンロー�
   `pip install --no-index --find-links=./radonpy_wheels radonpy-pypi` する
   (`doc/rust-urls.txt` のvendor手法と同じ考え方)。
 
+## 5.4 Dockerイメージとして固める方法(推奨)
+
+`doc/Dockerfile.radonpy` を使うと、`ubuntu:22.04`(jammy)をベースに
+RadonPy実行環境をイメージとしてビルドできる。
+
+これまで検討した方法(conda-pack、純Windownダウンロード)は、
+「実機とglibcバージョンを合わせる必要がある」「Windows上での展開で
+シンボリックリンクや実行権限が壊れないか未検証」という不確実性が
+つきまとっていたが、Dockerイメージ(`docker save`/`docker load`)は
+Docker自身がこれらを正しく扱う形式なので、この2つの不確実性が
+原理的に発生しない。Macでビルドする場合は必ず
+`--platform linux/amd64` を指定すること
+(Apple Silicon Macはデフォルトでarm64向けにビルドしてしまうため)。
+
+```
+docker build --platform linux/amd64 -f doc/Dockerfile.radonpy -t radonpy:latest .
+docker save radonpy:latest | gzip > radonpy-image.tar.gz
+# USB等で転送 → オフライン機側で:
+docker load < radonpy-image.tar.gz
+```
+
+レジストリ(Docker Hub等)を経由してもよい。詳細は
+`doc/Dockerfile.radonpy` 冒頭のコメントを参照。
+
 ## 5.5 Windows単体(WSL/Docker不要)で集める方法
 
 Docker/WSLが使えない場合、Windows上のcondaだけで**Linux(linux-64)向けの
