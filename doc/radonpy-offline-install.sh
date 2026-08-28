@@ -3,8 +3,8 @@
 # オフラインのUbuntu 22.04(jammy)実機上でRadonPy用conda環境を構築する。
 #
 # 前提: 以下がこのスクリプトと同じ場所に用意されていること
-#   - Miniconda3-latest-Linux-x86_64.sh
-#   - pkgs/  (Windows側の <miniconda>\pkgs をコピーしたディレクトリ)
+#   - Miniforge3-Linux-x86_64.sh
+#   - pkgs/  (Windows側の <miniforge3>\pkgs をコピーしたディレクトリ)
 #   - radonpy_wheels/
 #
 # 使い方:
@@ -12,28 +12,32 @@
 #
 # 実行後、`conda activate radonpy` でそのまま使える(ネットワーク不要で
 # ここまで構築済み)。
+#
+# Miniconda(Anaconda社製)ではなくMiniforge(conda-forgeプロジェクト製)を
+# 使う。Minicondaはデフォルトでdefaultsチャンネル(pkgs/main, pkgs/r)を
+# 前提にしており、これは利用規約上、一定規模以上の商用利用で有料ライセンスが
+# 必要になった。Miniforgeは最初からconda-forgeのみの構成なのでこの問題が
+# そもそも発生しない。
 
 set -euxo pipefail
 
 cd "$(dirname "$0")"
 
-echo "=== step: install miniconda (offline) ==="
-if [ ! -d "$HOME/miniconda3" ]; then
-  bash ./Miniconda3-latest-Linux-x86_64.sh -b -p "$HOME/miniconda3"
+echo "=== step: install miniforge (offline) ==="
+if [ ! -d "$HOME/miniforge3" ]; then
+  bash ./Miniforge3-Linux-x86_64.sh -b -p "$HOME/miniforge3"
 fi
 
-export PATH="$HOME/miniconda3/bin:$PATH"
-source "$HOME/miniconda3/etc/profile.d/conda.sh"
+export PATH="$HOME/miniforge3/bin:$PATH"
+source "$HOME/miniforge3/etc/profile.d/conda.sh"
 
 echo "=== step: import downloaded package cache ==="
 # pkgs/ 直下のパッケージファイル(*.conda / *.tar.bz2)だけでなく、
 # pkgs/cache/ 以下のリポジトリメタデータ(repodata)も一緒にコピーしないと
 # --offline での依存解決自体ができない点に注意。
-cp -an ./pkgs/. "$HOME/miniconda3/pkgs/"
+cp -an ./pkgs/. "$HOME/miniforge3/pkgs/"
 
 conda config --set always_yes true
-conda config --remove channels defaults || true
-conda config --add channels conda-forge
 conda config --set channel_priority strict
 
 echo "=== step: create radonpy env from local cache only (--offline) ==="

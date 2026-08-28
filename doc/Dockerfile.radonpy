@@ -5,6 +5,13 @@
 # 場合に問題になった「glibc版数合わせ」「展開時のシンボリックリンク/権限
 # 崩れ」は、Dockerのイメージ形式(save/load)自体が正しく扱うため発生しない。
 #
+# condaディストリビューションは Miniconda(Anaconda社製)ではなく
+# **Miniforge**(conda-forgeプロジェクト製)を使う。Minicondaはデフォルトで
+# Anaconda社の`defaults`チャンネル(pkgs/main, pkgs/r)を前提にしており、
+# これは利用規約上、一定規模以上の商用利用で有料ライセンスが必要になった。
+# Miniforgeは最初からconda-forgeのみを使う構成なので、この問題が
+# そもそも発生しない。
+#
 # ビルド(Mac/Apple Siliconの場合は必ず --platform を明示すること。
 # 指定しないとMacのCPUアーキテクチャ(arm64)向けにビルドされてしまい、
 # x86_64のUbuntu実機で動かなくなる):
@@ -30,7 +37,7 @@
 #   # push後、GitHubのPackages画面でVisibilityをPublicにするとストレージ/帯域無料
 #
 # 実機にDockerを入れたくない場合は、Docker daemon不要の`crane`コマンドで
-# イメージの中身(/opt/miniconda3以下)だけをtarとして取り出し、実機へは
+# イメージの中身(/opt/miniforge3以下)だけをtarとして取り出し、実機へは
 # ただのファイルとして配置する方法もある。詳細はdoc/radonpy-files.mdの
 # 5.4.1節を参照。
 
@@ -42,19 +49,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates bzip2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Miniconda導入
-RUN curl -fsSL -o /tmp/miniconda.sh \
-    https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh \
-    && bash /tmp/miniconda.sh -b -p /opt/miniconda3 \
-    && rm /tmp/miniconda.sh
+# Miniforge導入(conda-forge専用ディストリビューション。Anaconda社の
+# defaultsチャンネルを一切経由しない)
+RUN curl -fsSL -o /tmp/miniforge.sh \
+    https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
+    && bash /tmp/miniforge.sh -b -p /opt/miniforge3 \
+    && rm /tmp/miniforge.sh
 
-ENV PATH=/opt/miniconda3/bin:$PATH
+ENV PATH=/opt/miniforge3/bin:$PATH
 
-# defaults(pkgs/main, pkgs/r)はAnaconda社のToS同意が必要になったため使わず、
-# conda-forgeのみを使う。
 RUN conda config --set always_yes true \
-    && conda config --remove channels defaults || true \
-    && conda config --add channels conda-forge \
     && conda config --set channel_priority strict
 
 RUN conda create -n radonpy python=3.11 --override-channels -c conda-forge -y
@@ -73,7 +77,7 @@ RUN conda run -n radonpy python -c "import rdkit, radonpy; print('rdkit', rdkit.
     && conda run -n radonpy lmp -h > /dev/null
 
 # コンテナに入った時点でradonpy環境がデフォルトになるようにしておく
-ENV PATH=/opt/miniconda3/envs/radonpy/bin:$PATH
+ENV PATH=/opt/miniforge3/envs/radonpy/bin:$PATH
 
 WORKDIR /work
 CMD ["/bin/bash"]

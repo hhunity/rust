@@ -6,7 +6,8 @@
 #
 # 実行後、以下をUSB等でオフラインのUbuntu 22.04(jammy)実機へコピーする:
 #   - <miniconda>\pkgs\ 以下の *.conda / *.tar.bz2 (このスクリプトでDLしたもの)
-#   - Miniconda3-latest-Linux-x86_64.sh
+#   - Miniforge3-Linux-x86_64.sh (実機側にインストールするのはMiniforge。
+#     Anaconda社のdefaultsチャンネルを経由しないため)
 #   - radonpy_wheels\ フォルダ
 #
 # 実機側では doc/radonpy-offline-install.sh を使ってオフライン構築する。
@@ -54,9 +55,12 @@ Remove-Item Env:CONDA_OVERRIDE_ARCHSPEC
 # RadonPy本体(pure Pythonのwheel。プラットフォーム非依存なのでWindows上でDL可)
 pip download radonpy-pypi --no-deps -d .\radonpy_wheels
 
-# Miniconda Linuxインストーラ本体も取得しておく
-Invoke-WebRequest -Uri "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh" `
-  -OutFile ".\Miniconda3-latest-Linux-x86_64.sh"
+# 実機にインストールするのはMiniforge(conda-forge専用ディストリビューション)。
+# Windows側で今使っているconda自体がMiniconda/Anacondaでも問題ない
+# (ダウンロード作業に使っているだけで、実機側にインストールされるのは
+# 別途取得するこのMiniforgeインストーラのため)。
+Invoke-WebRequest -Uri "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh" `
+  -OutFile ".\Miniforge3-Linux-x86_64.sh"
 
 $pkgsDir = (conda info --base) + "\pkgs"
 Write-Host "=== 完了 ==="
@@ -64,5 +68,5 @@ Write-Host "以下をオフライン環境へコピーしてください:"
 Write-Host "  - $pkgsDir  (中の *.conda 等のパッケージファイルに加えて"
 Write-Host "               pkgs\cache\ 以下のrepodataキャッシュも必須。"
 Write-Host "               フォルダごとまるごとコピーすること)"
-Write-Host "  - .\Miniconda3-latest-Linux-x86_64.sh"
+Write-Host "  - .\Miniforge3-Linux-x86_64.sh"
 Write-Host "  - .\radonpy_wheels\"
