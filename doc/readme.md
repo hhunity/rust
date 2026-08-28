@@ -1,4 +1,11 @@
 
+## RadonPy (git) を使うのに必要なファイル (doc/radonpy-files.md)
+
+ポリマー物性の全自動計算ライブラリ RadonPy (https://github.com/RadonPy/RadonPy)
+を動かすために必要な一式(本体の git clone、依存Conda/PyPIパッケージ、
+LAMMPS/Psi4等の外部エンジン、オフライン環境への持っていき方)をまとめたもの。
+詳細は `doc/radonpy-files.md` を参照。
+
 ## Yoctoビルド用Ubuntu環境 (doc/yocto-urls.txt)
 
 Ubuntu 24.04 (noble) / amd64 上で Yocto Project (bitbake) をオフラインで
