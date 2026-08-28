@@ -104,10 +104,36 @@ Yoctoのビルドではこれとは別に以下も必要になるため、完全
 - **sstate-cache**: 同様にビルド成果物のキャッシュ (`sstate-cache/`) を
   コピーしておくと、オフライン環境での再ビルドが高速化できる(必須ではない)
 
-## Rust開発環境用 (doc/rust-urls.txt)
+## Rust開発環境用 (doc/rust-urls-<コードネーム>.txt)
 
-Ubuntu 24.04 (noble) / amd64 上で Rust のコードをオフラインでビルドできるように
-するための apt パッケージ一式(および依存パッケージ)のダウンロード URL 一覧です。
+Rust のコードをオフラインでビルドできるようにするための apt パッケージ一式
+(および依存パッケージ)のダウンロード URL 一覧です。**deb パッケージは
+Ubuntuのバージョン(コードネーム)ごとに中身もURLも異なるので、
+インストール先と同じバージョン向けのファイルを使ってください。**
+バージョンが違うファイルを使うと依存関係が噛み合わず「バージョンが合わない」
+エラーになります。
+
+現在用意しているファイル:
+- `doc/rust-urls-noble.txt` … Ubuntu 24.04 (noble) / amd64 向け
+- `doc/rust-urls-jammy.txt` … Ubuntu 22.04 (jammy) / amd64 向け
+
+インストール先のバージョン確認方法:
+```
+cat /etc/os-release   # または: lsb_release -a
+```
+
+### インストール方法の注意: `dpkg -i` ではなく `apt-get install ./*.deb` を使う
+
+ダウンロードした.debをまとめて入れる際、`dpkg -i *.deb` だと依存関係の
+解決順序を考慮してくれないため、`dependency problems - leaving unconfigured`
+のようなエラーが大量に出ることがある(パッケージが足りていなくても起きるが、
+足りていても順序の問題だけで起きる)。代わりに以下を使うこと:
+```
+cd rust-offline-debs
+sudo apt-get install ./*.deb
+```
+apt がローカルの.debファイルだけを見て正しいインストール順序を自動計算して
+くれるため、ネット接続なしでも一発で通る。
 
 対象パッケージ:
 - build-essential (gcc, g++, make 等。C ツールチェーンは多くの crate のビルドに必要)
@@ -118,14 +144,43 @@ Ubuntu 24.04 (noble) / amd64 上で Rust のコードをオフラインでビル
 - curl (rustup インストーラの取得に必要)
 - cmake (一部の native crate のビルドに必要)
 
-生成コマンド:
+生成コマンド(自分の環境がそのままターゲットと同じバージョンの場合):
 ```
 apt-get install --print-uris -y -o Dir::State::status=/dev/null \
   build-essential pkg-config libssl-dev ca-certificates git curl cmake \
-  | grep -oP "(?<=')[^']+(?=')" | grep '^http' | sort -u > rust-urls.txt
+  | grep -oP "(?<=')[^']+(?=')" | grep '^http' | sort -u > rust-urls-<コードネーム>.txt
 ```
 (`Dir::State::status=/dev/null` を指定することで、既にインストール済みのパッケージも
 含めた完全な依存関係の URL 一覧を出力できます。)
+
+自分の環境と**違う**バージョン向けに生成したい場合(例: noble環境でjammy用を作る)は、
+apt の状態を一切変更せず一時的な設定だけでそのバージョンのパッケージ索引を取得できます:
+```
+mkdir -p /tmp/apt-jammy/lists/partial /tmp/apt-jammy/cache/archives/partial
+cat > /tmp/apt-jammy/sources.list <<'EOF'
+deb http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu/ jammy-updates main restricted universe multiverse
+deb http://security.ubuntu.com/ubuntu/ jammy-security main restricted universe multiverse
+EOF
+
+apt-get -o Dir::Etc::SourceList=/tmp/apt-jammy/sources.list \
+        -o Dir::Etc::SourceParts=/dev/null \
+        -o Dir::State::Lists=/tmp/apt-jammy/lists \
+        -o Dir::Cache=/tmp/apt-jammy/cache \
+        -o APT::Architecture=amd64 \
+        update
+
+apt-get -o Dir::Etc::SourceList=/tmp/apt-jammy/sources.list \
+        -o Dir::Etc::SourceParts=/dev/null \
+        -o Dir::State::Lists=/tmp/apt-jammy/lists \
+        -o Dir::Cache=/tmp/apt-jammy/cache \
+        -o Dir::State::status=/dev/null \
+        -o APT::Architecture=amd64 \
+        install --print-uris -y build-essential pkg-config libssl-dev ca-certificates git curl cmake \
+  | grep -oP "(?<=')[^']+(?=')" | grep '^http' | sort -u > rust-urls-jammy.txt
+```
+`jammy` の部分をターゲットのコードネーム(`focal`, `noble` 等)に置き換えれば
+他バージョンにも対応できます。
 
 rustc/cargo 本体は apt ではなく、上記でダウンロードした curl を使って
 [rustup](https://rustup.rs/) でインストールすることを推奨します
@@ -198,7 +253,8 @@ cargo標準機能の `cargo vendor` でソースごとまとめて集めるの�
   Linux用の依存(`libc`等)はちゃんと含まれる。クロスコンパイルの心配は不要。
 - `openssl-sys` など、ネイティブCライブラリにリンクするcrateはソース自体は
   vendorできるが、リンク先のOS側ライブラリ(`libssl-dev`等)は別途必要。
-  これは `doc/rust-urls.txt` のaptパッケージ一覧でカバー済み。
+  これは `doc/rust-urls-<コードネーム>.txt` のaptパッケージ一覧でカバー済み
+  (インストール先のUbuntuバージョンに合わせたファイルを使うこと)。
 - 依存crateを追加/変更するたびに、Windows側で `Cargo.toml` を編集して
   `cargo vendor` を再実行し、`vendor/` を作り直してLinuxへ再転送する必要がある。
 - `cargo vendor` はcargo組み込みのサブコマンドなので追加インストール不要。
