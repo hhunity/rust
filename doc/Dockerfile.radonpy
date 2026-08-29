@@ -72,23 +72,27 @@ ENV PATH=/opt/miniforge3/bin:$PATH
 RUN conda config --set always_yes true \
     && conda config --set channel_priority strict
 
-RUN conda create -n radonpy python=3.11 --override-channels -c conda-forge -y
+# RadonPyのREADME.md「Installation for conda」節が推奨する組み合わせ
+# (python=3.13, psi4=1.10)に合わせる。python=3.11 + 最新psi4(1.9.1が
+# 解決される)の組み合わせでは、psi4がlibintの旧SONAME(libint2.so.2)を
+# 前提にリンクされているのに対しconda-forgeの最新libint(2.13.1)は
+# SONAMEを`libint2.so`(バージョン無し)に変更しており
+# `ImportError: libint2.so.2: cannot open shared object file`になる
+# ことを実機で確認したが、python=3.13 + psi4=1.10の組み合わせでは
+# psi4自体が新しいSONAME向けにビルドされているため、この問題が
+# そもそも発生しないことも確認済み。
+RUN conda create -n radonpy python=3.13 --override-channels -c conda-forge -y
 
 # RadonPyが要求する外部ツール・依存パッケージ一式(doc/radonpy-files.md参照)。
 #
-# libint / libxc-c はバージョンを明示的に固定している。理由:
-# psi4は`libint2.so.2`というSONAME(バージョン付き共有ライブラリ名)を
-# 前提にリンクされているが、conda-forgeの新しいlibintビルド(2.13.1)は
-# `libint2.so`(バージョン無し)にSONAMEが変わっており、psi4の依存指定
-# (libint >=2.9.0,<3.0a0)の範囲内であるにもかかわらず
-# `ImportError: libint2.so.2: cannot open shared object file`で
-# 壊れることを実機で確認した。同様にlibxc-c 7.1.2ではpsi4が使う
-# 一部の交換相関汎関数(XC_GGA_XC_TH_FL等)が見つからず
-# `RuntimeError: Could not find required LibXC functional`になることも
-# 確認した。いずれも古いビルドに固定することで解消する。
+# libxc-c はバージョンを明示的に固定している。理由: conda-forgeの
+# libxc-c 7.1.2ではpsi4が使う一部の交換相関汎関数(XC_GGA_XC_TH_FL等)
+# が見つからず`RuntimeError: Could not find required LibXC functional`
+# になることを実機で確認したため(psi4=1.9.1・1.10の両方で再現)。
+# 古いビルドに固定することで解消する。
 RUN conda install -n radonpy --override-channels -c conda-forge -c psi4 \
-    rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip lammps \
-    "libint=2.9.0" "libxc-c=7.0.0=cpu_h75f4f88_6" -y \
+    rdkit "psi4=1.10" dftd3-python resp mdtraj psutil scipy pandas matplotlib pip lammps \
+    "libxc-c=7.0.0=cpu_h75f4f88_6" -y \
     && conda clean -afy
 
 # RadonPy本体。リポジトリに同梱されているビルド済みwheel(dist/*.whl)を
@@ -100,9 +104,9 @@ RUN git clone --depth 1 https://github.com/RadonPy/RadonPy.git /opt/RadonPy \
 
 # コンテナに入った時点でradonpy環境がデフォルトになるようにしておく。
 # LD_LIBRARY_PATHも明示しておかないと、`conda run`/`conda activate`を
-# 経由しない素のシェル(docker run ... /bin/bash等)からpsi4を
-# importした際に `libint2.so.2: cannot open shared object file` の
-# ようなエラーになることを実機で確認したため。
+# 経由しない素のシェル(docker run ... /bin/bash等)から共有ライブラリが
+# 見つからずimportに失敗することがある(python=3.11時代のlibintの件で
+# 実機確認済み。python=3.13+psi4=1.10では起きないが念のため維持)。
 ENV PATH=/opt/miniforge3/envs/radonpy/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/miniforge3/envs/radonpy/lib
 
