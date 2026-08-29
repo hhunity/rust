@@ -74,9 +74,21 @@ RUN conda config --set always_yes true \
 
 RUN conda create -n radonpy python=3.11 --override-channels -c conda-forge -y
 
-# RadonPyが要求する外部ツール・依存パッケージ一式(doc/radonpy-files.md参照)
+# RadonPyが要求する外部ツール・依存パッケージ一式(doc/radonpy-files.md参照)。
+#
+# libint / libxc-c はバージョンを明示的に固定している。理由:
+# psi4は`libint2.so.2`というSONAME(バージョン付き共有ライブラリ名)を
+# 前提にリンクされているが、conda-forgeの新しいlibintビルド(2.13.1)は
+# `libint2.so`(バージョン無し)にSONAMEが変わっており、psi4の依存指定
+# (libint >=2.9.0,<3.0a0)の範囲内であるにもかかわらず
+# `ImportError: libint2.so.2: cannot open shared object file`で
+# 壊れることを実機で確認した。同様にlibxc-c 7.1.2ではpsi4が使う
+# 一部の交換相関汎関数(XC_GGA_XC_TH_FL等)が見つからず
+# `RuntimeError: Could not find required LibXC functional`になることも
+# 確認した。いずれも古いビルドに固定することで解消する。
 RUN conda install -n radonpy --override-channels -c conda-forge -c psi4 \
-    rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip lammps -y \
+    rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip lammps \
+    "libint=2.9.0" "libxc-c=7.0.0=cpu_h75f4f88_6" -y \
     && conda clean -afy
 
 # RadonPy本体。リポジトリに同梱されているビルド済みwheel(dist/*.whl)を
@@ -94,14 +106,31 @@ RUN git clone --depth 1 https://github.com/RadonPy/RadonPy.git /opt/RadonPy \
 ENV PATH=/opt/miniforge3/envs/radonpy/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/miniforge3/envs/radonpy/lib
 
+# LAMMPSはOpenMPI(mpirun)経由で実行されるが、このコンテナはrootで動作
+# するため、デフォルトのままだと
+# 「prterun has detected an attempt to run as root」で拒否されて
+# 動かない(実機で確認)。RadonPyのAutoMD_scriptsは内部でmpirunを
+# 起動するため、恒久的に許可しておく。
+ENV OMPI_ALLOW_RUN_AS_ROOT=1
+ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+
 # ビルド時点で最低限の動作確認をしておく(壊れていればここでビルド自体が失敗する)。
 # `conda run`経由ではなく、実際にユーザーが使う素のシェル状態
 # (上のENVだけが効いた状態)でimportできるかを検証する。
-# `import psi4`は`psi4 --version`だけでは検出できないリンクエラー
-# (libint2.so.2等)も拾えるので明示的にimportしている。
+# `import psi4`だけでは`libxc`側の関数欠落(RuntimeError: Could not
+# find required LibXC functional)を検出できないため、RadonPyの
+# デフォルトQM手法(wb97m-d3bj)で実際にエネルギー計算まで行い、
+# libint/libxcの組み合わせが正しく動くことまで確認する。
 RUN python -c "import rdkit, psi4, radonpy; print('rdkit', rdkit.__version__)" \
     && psi4 --version \
-    && lmp -h > /dev/null
+    && lmp -h > /dev/null \
+    && python -c "\
+import psi4; \
+psi4.set_memory('500 MB'); \
+psi4.geometry('H 0 0 0\nH 0 0 0.74'); \
+psi4.set_options({'basis': 'sto-3g'}); \
+e = psi4.energy('wb97m-d3bj'); \
+print('psi4 wb97m-d3bj energy OK', e)"
 
 WORKDIR /work
 CMD ["/bin/bash"]
