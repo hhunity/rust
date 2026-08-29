@@ -23,6 +23,11 @@
 #   docker run --rm --platform linux/amd64 radonpy:latest \
 #     conda run -n radonpy python -c "import rdkit, radonpy; print('ok')"
 #
+# RadonPyのソースコード(git clone、example/サンプル込み)は /opt/RadonPy に
+# 置いてある。importされる本体はpip版(radonpy-pypi)を使うので、
+# /opt/RadonPy を直接編集してもコンテナ内のimportには反映されない
+# (参照・サンプル実行用)。
+#
 # 保存してオフライン機へ転送する場合(レジストリを使わない方法):
 #
 #   docker save radonpy:latest | gzip > radonpy-image.tar.gz
@@ -46,7 +51,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates bzip2 \
+    curl ca-certificates bzip2 git \
     && rm -rf /var/lib/apt/lists/*
 
 # Miniforge導入(conda-forge専用ディストリビューション。Anaconda社の
@@ -68,8 +73,11 @@ RUN conda install -n radonpy --override-channels -c conda-forge -c psi4 \
     rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip lammps -y \
     && conda clean -afy
 
-# RadonPy本体
-RUN conda run -n radonpy pip install --no-cache-dir radonpy-pypi
+# RadonPy本体。pip版(PyPIのwheel)にはexample/サンプルスクリプトが
+# 含まれないため、gitリポジトリ本体も /opt/RadonPy に残しておく
+# (サンプルはこちらを参照する。importされるパッケージ本体はpip版を使う)
+RUN conda run -n radonpy pip install --no-cache-dir radonpy-pypi \
+    && git clone --depth 1 https://github.com/RadonPy/RadonPy.git /opt/RadonPy
 
 # ビルド時点で最低限の動作確認をしておく(壊れていればここでビルド自体が失敗する)
 RUN conda run -n radonpy python -c "import rdkit, radonpy; print('rdkit', rdkit.__version__)" \
