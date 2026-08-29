@@ -86,13 +86,22 @@ RUN conda install -n radonpy --override-channels -c conda-forge -c psi4 \
 RUN git clone --depth 1 https://github.com/RadonPy/RadonPy.git /opt/RadonPy \
     && conda run -n radonpy pip install --no-cache-dir --no-deps /opt/RadonPy/dist/*.whl
 
-# ビルド時点で最低限の動作確認をしておく(壊れていればここでビルド自体が失敗する)
-RUN conda run -n radonpy python -c "import rdkit, radonpy; print('rdkit', rdkit.__version__)" \
-    && conda run -n radonpy psi4 --version \
-    && conda run -n radonpy lmp -h > /dev/null
-
-# コンテナに入った時点でradonpy環境がデフォルトになるようにしておく
+# コンテナに入った時点でradonpy環境がデフォルトになるようにしておく。
+# LD_LIBRARY_PATHも明示しておかないと、`conda run`/`conda activate`を
+# 経由しない素のシェル(docker run ... /bin/bash等)からpsi4を
+# importした際に `libint2.so.2: cannot open shared object file` の
+# ようなエラーになることを実機で確認したため。
 ENV PATH=/opt/miniforge3/envs/radonpy/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/miniforge3/envs/radonpy/lib
+
+# ビルド時点で最低限の動作確認をしておく(壊れていればここでビルド自体が失敗する)。
+# `conda run`経由ではなく、実際にユーザーが使う素のシェル状態
+# (上のENVだけが効いた状態)でimportできるかを検証する。
+# `import psi4`は`psi4 --version`だけでは検出できないリンクエラー
+# (libint2.so.2等)も拾えるので明示的にimportしている。
+RUN python -c "import rdkit, psi4, radonpy; print('rdkit', rdkit.__version__)" \
+    && psi4 --version \
+    && lmp -h > /dev/null
 
 WORKDIR /work
 CMD ["/bin/bash"]
