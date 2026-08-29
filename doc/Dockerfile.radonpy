@@ -24,13 +24,15 @@
 #     conda run -n radonpy python -c "import rdkit, radonpy; print('ok')"
 #
 # RadonPyのソースコード(git clone、example/サンプル込み)は /opt/RadonPy に
-# 置いてある。importされる本体もこのソースをeditableインストール
-# (pip install -e)したものなので、/opt/RadonPy を直接編集すれば
-# コンテナ内のimportにもそのまま反映される。
+# 置いてある。importされる本体は、リポジトリに同梱されているビルド済み
+# wheel(/opt/RadonPy/dist/*.whl)をインストールしたもの。
 # (PyPI版radonpy-pypiはgit最新版と内容が異なり、AutoMD_scripts等の
 # サンプルが要求するモジュール(radonpy.ff.dreiding等)が無いことを
-# 実機で確認したため、pip版ではなくgit版をそのままインストールする
-# 方式に変更した)
+# 実機で確認した。また `pip install -e .` はRadonPy自体のsetup.py/
+# pyproject.tomlの記述矛盾(python_requiresの二重定義)により新しめの
+# setuptoolsでビルドが失敗することも確認したため、同梱wheelを直接
+# installする方式にした。/opt/RadonPy を編集してもimportには反映
+# されない点に注意)
 #
 # 保存してオフライン機へ転送する場合(レジストリを使わない方法):
 #
@@ -77,13 +79,12 @@ RUN conda install -n radonpy --override-channels -c conda-forge -c psi4 \
     rdkit psi4 dftd3-python resp mdtraj psutil scipy pandas matplotlib pip lammps -y \
     && conda clean -afy
 
-# RadonPy本体。PyPI版(radonpy-pypi)はgit最新版と内容が異なり、
-# example/サンプルスクリプト(AutoMD_scripts等)が要求するモジュールが
-# 無い場合があるため、gitリポジトリをそのままeditableインストールする。
-# --no-deps は、既にconda-forge側で入れたnumpy/scipy等を
-# pip側で二重に入れ直して壊さないため。
+# RadonPy本体。リポジトリに同梱されているビルド済みwheel(dist/*.whl)を
+# 直接installする(理由は上記コメント参照)。--no-deps は、既に
+# conda-forge側で入れたnumpy/scipy等をpip側で二重に入れ直して
+# 壊さないため。
 RUN git clone --depth 1 https://github.com/RadonPy/RadonPy.git /opt/RadonPy \
-    && conda run -n radonpy pip install --no-cache-dir --no-deps -e /opt/RadonPy
+    && conda run -n radonpy pip install --no-cache-dir --no-deps /opt/RadonPy/dist/*.whl
 
 # ビルド時点で最低限の動作確認をしておく(壊れていればここでビルド自体が失敗する)
 RUN conda run -n radonpy python -c "import rdkit, radonpy; print('rdkit', rdkit.__version__)" \
