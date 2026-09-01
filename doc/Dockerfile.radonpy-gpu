@@ -35,17 +35,22 @@
 # 差分が大きくなることを確認したため)。
 #
 # 既にCPU版を実機で構築済みで、GPU化のために差分だけ追加したい場合は
-# 以下の5パッケージだけで足りる(python=3.13+psi4=1.10のCPU版が
-# 既に入っている前提):
+# 以下の7パッケージだけで足りる(python=3.13+psi4=1.10のCPU版が
+# 既に入っている前提)。cuda-versionはバージョン情報のみのメタ
+# パッケージで実体を含まないため、実際にlibcudart.soを提供する
+# cuda-cudart / cuda-cudart_linux-64 を別途追加している(これが
+# 無いと `libcudart.so.13: cannot open shared object file` になる
+# ことを実機で確認した):
 #   https://conda.anaconda.org/conda-forge/linux-64/lammps-2025.07.22-cuda130_py313_h5db5c7c_mpi_mpich_3.conda
 #   https://conda.anaconda.org/conda-forge/noarch/cuda-version-13.3-hcbadf70_3.conda
+#   https://conda.anaconda.org/conda-forge/linux-64/cuda-cudart-13.3.29-hecca717_0.conda
+#   https://conda.anaconda.org/conda-forge/noarch/cuda-cudart_linux-64-13.3.29-h376f20c_0.conda
 #   https://conda.anaconda.org/conda-forge/linux-64/libevent-2.1.12-hf998b51_1.conda
 #   https://conda.anaconda.org/conda-forge/linux-64/ucc-1.8.0-h7a4b9c7_2.conda
 #   https://conda.anaconda.org/conda-forge/linux-64/libpmix-5.0.8-h31fc519_4.conda
 # ダウンロード後、コンテナ内で
 #   conda install -n radonpy --offline --override-channels -c conda-forge -c psi4 <ダウンロードした*.conda> -y
-# を実行すればよい(ネットに繋がっていれば、この5個以外の足りない依存は
-# 自動的に取得される)。
+# を実行すればよい。
 
 FROM ubuntu:22.04
 

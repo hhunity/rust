@@ -143,12 +143,18 @@ mpich版が解決されるため、GPU版もMPI実装を揃えてmpich版を使�
 (openmpi版だとMPI実装ごと丸ごと入れ替わり、差分が大きくなることを確認)。
 
 **既にCPU版を実機で構築済みで、GPU化のために差分だけ追加したい場合**
-(コンテナに入って直接`conda install`する場合)は、以下の5パッケージの
-URLだけで足りる(python=3.13+psi4=1.10のCPU版が既に入っている前提):
+(コンテナに入って直接`conda install`する場合)は、以下の7パッケージの
+URLだけで足りる(python=3.13+psi4=1.10のCPU版が既に入っている前提)。
+`cuda-version`はバージョン情報のみのメタパッケージで実体を含まないため、
+実際に`libcudart.so`を提供する`cuda-cudart` / `cuda-cudart_linux-64`を
+別途追加する必要がある(これが無いと`libcudart.so.13: cannot open
+shared object file`になることを実機で確認した):
 
 ```
 https://conda.anaconda.org/conda-forge/linux-64/lammps-2025.07.22-cuda130_py313_h5db5c7c_mpi_mpich_3.conda
 https://conda.anaconda.org/conda-forge/noarch/cuda-version-13.3-hcbadf70_3.conda
+https://conda.anaconda.org/conda-forge/linux-64/cuda-cudart-13.3.29-hecca717_0.conda
+https://conda.anaconda.org/conda-forge/noarch/cuda-cudart_linux-64-13.3.29-h376f20c_0.conda
 https://conda.anaconda.org/conda-forge/linux-64/libevent-2.1.12-hf998b51_1.conda
 https://conda.anaconda.org/conda-forge/linux-64/ucc-1.8.0-h7a4b9c7_2.conda
 https://conda.anaconda.org/conda-forge/linux-64/libpmix-5.0.8-h31fc519_4.conda
@@ -159,12 +165,15 @@ Windows側でダウンロード後、`-v`マウントしたフォルダ経由で
 ```
 conda install -n radonpy --offline --override-channels -c conda-forge -c psi4 <ダウンロードした*.conda> -y
 ```
-この5個の圧縮ファイルだけで、**ネットワーク接続なしでも**正しく
+この7個の圧縮ファイルだけで、**ネットワーク接続なしでも**正しく
 インストールできることを実際に確認済み(展開済みキャッシュを排除した
-クリーンな状態でテスト)。既存のRadonPy(CPU)フル環境をゼロから
-`--offline`構築する場合は展開済みディレクトリが必要になる問題が
-以前あったが、今回のように「既に動いている環境へ、ファイルパスを
-明示して追加install」する場合はこの問題が起きないため。
+クリーンな状態でテスト、`ldd lmp_mpi`で`libcuda.so.1`以外の未解決
+シンボルが無いことも確認済み。`libcuda.so.1`はGPUドライバ側のファイルで、
+実機で`--gpus all`指定時にホストから渡されるため、conda側でのインストールは
+不要)。既存のRadonPy(CPU)フル環境をゼロから`--offline`構築する場合は
+展開済みディレクトリが必要になる問題が以前あったが、今回のように
+「既に動いている環境へ、ファイルパスを明示して追加install」する場合は
+この問題が起きないため。
 
 ### 5.4.1 手順まとめ(Mac + GitHub Container Registry、実機にDocker不要)
 
