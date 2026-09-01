@@ -43,7 +43,7 @@
 #   https://conda.anaconda.org/conda-forge/linux-64/ucc-1.8.0-h7a4b9c7_2.conda
 #   https://conda.anaconda.org/conda-forge/linux-64/libpmix-5.0.8-h31fc519_4.conda
 # ダウンロード後、コンテナ内で
-#   conda install -n radonpy --override-channels -c conda-forge -c psi4 <ダウンロードした*.conda> -y
+#   conda install -n radonpy --offline --override-channels -c conda-forge -c psi4 <ダウンロードした*.conda> -y
 # を実行すればよい(ネットに繋がっていれば、この5個以外の足りない依存は
 # 自動的に取得される)。
 
