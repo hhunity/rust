@@ -28,8 +28,24 @@
 #
 # lammps=*=cuda130* のようにワイルドカードで指定すると、MPIを含まない
 # nompi ビルドが選ばれてしまい、RadonPyが内部で呼び出す `lmp_mpi` という
-# バイナリが存在せずに失敗することを確認したため、
-# ビルド文字列まで含めてMPI(openmpi)+CUDA版を明示的に固定している。
+# バイナリが存在せずに失敗することを確認したため、ビルド文字列まで含めて
+# MPI+CUDA版を明示的に固定している。CPU版(doc/Dockerfile.radonpy)で
+# 素のlammpsを指定すると mpich 版が解決されるため、GPU版もMPI実装を
+# 揃えてmpich版を使う(openmpi版だと、MPI実装ごと丸ごと入れ替わって
+# 差分が大きくなることを確認したため)。
+#
+# 既にCPU版を実機で構築済みで、GPU化のために差分だけ追加したい場合は
+# 以下の5パッケージだけで足りる(python=3.13+psi4=1.10のCPU版が
+# 既に入っている前提):
+#   https://conda.anaconda.org/conda-forge/linux-64/lammps-2025.07.22-cuda130_py313_h5db5c7c_mpi_mpich_3.conda
+#   https://conda.anaconda.org/conda-forge/noarch/cuda-version-13.3-hcbadf70_3.conda
+#   https://conda.anaconda.org/conda-forge/linux-64/libevent-2.1.12-hf998b51_1.conda
+#   https://conda.anaconda.org/conda-forge/linux-64/ucc-1.8.0-h7a4b9c7_2.conda
+#   https://conda.anaconda.org/conda-forge/linux-64/libpmix-5.0.8-h31fc519_4.conda
+# ダウンロード後、コンテナ内で
+#   conda install -n radonpy --override-channels -c conda-forge -c psi4 <ダウンロードした*.conda> -y
+# を実行すればよい(ネットに繋がっていれば、この5個以外の足りない依存は
+# 自動的に取得される)。
 
 FROM ubuntu:22.04
 
@@ -51,10 +67,10 @@ RUN conda config --set always_yes true \
 
 RUN conda create -n radonpy python=3.13 --override-channels -c conda-forge -y
 
-# lammpsだけCUDA+OpenMPI版のビルド文字列を明示指定(他はCPU版と同じ)
+# lammpsだけCUDA+mpich版のビルド文字列を明示指定(他はCPU版と同じ)
 RUN conda install -n radonpy --override-channels -c conda-forge -c psi4 \
     rdkit "psi4=1.10" dftd3-python resp mdtraj psutil scipy pandas matplotlib pip \
-    "lammps=2025.07.22=cuda130_py313_h80b445b_mpi_openmpi_3" \
+    "lammps=2025.07.22=cuda130_py313_h5db5c7c_mpi_mpich_3" \
     "libxc-c=7.0.0=cpu_h75f4f88_6" -y \
     && conda clean -afy
 
@@ -64,11 +80,7 @@ RUN git clone --depth 1 https://github.com/RadonPy/RadonPy.git /opt/RadonPy \
 ENV PATH=/opt/miniforge3/envs/radonpy/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/miniforge3/envs/radonpy/lib
 
-ENV OMPI_ALLOW_RUN_AS_ROOT=1
-ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
-# GPU間通信をCUDA-awareにする(OpenMPIのCUDA対応はビルドされていても
-# デフォルト無効のため)。詳細はconda install時のopenmpiのメッセージを参照。
-ENV OMPI_MCA_opal_cuda_support=true
+# CPU版と同じくmpichを使うため、OpenMPI固有のroot実行許可設定は不要。
 
 # ビルド環境(docker build実行中)には通常GPUが無いため、psi4のエネルギー
 # 計算やlmpの実行確認はここでは行わない(CPU版と違い、lmpの実行には
