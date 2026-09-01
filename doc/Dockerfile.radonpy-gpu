@@ -1,0 +1,83 @@
+# RadonPy用の実行環境イメージ(GPU版)。
+#
+# doc/Dockerfile.radonpy(CPU版)との違いはLAMMPSのみ。RadonPyのパイプライン
+# の中でGPU(CUDA)アクセラレーションが効くのは実質LAMMPS(分子動力学)だけで、
+# Psi4(量子化学計算)・RDKitはconda-forge版がCPU専用のため恩恵はない。
+#
+# 前提(ホスト側 = 実際にコンテナを動かすマシン):
+#   - NVIDIA製GPU(conda-forgeのLAMMPS GPUビルドはCUDA専用。AMD/Intelは非対応)
+#   - NVIDIAドライバ(Windows+WSL2の場合はWindows側にインストールする。
+#     WSL2の中に別途Linux用ドライバを入れる必要はない)
+#   - NVIDIA Container Toolkit(WSL2 Ubuntu内、またはLinuxホストに導入):
+#       distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+#       curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+#       curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | \
+#         sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+#         sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+#       sudo apt update && sudo apt install -y nvidia-container-toolkit
+#       sudo systemctl restart docker
+#
+# ビルド(ビルド自体にGPUは不要。x86_64ホストなら--platformは省略可):
+#
+#   docker build -f doc/Dockerfile.radonpy-gpu -t radonpy-gpu:latest .
+#
+# 実行(必ず --gpus all を付けること。無いとGPUが見えず
+#   `libcuda.so.1: cannot open shared object file` になる):
+#
+#   docker run --rm -it --shm-size=1g --gpus all radonpy-gpu:latest
+#
+# lammps=*=cuda130* のようにワイルドカードで指定すると、MPIを含まない
+# nompi ビルドが選ばれてしまい、RadonPyが内部で呼び出す `lmp_mpi` という
+# バイナリが存在せずに失敗することを確認したため、
+# ビルド文字列まで含めてMPI(openmpi)+CUDA版を明示的に固定している。
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates bzip2 git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL -o /tmp/miniforge.sh \
+    https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh \
+    && bash /tmp/miniforge.sh -b -p /opt/miniforge3 \
+    && rm /tmp/miniforge.sh
+
+ENV PATH=/opt/miniforge3/bin:$PATH
+
+RUN conda config --set always_yes true \
+    && conda config --set channel_priority strict
+
+RUN conda create -n radonpy python=3.13 --override-channels -c conda-forge -y
+
+# lammpsだけCUDA+OpenMPI版のビルド文字列を明示指定(他はCPU版と同じ)
+RUN conda install -n radonpy --override-channels -c conda-forge -c psi4 \
+    rdkit "psi4=1.10" dftd3-python resp mdtraj psutil scipy pandas matplotlib pip \
+    "lammps=2025.07.22=cuda130_py313_h80b445b_mpi_openmpi_3" \
+    "libxc-c=7.0.0=cpu_h75f4f88_6" -y \
+    && conda clean -afy
+
+RUN git clone --depth 1 https://github.com/RadonPy/RadonPy.git /opt/RadonPy \
+    && conda run -n radonpy pip install --no-cache-dir --no-deps /opt/RadonPy/dist/*.whl
+
+ENV PATH=/opt/miniforge3/envs/radonpy/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/miniforge3/envs/radonpy/lib
+
+ENV OMPI_ALLOW_RUN_AS_ROOT=1
+ENV OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1
+# GPU間通信をCUDA-awareにする(OpenMPIのCUDA対応はビルドされていても
+# デフォルト無効のため)。詳細はconda install時のopenmpiのメッセージを参照。
+ENV OMPI_MCA_opal_cuda_support=true
+
+# ビルド環境(docker build実行中)には通常GPUが無いため、psi4のエネルギー
+# 計算やlmpの実行確認はここでは行わない(CPU版と違い、lmpの実行には
+# 実際のGPU+ドライバが必要なため、ビルド時点では失敗してしまう)。
+# バイナリ・importの存在確認のみ行う。
+RUN python -c "import rdkit, psi4, radonpy; print('rdkit', rdkit.__version__)" \
+    && psi4 --version \
+    && test -x /opt/miniforge3/envs/radonpy/bin/lmp_mpi \
+    && echo "lmp_mpi binary exists (GPU実行確認は実機で --gpus all を付けて行うこと)"
+
+WORKDIR /work
+CMD ["/bin/bash"]

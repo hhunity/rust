@@ -124,6 +124,22 @@ Docker自身がこれらを正しく扱う形式なので、この2つの不確�
 `--platform linux/amd64` を指定すること
 (Apple Silicon Macはデフォルトでarm64向けにビルドしてしまうため)。
 
+### 5.4.0 GPU(CUDA)を使う場合
+
+`doc/Dockerfile.radonpy-gpu` を使う。RadonPyのパイプラインでGPU
+アクセラレーションが効くのは実質LAMMPS(分子動力学)のみで、
+Psi4(量子化学計算)・RDKitはconda-forge版がCPU専用のため恩恵はない。
+
+ホスト側(実際にコンテナを動かすマシン)にNVIDIA製GPU・NVIDIAドライバ・
+NVIDIA Container Toolkitが必要で、`docker run --gpus all` を付けて
+起動する必要がある。詳細は`doc/Dockerfile.radonpy-gpu`冒頭のコメントを
+参照。
+
+`lammps=*=cuda130*` のようにワイルドカードで指定すると、MPIを含まない
+`nompi`ビルドが選ばれてしまい、RadonPyが内部で呼び出す`lmp_mpi`という
+バイナリが存在せず動かないことを確認済みなので、ビルド文字列まで
+含めてMPI(openmpi)+CUDA版を明示的に固定している。
+
 ### 5.4.1 手順まとめ(Mac + GitHub Container Registry、実機にDocker不要)
 
 Dockerは**ビルド用(Mac)にだけ**使い、実機には一切インストールしない構成。
