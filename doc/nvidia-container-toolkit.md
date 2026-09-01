@@ -25,62 +25,57 @@ Windows側のドライバがWSL越しに透過的に見える仕組みのため�
   nvidia-smiをインストールする必要はなく、Windows側ドライバのものが
   そのまま見える)。
 
-## NVIDIA Container Toolkit本体のURL一覧について
+## Windows側での一括ダウンロード手順 (doc/nvidia-container-toolkit-windows-download.ps1)
 
-**このリポジトリの自動生成環境では、NVIDIA配布リポジトリ
-(`nvidia.github.io`)へのアクセスがプロキシでブロックされており、
-`apt-get install --print-uris`を実行してURL一覧を生成することが
-できなかった。** 以下のコマンドを、ネットに繋がるUbuntu 22.04環境
-(オンラインの間だけのWSLで一度実行するのでもよい)で実行し、
-`nvidia-container-urls-jammy.txt`を作成してから、次の「Windows側での
-一括ダウンロード」に進むこと。
+WSL自体がオフラインで、他にネットに繋がるUbuntu環境も無い前提のため、
+「Ubuntu環境で`apt-get install --print-uris`を実行してURL一覧を作る」
+という通常のやり方(`doc/rust-urls-*.txt`等と同じ方式)は使えない。
 
-```
-# 1. NVIDIA配布リポジトリのGPGキーとリスト定義を取得
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
-  | gpg --dearmor -o nvidia-container-toolkit-keyring.gpg
-curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
-  | sed "s#deb https://#deb [arch=amd64 signed-by=$(pwd)/nvidia-container-toolkit-keyring.gpg] https://#g" \
-  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit-tmp.list
-sudo apt-get update
+代わりに、NVIDIAのAPTリポジトリが公開しているパッケージインデックス
+ファイル(`Packages`。Debianパッケージリポジトリの標準フォーマットの
+プレーンテキストで、`apt`を経由しなくても中身が読める)を直接HTTPで
+取得し、そこから必要な4パッケージ
 
-# 2. パッケージ本体+依存(全てUbuntu標準リポジトリ分も含めて解決される)のURL一覧を生成
-apt-get install --print-uris -y -o Dir::State::status=/dev/null \
-  nvidia-container-toolkit \
-  | grep -oP "(?<=')[^']+(?=')" | grep '^http' | sort -u > nvidia-container-urls-jammy.txt
-
-sudo rm /etc/apt/sources.list.d/nvidia-container-toolkit-tmp.list
-```
-
-`nvidia-container-toolkit`パッケージは以下に依存しており
-(2026年9月時点)、上記コマンドで生成される一覧にはこれらが
-全て含まれるはずなので、個別に意識する必要はない:
+- `nvidia-container-toolkit`
 - `nvidia-container-toolkit-base`
 - `libnvidia-container-tools`
 - `libnvidia-container1`
 
-依存はほぼUbuntu標準ライブラリ(`libc6`, `libseccomp2`等)に収まるため、
-生成される一覧のほとんどはNVIDIA配布リポジトリ由来の上記4パッケージ
-そのものになるはずである。
-
-## Windows側での一括ダウンロード手順
-
-`nvidia-container-urls-jammy.txt`をWindows上の作業フォルダに置き、
-PowerShellで一括ダウンロードする(`doc/readme.md`のYocto/Rust向けと
-同じパターン):
+のダウンロードURLを組み立てる`doc/nvidia-container-toolkit-windows-download.ps1`
+を用意した。**Ubuntu/WSL環境は一切不要で、ネットに繋がるWindows機だけ
+で完結する**:
 
 ```powershell
-$outDir = ".\nvidia-container-toolkit-offline-debs"
-New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-
-Get-Content nvidia-container-urls-jammy.txt | ForEach-Object {
-    $fileName = Split-Path $_ -Leaf
-    Invoke-WebRequest -Uri $_ -OutFile (Join-Path $outDir $fileName)
-}
+.\nvidia-container-toolkit-windows-download.ps1
 ```
 
-`nvidia-container-toolkit-offline-debs`フォルダをUSBメモリ等で
-オフラインのWSL(Ubuntu 22.04 jammy)環境へコピーする。
+実行すると`.\nvidia-container-toolkit-offline-debs\`に4つの`.deb`が
+ダウンロードされる。このフォルダをUSBメモリ等でオフラインのWSL
+(Ubuntu 22.04 jammy)環境へコピーする。
+
+**注意: このスクリプトはNVIDIA配布リポジトリ(`nvidia.github.io`)への
+アクセスが本リポジトリの開発環境からブロックされていたため、実機での
+動作確認ができていない。** 想定しているリポジトリ構成(flat repository
+形式、`https://nvidia.github.io/libnvidia-container/stable/deb/amd64/Packages`
+にインデックスがある)と実際が異なっていた場合、「パッケージが
+見つかりませんでした」という警告が出るか、ダウンロードが404で失敗する。
+その場合は以下の手動フォールバックを使うこと:
+
+1. ブラウザで https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list
+   を開き、実際の`deb`行に書かれているリポジトリのベースURLを確認する
+2. `<そのベースURL>/Packages` (アーキテクチャ別ディレクトリが挟まる
+   構成なら `<ベースURL>/amd64/Packages` や `<ベースURL>/binary-amd64/Packages`
+   等)をブラウザで直接開き、`Package: nvidia-container-toolkit` /
+   `Package: nvidia-container-toolkit-base` / `Package: libnvidia-container-tools` /
+   `Package: libnvidia-container1` の各ブロックを探す
+3. 各ブロックの`Filename:`の値を`<ベースURL>/<Filename>`と組み合わせた
+   URLをブラウザで直接開けばダウンロードできる
+
+なお依存関係(`libc6`, `libseccomp2`等)はUbuntu 22.04であれば標準で
+入っているため、通常はこの4パッケージ以外に追加ダウンロードは不要。
+`apt-get install ./*.deb`で「dependency problems」と言われた場合のみ、
+`doc/rust-urls-jammy.txt`(Ubuntu標準パッケージのURL一覧、既に生成済み)
+から該当パッケージを探して追加すること。
 
 ## オフライン環境(WSL内)側でのインストール
 
