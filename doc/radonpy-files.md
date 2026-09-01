@@ -138,7 +138,28 @@ NVIDIA Container Toolkitが必要で、`docker run --gpus all` を付けて
 `lammps=*=cuda130*` のようにワイルドカードで指定すると、MPIを含まない
 `nompi`ビルドが選ばれてしまい、RadonPyが内部で呼び出す`lmp_mpi`という
 バイナリが存在せず動かないことを確認済みなので、ビルド文字列まで
-含めてMPI(openmpi)+CUDA版を明示的に固定している。
+含めてMPI+CUDA版を明示的に固定している。CPU版で素の`lammps`を指定すると
+mpich版が解決されるため、GPU版もMPI実装を揃えてmpich版を使っている
+(openmpi版だとMPI実装ごと丸ごと入れ替わり、差分が大きくなることを確認)。
+
+**既にCPU版を実機で構築済みで、GPU化のために差分だけ追加したい場合**
+(コンテナに入って直接`conda install`する場合)は、以下の5パッケージの
+URLだけで足りる(python=3.13+psi4=1.10のCPU版が既に入っている前提):
+
+```
+https://conda.anaconda.org/conda-forge/linux-64/lammps-2025.07.22-cuda130_py313_h5db5c7c_mpi_mpich_3.conda
+https://conda.anaconda.org/conda-forge/noarch/cuda-version-13.3-hcbadf70_3.conda
+https://conda.anaconda.org/conda-forge/linux-64/libevent-2.1.12-hf998b51_1.conda
+https://conda.anaconda.org/conda-forge/linux-64/ucc-1.8.0-h7a4b9c7_2.conda
+https://conda.anaconda.org/conda-forge/linux-64/libpmix-5.0.8-h31fc519_4.conda
+```
+
+Windows側でダウンロード後、`-v`マウントしたフォルダ経由でコンテナに渡し、
+コンテナ内で以下を実行すればよい(ネットに繋がっていれば、この5個以外の
+足りない依存関係は自動的に取得される):
+```
+conda install -n radonpy --override-channels -c conda-forge -c psi4 <ダウンロードした*.conda> -y
+```
 
 ### 5.4.1 手順まとめ(Mac + GitHub Container Registry、実機にDocker不要)
 
