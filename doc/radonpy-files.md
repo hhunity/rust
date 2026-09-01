@@ -155,11 +155,16 @@ https://conda.anaconda.org/conda-forge/linux-64/libpmix-5.0.8-h31fc519_4.conda
 ```
 
 Windows側でダウンロード後、`-v`マウントしたフォルダ経由でコンテナに渡し、
-コンテナ内で以下を実行すればよい(ネットに繋がっていれば、この5個以外の
-足りない依存関係は自動的に取得される):
+コンテナ内で以下を実行すればよい:
 ```
-conda install -n radonpy --override-channels -c conda-forge -c psi4 <ダウンロードした*.conda> -y
+conda install -n radonpy --offline --override-channels -c conda-forge -c psi4 <ダウンロードした*.conda> -y
 ```
+この5個の圧縮ファイルだけで、**ネットワーク接続なしでも**正しく
+インストールできることを実際に確認済み(展開済みキャッシュを排除した
+クリーンな状態でテスト)。既存のRadonPy(CPU)フル環境をゼロから
+`--offline`構築する場合は展開済みディレクトリが必要になる問題が
+以前あったが、今回のように「既に動いている環境へ、ファイルパスを
+明示して追加install」する場合はこの問題が起きないため。
 
 ### 5.4.1 手順まとめ(Mac + GitHub Container Registry、実機にDocker不要)
 
