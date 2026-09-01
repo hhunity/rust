@@ -210,25 +210,20 @@ static.rust-lang.org が配布している**単体installer(tarball)** を使う
 最新化したい場合は `https://static.rust-lang.org/dist/channel-rust-stable.toml`
 を取得し、`[pkg.rust.target.x86_64-unknown-linux-gnu]` のURLを参照してください。
 
-## WSL2 + NVIDIA Container Toolkit をオフラインで導入する場合 (doc/nvidia-container-toolkit.md)
+## WSL2向け NVIDIA Container Toolkit をオフラインで導入する場合 (doc/nvidia-container-toolkit.md)
 
-WSL2 (Ubuntu 22.04 jammy) 上で GPU 対応の Docker (`docker run --gpus all ...`)
-を動かせるようにするための、Windows側での一括ダウンロード手順・URL一覧・
-オフライン環境側でのインストール手順をまとめたものです。詳細は
-`doc/nvidia-container-toolkit.md` を参照してください。
+WSL2 (Ubuntu 22.04 jammy) に、GPU対応Dockerに必要な**NVIDIA Container
+Toolkit本体**をオフラインで導入するための手順です(Docker Engine自体は
+別途用意済みである前提)。Windows側での一括ダウンロード手順・
+オフライン環境側でのインストール手順は `doc/nvidia-container-toolkit.md`
+を参照してください。
 
-必要なものは大きく3層に分かれます:
-- **Windows側のGPUドライバ**(WSL内には入れない。既存のGeForce/Studio/
-  Quadroドライバがあれば追加作業不要なことが多い)
-- **WSL内のDocker Engine**: URL一覧を `doc/docker-urls-jammy.txt` として
-  用意済み(186ファイル。archive.ubuntu.com由来 + download.docker.com由来)
-- **WSL内のNVIDIA Container Toolkit**: NVIDIA配布リポジトリ
-  (`nvidia.github.io`)への接続が本リポジトリの自動生成環境からブロック
-  されていたため、URL一覧は未生成です。`doc/nvidia-container-toolkit.md`
-  に記載の生成コマンドを、ネットに繋がるUbuntu 22.04環境(オンライン中の
-  WSLで一度だけ実行してもOK)で実行し、`nvidia-container-urls-jammy.txt`
-  を作成してから、他のURL一覧と同じくPowerShellで一括ダウンロードして
-  ください。
+NVIDIA配布リポジトリ(`nvidia.github.io`)への接続が本リポジトリの自動
+生成環境からブロックされていたため、URL一覧はまだ生成できていません。
+`doc/nvidia-container-toolkit.md` に記載の生成コマンドを、ネットに
+繋がるUbuntu 22.04環境(オンライン中のWSLで一度だけ実行してもOK)で
+実行し、`nvidia-container-urls-jammy.txt` を作成してから、他のURL一覧と
+同じくPowerShellで一括ダウンロードしてください。
 
 ## ライブラリ(crate)を集めてWindows→Linuxへ持っていく方法
 
