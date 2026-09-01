@@ -175,6 +175,21 @@ conda install -n radonpy --offline --override-channels -c conda-forge -c psi4 <�
 「既に動いている環境へ、ファイルパスを明示して追加install」する場合は
 この問題が起きないため。
 
+**参考: `cuda-toolkit`一式を入れる場合**
+
+上記7パッケージはLAMMPS実行に必要な最小構成だが、`nvcc`(CUDAコンパイラ)
+やcuBLAS/cuFFT/cuSPARSE/cuSOLVER等の数学ライブラリ、プロファイラ
+(nsight-compute)まで含む`cuda-toolkit`をまとめて入れることもできる。
+ただし今回のLAMMPS実行には不要(`ldd lmp_mpi`で確認した必要ライブラリは
+`libcudart.so`のみ)で、**85パッケージ・合計約1.5GB**とかなり大きい
+(gcc/g++一式やデバッガも付いてくる)。将来的にCUDAコードを自前でビルド
+する予定がある場合など、必要な時だけ使うとよい。
+
+URL一覧: `doc/radonpy-cuda-toolkit-urls.txt`
+```
+conda install -n radonpy --offline --override-channels -c conda-forge -c psi4 <ダウンロードした*.conda> -y
+```
+
 ### 5.4.1 手順まとめ(Mac + GitHub Container Registry、実機にDocker不要)
 
 Dockerは**ビルド用(Mac)にだけ**使い、実機には一切インストールしない構成。
