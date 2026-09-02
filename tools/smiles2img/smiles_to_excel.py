@@ -97,7 +97,7 @@ def chunk_output_path(output_path, part_no, total_parts):
 
 
 def write_chunk(chunk_rows, header, smiles_idx, image_idx, image_col_letter,
-                 overwrite_smiles_text, out_path, row_offset, total, progress_every, failed):
+                 overwrite_smiles_text, clear_text, out_path, row_offset, total, progress_every, failed):
     wb = Workbook()
     ws = wb.active
 
@@ -119,7 +119,7 @@ def write_chunk(chunk_rows, header, smiles_idx, image_idx, image_col_letter,
             try:
                 png_buf = smiles_to_png_bytes(smiles)
                 cell_ref = f"{image_col_letter}{row_i}"
-                if overwrite_smiles_text:
+                if overwrite_smiles_text and clear_text:
                     ws[cell_ref] = None  # SMILESテキストを消して画像に差し替え
                 img = XLImage(png_buf)
                 img.width, img.height = IMG_SIZE
@@ -151,7 +151,14 @@ def main():
     parser.add_argument(
         "--image-column",
         default=None,
-        help="画像を貼る列。列記号(F)またはヘッダー名。省略時は--columnと同じ列(SMILESを画像で上書き)",
+        help="画像を貼る列。列記号(F)またはヘッダー名。省略時は--columnと同じ列",
+    )
+    parser.add_argument(
+        "--clear-text",
+        action="store_true",
+        help="画像をSMILES列自体に貼る場合(--image-column省略時)、"
+        "元のSMILESテキストを消してから画像を貼る。既定ではテキストは残したまま"
+        "画像を上に重ねる(セルの値としては残るが、画像の下に隠れて見えなくなる)",
     )
     parser.add_argument(
         "--encoding",
@@ -202,7 +209,7 @@ def main():
         row_offset = (part_no - 1) * chunk_size
         write_chunk(
             chunk_rows, header, smiles_idx, image_idx, image_col_letter,
-            overwrite_smiles_text, out_path, row_offset, total, args.progress_every, failed,
+            overwrite_smiles_text, args.clear_text, out_path, row_offset, total, args.progress_every, failed,
         )
 
     print(f"書き出し完了: {total}行 / {total_parts}ファイル, 失敗{len(failed)}件")
