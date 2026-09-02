@@ -1,0 +1,6 @@
+ID,Name,MolecularWeight,Note,SMILES
+1,Aspirin,180.16,鎮痛剤,CC(=O)Oc1ccccc1C(=O)O
+2,Caffeine,194.19,興奮剤,Cn1cnc2c1c(=O)n(C)c(=O)n2C
+3,Ibuprofen,206.28,鎮痛剤,CC(C)Cc1ccc(cc1)C(C)C(=O)O
+4,Paracetamol,151.16,解熱剤,CC(=O)Nc1ccc(O)cc1
+5,Ethanol,46.07,溶媒,CCO
