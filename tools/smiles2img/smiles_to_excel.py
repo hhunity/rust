@@ -22,6 +22,25 @@ IMG_SIZE = (200, 200)
 CELL_ROW_HEIGHT = 150  # points
 CELL_COL_WIDTH = 28  # excel column width units
 
+# 日本語Excelで保存されたCSVはShift-JIS(CP932)になることが多いため、
+# UTF-8で読めなければ順に試す
+CANDIDATE_ENCODINGS = ["utf-8-sig", "cp932", "euc_jp"]
+
+
+def read_csv_rows(path):
+    for enc in CANDIDATE_ENCODINGS:
+        try:
+            with open(path, newline="", encoding=enc) as f:
+                rows = list(csv.reader(f))
+            print(f"[info] 文字コード '{enc}' として読み込みました", file=sys.stderr)
+            return rows
+        except UnicodeDecodeError:
+            continue
+    raise SystemExit(
+        f"CSVの文字コードを判定できませんでした(試した候補: {CANDIDATE_ENCODINGS})。"
+        f" --encoding で明示的に指定してください。"
+    )
+
 
 def resolve_column_index(header, column_arg):
     """--column に列名(例: SMILES)か列記号(例: E)のどちらが来ても列インデックス(0始まり)を返す"""
@@ -56,10 +75,18 @@ def main():
         default="E",
         help="SMILESが入っている列。列記号(E)またはヘッダー名(SMILES)。既定: E",
     )
+    parser.add_argument(
+        "--encoding",
+        default=None,
+        help="CSVの文字コードを明示指定(例: cp932)。省略時は自動判定",
+    )
     args = parser.parse_args()
 
-    with open(args.input_csv, newline="", encoding="utf-8-sig") as f:
-        rows = list(csv.reader(f))
+    if args.encoding:
+        with open(args.input_csv, newline="", encoding=args.encoding) as f:
+            rows = list(csv.reader(f))
+    else:
+        rows = read_csv_rows(args.input_csv)
     if not rows:
         raise SystemExit("CSVが空です")
 
