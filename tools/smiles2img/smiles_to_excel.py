@@ -4,6 +4,7 @@
 使い方:
     python smiles_to_excel.py input.csv output.xlsx --column E
     python smiles_to_excel.py input.csv output.xlsx --column SMILES
+    python smiles_to_excel.py input.tsv output.xlsx --column E --delimiter tab
 """
 import argparse
 import csv
@@ -25,19 +26,36 @@ CELL_COL_WIDTH = 28  # excel column width units
 # 日本語Excelで保存されたCSVはShift-JIS(CP932)になることが多いため、
 # UTF-8で読めなければ順に試す
 CANDIDATE_ENCODINGS = ["utf-8-sig", "cp932", "euc_jp"]
+CANDIDATE_DELIMITERS = [",", "\t", ";", "|"]
+DELIMITER_ALIASES = {"tab": "\t", "comma": ",", "semicolon": ";"}
 
 
-def read_csv_rows(path):
-    for enc in CANDIDATE_ENCODINGS:
+def detect_delimiter(sample_text):
+    try:
+        dialect = csv.Sniffer().sniff(sample_text, delimiters="".join(CANDIDATE_DELIMITERS))
+        return dialect.delimiter
+    except csv.Error:
+        first_line = sample_text.splitlines()[0] if sample_text else ""
+        counts = {d: first_line.count(d) for d in CANDIDATE_DELIMITERS}
+        best = max(counts, key=counts.get)
+        return best if counts[best] > 0 else ","
+
+
+def read_csv_rows(path, encoding=None, delimiter=None):
+    encodings = [encoding] if encoding else CANDIDATE_ENCODINGS
+    for enc in encodings:
         try:
-            with open(path, newline="", encoding=enc) as f:
-                rows = list(csv.reader(f))
-            print(f"[info] 文字コード '{enc}' として読み込みました", file=sys.stderr)
-            return rows
+            text = path.read_text(encoding=enc)
         except UnicodeDecodeError:
             continue
+        delim = delimiter or detect_delimiter(text)
+        rows = list(csv.reader(io.StringIO(text), delimiter=delim))
+        delim_label = "TAB" if delim == "\t" else repr(delim)
+        print(f"[info] 文字コード '{enc}' / 区切り文字 {delim_label} として読み込みました", file=sys.stderr)
+        return rows
+    tried = encodings
     raise SystemExit(
-        f"CSVの文字コードを判定できませんでした(試した候補: {CANDIDATE_ENCODINGS})。"
+        f"CSVの文字コードを判定できませんでした(試した候補: {tried})。"
         f" --encoding で明示的に指定してください。"
     )
 
@@ -80,13 +98,15 @@ def main():
         default=None,
         help="CSVの文字コードを明示指定(例: cp932)。省略時は自動判定",
     )
+    parser.add_argument(
+        "--delimiter",
+        default=None,
+        help="区切り文字を明示指定(例: tab, ';' )。省略時は自動判定",
+    )
     args = parser.parse_args()
 
-    if args.encoding:
-        with open(args.input_csv, newline="", encoding=args.encoding) as f:
-            rows = list(csv.reader(f))
-    else:
-        rows = read_csv_rows(args.input_csv)
+    delimiter = DELIMITER_ALIASES.get(args.delimiter, args.delimiter) if args.delimiter else None
+    rows = read_csv_rows(args.input_csv, encoding=args.encoding, delimiter=delimiter)
     if not rows:
         raise SystemExit("CSVが空です")
 
