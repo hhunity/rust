@@ -5,6 +5,8 @@
     python smiles_to_excel.py input.csv output.xlsx --column E
     python smiles_to_excel.py input.csv output.xlsx --column SMILES
     python smiles_to_excel.py input.tsv output.xlsx --column E --delimiter tab
+    # SMILESはE列のまま残し、画像はF列に貼る
+    python smiles_to_excel.py input.csv output.xlsx --column E --image-column F
 """
 import argparse
 import csv
@@ -94,6 +96,11 @@ def main():
         help="SMILESが入っている列。列記号(E)またはヘッダー名(SMILES)。既定: E",
     )
     parser.add_argument(
+        "--image-column",
+        default=None,
+        help="画像を貼る列。列記号(F)またはヘッダー名。省略時は--columnと同じ列(SMILESを画像で上書き)",
+    )
+    parser.add_argument(
         "--encoding",
         default=None,
         help="CSVの文字コードを明示指定(例: cp932)。省略時は自動判定",
@@ -112,17 +119,24 @@ def main():
 
     header, data_rows = rows[0], rows[1:]
     smiles_idx = resolve_column_index(header, args.column)
+    image_idx = resolve_column_index(header, args.image_column) if args.image_column else smiles_idx
+    overwrite_smiles_text = image_idx == smiles_idx
 
     wb = Workbook()
     ws = wb.active
-    ws.append(header)
 
-    smiles_col_letter = get_column_letter(smiles_idx + 1)
-    ws.column_dimensions[smiles_col_letter].width = CELL_COL_WIDTH
+    for col_i, val in enumerate(header):
+        ws.cell(row=1, column=col_i + 1, value=val)
+    if image_idx >= len(header) or not header[image_idx].strip():
+        ws.cell(row=1, column=image_idx + 1, value="Structure")
+
+    image_col_letter = get_column_letter(image_idx + 1)
+    ws.column_dimensions[image_col_letter].width = CELL_COL_WIDTH
 
     failed = []
     for row_i, row in enumerate(data_rows, start=2):
-        ws.append(row)
+        for col_i, val in enumerate(row):
+            ws.cell(row=row_i, column=col_i + 1, value=val)
         ws.row_dimensions[row_i].height = CELL_ROW_HEIGHT
 
         smiles = row[smiles_idx].strip() if smiles_idx < len(row) else ""
@@ -134,8 +148,9 @@ def main():
             failed.append((row_i, smiles))
             continue
 
-        cell_ref = f"{smiles_col_letter}{row_i}"
-        ws[cell_ref] = None  # SMILESテキストを消して画像に差し替え
+        cell_ref = f"{image_col_letter}{row_i}"
+        if overwrite_smiles_text:
+            ws[cell_ref] = None  # SMILESテキストを消して画像に差し替え
 
         img = XLImage(png_buf)
         img.width, img.height = IMG_SIZE
