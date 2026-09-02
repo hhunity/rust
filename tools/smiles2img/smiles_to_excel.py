@@ -78,13 +78,16 @@ def resolve_column_index(header, column_arg):
     raise SystemExit(f"列 '{column_arg}' が見つかりません。ヘッダー: {header}")
 
 
-def smiles_to_png_bytes(smiles):
+def smiles_to_png_bytes(smiles, colors=16):
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         raise ValueError("SMILES解析失敗(RDKitがNoneを返した)")
     pil_img = Draw.MolToImage(mol, size=IMG_SIZE)
+    if colors:
+        # 構造式はほぼ白黒少数色なので、パレット化するだけでPNGが大幅に軽くなる
+        pil_img = pil_img.convert("P", palette=1, colors=colors)
     buf = io.BytesIO()
-    pil_img.save(buf, format="PNG")
+    pil_img.save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
 
@@ -97,7 +100,8 @@ def chunk_output_path(output_path, part_no, total_parts):
 
 
 def write_chunk(chunk_rows, header, smiles_idx, image_idx, image_col_letter,
-                 overwrite_smiles_text, clear_text, out_path, row_offset, total, progress_every, failed):
+                 overwrite_smiles_text, clear_text, image_colors, out_path, row_offset, total,
+                 progress_every, failed):
     wb = Workbook()
     ws = wb.active
 
@@ -117,7 +121,7 @@ def write_chunk(chunk_rows, header, smiles_idx, image_idx, image_col_letter,
         smiles = row[smiles_idx].strip() if smiles_idx < len(row) else ""
         if smiles:
             try:
-                png_buf = smiles_to_png_bytes(smiles)
+                png_buf = smiles_to_png_bytes(smiles, colors=image_colors)
                 cell_ref = f"{image_col_letter}{row_i}"
                 if overwrite_smiles_text and clear_text:
                     ws[cell_ref] = None  # SMILESテキストを消して画像に差し替え
@@ -183,6 +187,13 @@ def main():
         default=500,
         help="この行数ごとに進捗をstderrへ出す。既定: 500行ごと",
     )
+    parser.add_argument(
+        "--image-colors",
+        type=int,
+        default=16,
+        help="画像PNGの色数をこの数に減色してファイルサイズを圧縮する(構造式は少数色で足りる)。"
+        "0を指定すると減色せずフルカラーで保存する。既定: 16色",
+    )
     args = parser.parse_args()
 
     delimiter = DELIMITER_ALIASES.get(args.delimiter, args.delimiter) if args.delimiter else None
@@ -209,7 +220,8 @@ def main():
         row_offset = (part_no - 1) * chunk_size
         write_chunk(
             chunk_rows, header, smiles_idx, image_idx, image_col_letter,
-            overwrite_smiles_text, args.clear_text, out_path, row_offset, total, args.progress_every, failed,
+            overwrite_smiles_text, args.clear_text, args.image_colors, out_path, row_offset, total,
+            args.progress_every, failed,
         )
 
     print(f"書き出し完了: {total}行 / {total_parts}ファイル, 失敗{len(failed)}件")
