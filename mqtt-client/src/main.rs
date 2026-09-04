@@ -4,6 +4,21 @@ use std::time::Duration;
 
 use rumqttc::{Client, Event, MqttOptions, Packet, QoS};
 
+/// 入力行の先頭にある `/qos0 ` `/qos1 ` `/qos2 ` プレフィックスを読み取り、
+/// (QoS, プレフィックスを除いた本文) を返す。プレフィックスが無ければQoS1（AtLeastOnce）扱い。
+fn parse_qos_prefix(line: &str) -> (QoS, &str) {
+    for (prefix, qos) in [
+        ("/qos0 ", QoS::AtMostOnce),
+        ("/qos1 ", QoS::AtLeastOnce),
+        ("/qos2 ", QoS::ExactlyOnce),
+    ] {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            return (qos, rest);
+        }
+    }
+    (QoS::AtLeastOnce, line)
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let name = args.next().unwrap_or_else(|| {
@@ -35,9 +50,10 @@ fn main() {
                 if line.is_empty() {
                     continue;
                 }
-                let message = format!("{name}: {line}");
+                let (qos, text) = parse_qos_prefix(&line);
+                let message = format!("{name}: {text}");
                 client
-                    .publish(&topic, QoS::AtLeastOnce, false, message.as_bytes())
+                    .publish(&topic, qos, false, message.as_bytes())
                     .unwrap();
             }
         });
@@ -45,6 +61,7 @@ fn main() {
 
     println!("接続しました host={host} port={port} topic={topic} name={name}");
     println!("メッセージを入力して Enter で送信します（Ctrl+D で終了）");
+    println!("先頭に /qos0 /qos1 /qos2 を付けるとそのメッセージだけQoSを変更できます（省略時はQoS1）");
 
     for notification in connection.iter() {
         match notification {
