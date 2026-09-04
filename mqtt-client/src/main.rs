@@ -93,12 +93,32 @@ fn send_file_to(host: &str, port: u16, path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// TcpListenerが1件の接続を受け付け、send_file_toが送ってきたファイルを保存する。
-/// 戻り値は (受け取ったファイル名, サイズ, 保存先パス)。
-fn receive_file(listener: TcpListener) -> io::Result<(String, u64, PathBuf)> {
-    // accept() は「誰かが繋いでくるまで待ち、繋がってきたらその通信路を返す」
-    let (mut stream, _addr) = listener.accept()?;
+/// 固定ポートのTcpListenerで、来た接続を延々と受け付け続ける（マイコン役が起動時に1回呼ぶ）。
+/// 接続が来るたびに別スレッドを立てて受信処理をし、このループ自体は次の接続を待ち続ける。
+/// これにより、何度でも（複数回・複数相手から）ファイルを受け取れる「常時待ち受け」になる。
+fn run_file_listener(listener: TcpListener) {
+    // listener.incoming() は「接続が来るたびに1つずつ返してくれる、終わりのないイテレータ」
+    for stream in listener.incoming() {
+        let stream = match stream {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[system] 接続の受け付けに失敗しました: {e}");
+                continue;
+            }
+        };
+        // 1件の受信処理に時間がかかっても次の接続を待てるように、別スレッドに任せる
+        thread::spawn(move || match receive_one_file(stream) {
+            Ok((filename, size, path)) => {
+                println!("[system] 受信完了: {filename} ({size} bytes) -> {}", path.display());
+            }
+            Err(e) => eprintln!("[system] ファイル受信エラー: {e}"),
+        });
+    }
+}
 
+/// すでに繋がっている1本のTCP接続(stream)から、send_file_toが送ってきたファイルを読み取って保存する。
+/// 戻り値は (受け取ったファイル名, サイズ, 保存先パス)。
+fn receive_one_file(mut stream: TcpStream) -> io::Result<(String, u64, PathBuf)> {
     // ファイル名の長さ(4バイト)を読み取る
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf)?;
@@ -127,8 +147,14 @@ fn receive_file(listener: TcpListener) -> io::Result<(String, u64, PathBuf)> {
 }
 
 /// 「OFFER|id|from|to|filename|size」という送信申し出メッセージを受け取ったときの処理。
-/// 自分宛て(to == my_name)のときだけ反応し、TCPで待ち受けを始めて、
-/// 「ここに繋いで」という返事(ACK)をackトピックへpublishする。
+/// 自分宛て(to == my_name)のときだけ反応する。
+///
+/// マイコン役（起動時に固定ポートで常時listenしている＝listen_portがSome）なら、
+/// 「ここに繋いで」という返事(ACK)を今のIPアドレス＋固定ポートでackトピックへpublishするだけでよい
+/// （待ち受け自体はもう起動時から動いているので、ここで新しく始める必要はない）。
+///
+/// パソコン役（listenしていない＝listen_portがNone）は、そもそもファイルを受け取れないので、
+/// 警告だけ表示してACKは返さない（＝送信側はいつまでもACKが来ないので送信を諦めることになる）。
 fn handle_offer(
     payload: &str,
     my_name: &str,
@@ -136,6 +162,7 @@ fn handle_offer(
     ack_topic: &str,
     broker_host: &str,
     broker_port: u16,
+    listen_port: Option<u16>,
 ) {
     // "|" で区切って各項目に分解する。件数が合わなければ壊れたメッセージとして無視する
     let parts: Vec<&str> = payload.split('|').collect();
@@ -146,28 +173,23 @@ fn handle_offer(
         return; // 自分宛てのオファーでなければ何もしない
     }
 
-    println!("[system] {from}さんから {filename} ({size} bytes) を送りたいと連絡がありました。受信準備をします…");
+    let Some(port) = listen_port else {
+        println!(
+            "[system] {from}さんから {filename} ({size} bytes) を送ろうとしていますが、\
+             このクライアントは受信listenをしていないので受け取れません（起動時にlisten_portを指定してください）"
+        );
+        return;
+    };
 
-    // ポート番号 0 を指定すると、OSが空いているポートを1つ選んで割り当ててくれる
-    let listener = TcpListener::bind("0.0.0.0:0").expect("TCP待ち受けの開始に失敗しました");
-    let port = listener.local_addr().unwrap().port();
+    // DHCPなどでIPアドレスが変わっている可能性があるので、返事のたびに毎回調べ直す（ポート番号は固定のまま）
     let host = detect_local_ip(broker_host, broker_port);
-
-    println!("[system] {host}:{port} で待ち受けを開始します");
+    println!("[system] {from}さんから {filename} ({size} bytes) を受け取ります（{host}:{port} で待ち受け中）");
 
     // ここに繋いでほしい、という返事をMQTTで送り返す
     let ack = format!("ACK|{id}|{host}|{port}");
     client
         .publish(ack_topic, QoS::AtLeastOnce, false, ack.as_bytes())
         .unwrap();
-
-    // 実際のファイル受信は時間がかかる（相手が繋いでくるまで待つ）ので、別スレッドに任せる
-    thread::spawn(move || match receive_file(listener) {
-        Ok((filename, size, path)) => {
-            println!("[system] 受信完了: {filename} ({size} bytes) -> {}", path.display());
-        }
-        Err(e) => eprintln!("[system] ファイル受信エラー: {e}"),
-    });
 }
 
 /// 「ACK|id|host|port」という返事を受け取ったときの処理。
@@ -204,12 +226,19 @@ fn main() {
     let mut args = std::env::args().skip(1);
 
     let name = args.next().unwrap_or_else(|| {
-        eprintln!("usage: mqtt-client <name> [host] [port] [topic]");
+        eprintln!("usage: mqtt-client <name> [host] [port] [topic] [listen_port]");
         std::process::exit(1);
     });
     let host = args.next().unwrap_or_else(|| "127.0.0.1".to_string());
     let port: u16 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1883);
     let topic = args.next().unwrap_or_else(|| "chat".to_string());
+    // 5番目の引数（省略可）: これを指定すると「マイコン役」になり、起動時からこのポートで
+    // ファイル受信のTCP待ち受けをし続ける。省略時は「パソコン役」＝一切listenしない
+    // （0を指定した場合もlistenしない扱いにする）。
+    let listen_port: Option<u16> = args
+        .next()
+        .and_then(|s| s.parse().ok())
+        .filter(|&p: &u16| p != 0);
 
     // ファイル送信の申し出(offer)と、その返事(ack)専用のトピックを、チャットのトピックから派生させる
     // 例: topicが"chat"なら "chat/file/offer" と "chat/file/ack"
@@ -230,6 +259,15 @@ fn main() {
 
     // 自分が送信を申し出た(まだ返事を待っている)ファイルの一覧
     let pending_offers: PendingOffers = Arc::new(Mutex::new(HashMap::new()));
+
+    // listen_portが指定されている（＝マイコン役）なら、起動時に一度だけ固定ポートでlistenを開始し、
+    // そのままプログラムが終わるまでファイル受信を待ち受け続ける
+    if let Some(port) = listen_port {
+        let listener = TcpListener::bind(("0.0.0.0", port))
+            .unwrap_or_else(|e| panic!("{port}番ポートでのlisten開始に失敗しました: {e}"));
+        println!("[system] {port}番ポートで常時待ち受けを開始しました（マイコン役）");
+        thread::spawn(move || run_file_listener(listener));
+    }
 
     // --- ④ 別スレッドを立てて「キーボード入力 → メッセージ送信」を担当させる ---
     {
@@ -305,6 +343,10 @@ fn main() {
     println!("メッセージを入力して Enter で送信します（Ctrl+D で終了）");
     println!("先頭に /qos0 /qos1 /qos2 を付けるとそのメッセージだけQoSを変更できます（省略時はQoS1）");
     println!("/send <宛先の名前> <ファイルパス> でファイルを送れます（例: /send bob ./photo.png）");
+    match listen_port {
+        Some(p) => println!("役割: マイコン役（{p}番ポートで常時待ち受け中。他のクライアントからファイルを受け取れます）"),
+        None => println!("役割: パソコン役（listenはしません。ファイルは送るだけで、受け取ることはできません）"),
+    }
 
     // --- ⑤ メインスレッドでは「受信したメッセージを表示する」処理をずっと続ける ---
     for notification in connection.iter() {
@@ -313,7 +355,7 @@ fn main() {
                 let text = String::from_utf8_lossy(&publish.payload);
 
                 if publish.topic == offer_topic {
-                    handle_offer(&text, &name, &client, &ack_topic, &host, port);
+                    handle_offer(&text, &name, &client, &ack_topic, &host, port, listen_port);
                 } else if publish.topic == ack_topic {
                     handle_ack(&text, &pending_offers);
                 } else if publish.topic == topic {
