@@ -15,7 +15,7 @@ use std::thread;
 
 use rumqttc::{Client, QoS};
 
-use crate::messages::ReceivedMsg;
+use crate::messages::{DataMsg, ReceivedMsg};
 use crate::seq::{next_seq, SeqCounter};
 
 /// 自分自身のIPアドレス（相手から接続してもらうためのアドレス）を推測する。
@@ -46,18 +46,16 @@ pub fn detect_local_ip(broker_host: &str, broker_port: u16) -> String {
 /// 定番のマルチスレッドサーバーの作り方と同じです）。
 /// これにより、何度でも（複数回・複数相手から）ファイルを受け取れる「常時待ち受け」になる。
 ///
-/// client・my_name・received_topic_prefixは、受信結果（成功/失敗）をMQTTで報告するために使う。
+/// client・data_topicは、受信結果（成功/失敗）をMQTTで報告するために使う。
 /// バルクデータ（ファイルの中身）はMQTTの外（生TCP）でやり取りしているので、この報告が無いと
 /// MQTTだけを見ている側からは「実際に届いたかどうか」が一切分からなくなってしまう。
-/// 報告先トピックは`<received_topic_prefix>/<my_name>`（例: "chat/file/received/device1"）。
+/// 報告先は自分自身のdataトピック（`<topic>/<自分の名前>/data`）。
 pub fn run_file_listener(
     listener: TcpListener,
     client: Client,
-    my_name: String,
-    received_topic_prefix: String,
+    data_topic: String,
     received_counter: SeqCounter,
 ) {
-    let received_topic = format!("{received_topic_prefix}/{my_name}");
     // listener.incoming() は「接続が来るたびに1つずつ返してくれる、終わりのないイテレータ」。
     // C++の`for (;;) { auto fd = accept(listen_fd, ...); ... }`に相当します。
     for stream in listener.incoming() {
@@ -72,17 +70,14 @@ pub fn run_file_listener(
         // client（内部はArc相当の共有ハンドル）は複製してもコネクション自体は1つを
         // 指し続けるので、C++でいうshared_ptrをコピーする感覚に近いです。
         let client = client.clone();
-        let my_name = my_name.clone();
-        let received_topic = received_topic.clone();
+        let data_topic = data_topic.clone();
         let received_counter = received_counter.clone();
         // 1件の受信処理に時間がかかっても次の接続を待てるように、別スレッドに任せる
-        thread::spawn(move || {
-            match receive_one_file(stream, &my_name, &client, &received_topic, &received_counter) {
-                Ok((id, filename, size, path)) => {
-                    println!("[system] ジョブ{id}: 受信完了 {filename} ({size} bytes) -> {}", path.display());
-                }
-                Err(e) => eprintln!("[system] ファイル受信エラー: {e}"),
+        thread::spawn(move || match receive_one_file(stream, &client, &data_topic, &received_counter) {
+            Ok((id, filename, size, path)) => {
+                println!("[system] ジョブ{id}: 受信完了 {filename} ({size} bytes) -> {}", path.display());
             }
+            Err(e) => eprintln!("[system] ファイル受信エラー: {e}"),
         });
     }
 }
@@ -90,14 +85,13 @@ pub fn run_file_listener(
 /// すでに繋がっている1本のTCP接続(stream)から、パソコン役が送ってきたファイルを読み取って保存する。
 /// 戻り値は (id, 受け取ったファイル名, サイズ, 保存先パス)。
 ///
-/// idが読み取れた後は、途中で失敗しても成功しても、必ずreceived_topicへMQTTで結果を
+/// idが読み取れた後は、途中で失敗しても成功しても、必ず自分のdataトピックへMQTTで結果を
 /// publishする。これでパソコン役（や他の監視者）は、MQTTを見ているだけで生TCP転送の
 /// 結果まで分かるようになる。
 fn receive_one_file(
     mut stream: TcpStream,
-    my_name: &str,
     client: &Client,
-    received_topic: &str,
+    data_topic: &str,
     seq_counter: &SeqCounter,
 ) -> io::Result<(String, String, u64, PathBuf)> {
     // idの長さ(4バイト)と中身を読み取る
@@ -112,21 +106,15 @@ fn receive_one_file(
     //
     // `let report = |status: &str, size: u64| { ... };` はクロージャ（無名関数）の定義です。
     // C++のラムダ式`auto report = [&](const char* status, uint64_t size) { ... };`と
-    // ほぼ同じ働きで、周囲の変数（id, my_name, client, received_topic, seq_counter）を
+    // ほぼ同じ働きで、周囲の変数（id, client, data_topic, seq_counter）を
     // 自動的に「借用」して使っています（C++ラムダの`[&]`キャプチャに近い挙動です）。
     let result = receive_file_body(&mut stream);
     let report = |status: &str, size: u64| {
-        let msg = ReceivedMsg {
-            id: id.clone(),
-            who: my_name.to_string(),
-            status: status.to_string(),
-            size,
-            seq: next_seq(seq_counter),
-        };
-        let payload = serde_json::to_vec(&msg).unwrap();
+        let msg = ReceivedMsg { id: id.clone(), status: status.to_string(), size, seq: next_seq(seq_counter) };
+        let payload = serde_json::to_vec(&DataMsg::FileReceived(msg)).unwrap();
         // publish自体が失敗しても、ここでできることは無いので無視する
         // （`let _ = ...` は、C++でいう「戻り値を(void)キャストして意図的に捨てる」のと同じ）
-        let _ = client.publish(received_topic, QoS::AtLeastOnce, false, payload);
+        let _ = client.publish(data_topic, QoS::AtLeastOnce, false, payload);
     };
 
     match result {

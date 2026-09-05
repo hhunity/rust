@@ -28,20 +28,26 @@ use std::sync::{Arc, Mutex};
 /// 型エイリアス（`type X = Y;`）は、C++の`using X = Y;`（またはC言語の`typedef`）と同じ、
 /// 長い型に短い名前を付けるための機能です。
 ///
-/// 重要: **メッセージの種類（OFFERかJOBかなど）ごとに別々のSeqCounterを用意する**必要が
-/// あります。理由は、例えば`ACK`は「申し出た本人だけ」に届く専用トピックで、他の観測者には
-/// そもそも見えないメッセージだからです。もし全種類で1つの共有カウンタを使うと、
-/// ACKの分だけ他の観測者から見て番号が「飛んで」見えてしまい、実際は何も欠落していないのに
-/// 誤って警告が出てしまいます（実際に開発中にこの誤検知が起きたことがあります）。
-/// あるメッセージ種類を購読している人には、その種類のメッセージは必ず全部見えるはずなので、
-/// 種類ごとに分ければ正しく欠落を検知できます。
+/// 重要: **同じMQTTトピックを共有するメッセージ群ごとに、1つのSeqCounterを用意する**
+/// 必要があります。理由は、あるトピックを購読している人には、そこに流れるメッセージが
+/// （中身の種類が違っても）必ず全部見えるはずだからです。逆に、別のトピックへ流れる
+/// メッセージ（例えば他のマイコン宛てのOFFER）は見えないので、それを同じカウンタに
+/// 混ぜてしまうと、番号が「飛んで」見えて誤って警告を出してしまいます（実際に開発中に
+/// この誤検知が起きたことがあります）。
+///
+/// このプロジェクトのトピックは3種類（`<topic>/<名前>/cmd`・`<topic>/all/cmd`・
+/// `<topic>/<名前>/data`）なので、それぞれに対応するカウンタ／トラッカーを用意します
+/// （`<topic>/<名前>/data`には元々presence・ACK・RECEIVED・DONEの4種類のメッセージが
+/// 乗りますが、全部同じトピックに乗る＝観測者からは全部見えるので、まとめて1つの
+/// カウンタで構いません。これはSparkplug B本家が「ノード1つにつきseqは1系列」と
+/// している設計にも合わせた形です）。
 pub type SeqCounter = Arc<Mutex<u64>>;
 
 /// 相手の名前ごとに「最後に見たseq番号」を覚えておく辞書。
 ///
 /// `HashMap<K, V>`はC++の`std::unordered_map<K, V>`と同じ、ハッシュテーブルです。
 /// 次に来たメッセージのseqと比べて、1つ飛んでいたら「間の1通が抜けたかもしれない」と分かります。
-/// SeqCounterと同様、**メッセージの種類ごとに別々のSeqTrackerを使う**のがポイントです。
+/// SeqCounterと同様、**トピックごとに別々のSeqTrackerを使う**のがポイントです。
 pub type SeqTracker = Arc<Mutex<HashMap<String, u64>>>;
 
 /// 中身が0のSeqCounterを新しく作るための、ちょっとしたヘルパー関数。
@@ -72,8 +78,8 @@ pub fn next_seq(counter: &SeqCounter) -> u64 {
   // （C++のstd::lock_guard/std::unique_lockと同じ、RAIIによる自動アンロック）
 
 /// 受信したメッセージのseq番号を確認し、直前に見た値から1つも増えていなければ
-/// （＝間の番号が抜けていれば）警告を表示する。呼び出す側は、メッセージの種類に対応する
-/// 専用のSeqTrackerを渡すこと（他の種類のトラッカーと混ぜて使わない）。
+/// （＝間の番号が抜けていれば）警告を表示する。呼び出す側は、そのトピックに対応する
+/// 専用のSeqTrackerを渡すこと（他のトピックのトラッカーと混ぜて使わない）。
 ///
 /// - 初めて見る名前の場合は比較のしようがないので、警告なしでそのまま記録するだけにする
 /// - is_birthがtrueのとき（presenceの"online"、Sparkplug BでいうBIRTH）は、再接続で
@@ -98,8 +104,8 @@ pub fn check_seq(from: &str, seq: u64, tracker: &SeqTracker, is_birth: bool) {
 }
 
 /// パソコン役（`mqtt-server`）が使うseq状態。
-/// パソコン役は「OFFERとJOBを送る側」「ACK・RECEIVED・presence・DONEを受け取る側」なので、
-/// その組み合わせだけを持つ。
+/// パソコン役は「OFFERとJOBを送る側」「各マイコンのdataトピック（presence・ACK・RECEIVED・
+/// DONEをまとめたもの）を受け取る側」なので、その組み合わせだけを持つ。
 ///
 /// `#[derive(Clone)]`は、C++でいうコピーコンストラクタを自動生成する指示に近いですが、
 /// 中身が全部`Arc`（＝shared_ptr相当）なので、実際に複製されるのは「参照カウンタの
@@ -107,18 +113,13 @@ pub fn check_seq(from: &str, seq: u64, tracker: &SeqTracker, is_birth: bool) {
 /// 複数のスレッドが同じ実体を共有し続けます（shared_ptrをコピーする感覚と同じです）。
 #[derive(Clone)]
 pub struct ControllerSeqState {
-    /// 自分が送るOFFERのseqカウンタ
+    /// 自分が送るOFFER（`<topic>/<宛先>/cmd`、宛先ごとに別トピック）のseqカウンタ
     pub offer_counter: SeqCounter,
-    /// 受け取るACKの欠落検知用トラッカー
-    pub ack_tracker: SeqTracker,
-    /// 受け取るRECEIVEDの欠落検知用トラッカー
-    pub received_tracker: SeqTracker,
-    /// 受け取るpresenceの欠落検知用トラッカー
-    pub presence_tracker: SeqTracker,
-    /// 自分が送るJOBのseqカウンタ
+    /// 自分が送るJOB（`<topic>/all/cmd`）のseqカウンタ
     pub job_counter: SeqCounter,
-    /// 受け取るDONEの欠落検知用トラッカー
-    pub done_tracker: SeqTracker,
+    /// 各マイコンの`<topic>/<名前>/data`の欠落検知用トラッカー
+    /// （マイコンの名前ごとに、最後に見たseqを覚えておく）
+    pub data_tracker: SeqTracker,
 }
 
 impl ControllerSeqState {
@@ -130,32 +131,24 @@ impl ControllerSeqState {
     pub fn new() -> Self {
         ControllerSeqState {
             offer_counter: new_counter(),
-            ack_tracker: new_tracker(),
-            received_tracker: new_tracker(),
-            presence_tracker: new_tracker(),
             job_counter: new_counter(),
-            done_tracker: new_tracker(),
+            data_tracker: new_tracker(),
         }
     }
 }
 
 /// マイコン役（`mqtt-client`）が使うseq状態。
-/// マイコン役は「ACK・RECEIVED・presence・DONEを送る側」「OFFER・JOBを受け取る側」なので、
-/// パソコン役とはちょうど逆の組み合わせを持つ。
+/// マイコン役は「OFFER・JOBを受け取る側」「自分のdataトピック（presence・ACK・RECEIVED・
+/// DONEをまとめたもの）を送る側」なので、パソコン役とはちょうど逆の組み合わせを持つ。
 #[derive(Clone)]
 pub struct DeviceSeqState {
-    /// 受け取るOFFERの欠落検知用トラッカー
+    /// 受け取るOFFER（`<topic>/<自分の名前>/cmd`）の欠落検知用トラッカー
     pub offer_tracker: SeqTracker,
-    /// 受け取るJOBの欠落検知用トラッカー
+    /// 受け取るJOB（`<topic>/all/cmd`）の欠落検知用トラッカー
     pub job_tracker: SeqTracker,
-    /// 自分が送るACKのseqカウンタ
-    pub ack_counter: SeqCounter,
-    /// 自分が送るRECEIVEDのseqカウンタ
-    pub received_counter: SeqCounter,
-    /// 自分が送るpresenceのseqカウンタ
-    pub presence_counter: SeqCounter,
-    /// 自分が送るDONEのseqカウンタ
-    pub done_counter: SeqCounter,
+    /// 自分が送る`<topic>/<自分の名前>/data`のseqカウンタ
+    /// （presence・ACK・RECEIVED・DONEをまとめて、この1本のカウンタを使う）
+    pub data_counter: SeqCounter,
 }
 
 impl DeviceSeqState {
@@ -163,10 +156,7 @@ impl DeviceSeqState {
         DeviceSeqState {
             offer_tracker: new_tracker(),
             job_tracker: new_tracker(),
-            ack_counter: new_counter(),
-            received_counter: new_counter(),
-            presence_counter: new_counter(),
-            done_counter: new_counter(),
+            data_counter: new_counter(),
         }
     }
 }

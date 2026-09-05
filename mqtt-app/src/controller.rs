@@ -17,7 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rumqttc::{Client, Event, MqttOptions, Packet, QoS};
 
-use crate::messages::{AckMsg, DoneMsg, JobMsg, OfferMsg, PresenceMsg, ReceivedMsg};
+use crate::messages::{AckMsg, CmdMsg, DataMsg, DoneMsg, JobMsg, OfferMsg, PresenceMsg, ReceivedMsg};
 use crate::seq::{check_seq, next_seq, ControllerSeqState};
 
 /// 送信申し出(id)ごとに「これから送るファイルのパス」を覚えておく辞書。
@@ -71,6 +71,18 @@ fn parse_qos_prefix(line: &str) -> (QoS, &str) {
     (QoS::AtLeastOnce, line)
 }
 
+/// 受信したpublishのトピックが `<topic>/<名前>/data` の形なら、その`<名前>`部分を取り出す。
+/// 一致しなければ`None`。
+///
+/// `Option<&str>`を返しているのは、余計な文字列コピーをせず、元の`publish_topic`の一部を
+/// そのまま指す「借用」で済ませるためです（C++の`std::string_view`を返す関数に近い発想）。
+fn parse_data_topic<'a>(publish_topic: &'a str, topic: &str) -> Option<&'a str> {
+    publish_topic
+        .strip_prefix(topic)?
+        .strip_prefix('/')?
+        .strip_suffix("/data")
+}
+
 /// ファイルの中身を、繋いだ相手(TcpStream)へ送りつける。
 ///
 /// 自前の単純な通信ルール（プロトコル）を使う:
@@ -113,23 +125,10 @@ fn send_file_to(host: &str, port: u16, id: &str, path: &Path) -> io::Result<()> 
     Ok(())
 }
 
-/// `AckMsg`（JSON）の返事を受け取ったときの処理。
+/// `AckMsg`（`DataMsg::FileAck`の中身）を受け取ったときの処理。
 /// 自分が送った申し出(id)に対する返事だった場合、そのidに対応するファイルを
 /// 教えてもらったhost:portへ実際に送信する。
-fn handle_ack(payload: &str, pending_offers: &PendingOffers, seq: &ControllerSeqState) {
-    // serde_json::from_str::<AckMsg>(payload) は、JSON文字列をAckMsg構造体に変換する処理。
-    // 失敗する可能性がある（壊れたJSONかもしれない）のでResultが返る。
-    // let Ok(x) = ... else { return; } は「成功(Ok)ならxに取り出す、失敗(Err)ならここでreturnする」
-    // という書き方（"let-elseパターン"）で、C++でいう
-    //   auto result = parse(payload);
-    //   if (!result.has_value()) return;
-    //   auto ack = *result;
-    // に相当します。
-    let Ok(ack) = serde_json::from_str::<AckMsg>(payload) else {
-        return;
-    };
-    check_seq(&ack.from, ack.seq, &seq.ack_tracker, false);
-
+fn handle_ack(ack: AckMsg, pending_offers: &PendingOffers) {
     // remove() は「辞書から取り出して削除する」。C++のstd::unordered_map::extract()に近い。
     // 自分が送った申し出でなければNoneが返り何もしない。
     let Some(path) = pending_offers.lock().unwrap().remove(&ack.id) else {
@@ -148,40 +147,21 @@ fn handle_ack(payload: &str, pending_offers: &PendingOffers, seq: &ControllerSeq
     });
 }
 
-/// `ReceivedMsg`（JSON）の、生TCPでのファイル転送結果の報告を受け取ったときの処理。
-fn handle_file_received(payload: &str, seq: &ControllerSeqState) {
-    let Ok(received) = serde_json::from_str::<ReceivedMsg>(payload) else {
-        return;
-    };
-    check_seq(&received.who, received.seq, &seq.received_tracker, false);
-
+/// `ReceivedMsg`（`DataMsg::FileReceived`の中身）を受け取ったときの処理。
+/// `who`は、これを送ってきたマイコンの名前（トピックの`<名前>`部分から渡される）。
+fn handle_file_received(who: &str, received: ReceivedMsg) {
     if received.status == "ok" {
         println!(
-            "[system] ジョブ{}: {} が受信完了しました（{} bytes）",
-            received.id, received.who, received.size
+            "[system] ジョブ{}: {who} が受信完了しました（{} bytes）",
+            received.id, received.size
         );
     } else {
-        println!("[system] ジョブ{}: {} での受信に失敗しました", received.id, received.who);
+        println!("[system] ジョブ{}: {who} での受信に失敗しました", received.id);
     }
 }
 
-/// presenceトピック（`<topic>/presence/<名前>`）への`PresenceMsg`（JSON）通知を受け取ったときの処理。
-fn handle_presence(
-    publish_topic: &str,
-    payload: &str,
-    presence_prefix: &str,
-    roster: &Roster,
-    seq: &ControllerSeqState,
-) {
-    let Some(who) = publish_topic.strip_prefix(presence_prefix).and_then(|s| s.strip_prefix('/'))
-    else {
-        return;
-    };
-    let Ok(presence) = serde_json::from_str::<PresenceMsg>(payload) else {
-        return;
-    };
-    check_seq(who, presence.seq, &seq.presence_tracker, presence.status == "online");
-
+/// `PresenceMsg`（`DataMsg::Presence`の中身）を受け取ったときの処理。
+fn handle_presence(who: &str, presence: PresenceMsg, roster: &Roster) {
     let mut roster = roster.lock().unwrap();
     if presence.status == "online" {
         // insert()の戻り値は「上書きする前にそこにあった古い値」（無ければNone）。
@@ -196,18 +176,13 @@ fn handle_presence(
     }
 }
 
-/// `DoneMsg`（JSON）の完了報告を受け取ったときの処理。
-fn handle_job_done(payload: &str, inflight: &InFlightState, seq: &ControllerSeqState) {
-    let Ok(done) = serde_json::from_str::<DoneMsg>(payload) else {
-        return;
-    };
-    check_seq(&done.who, done.seq, &seq.done_tracker, false);
-
+/// `DoneMsg`（`DataMsg::JobDone`の中身）を受け取ったときの処理。
+fn handle_job_done(who: &str, done: DoneMsg, inflight: &InFlightState) {
     let guard = inflight.lock().unwrap();
     if let Some(job) = guard.as_ref() {
         if job.id == done.id {
             // send()が失敗するのは、待っている側が既にタイムアウトして諦めた後くらいなので無視してよい
-            let _ = job.tx.send(done.who);
+            let _ = job.tx.send(who.to_string());
         }
     }
 }
@@ -216,13 +191,10 @@ fn handle_job_done(payload: &str, inflight: &InFlightState, seq: &ControllerSeqS
 /// この関数はプログラムが終わるまでブロックし続ける
 /// （C++でいう、`main()`の中の`while (true) { ... }`メインループに相当する部分です）。
 pub fn run(name: String, host: String, port: u16, topic: String) {
-    let offer_prefix = format!("{topic}/file/offer");
-    let ack_prefix = format!("{topic}/file/ack");
-    let my_ack_topic = format!("{ack_prefix}/{name}");
-    let received_prefix = format!("{topic}/file/received");
-    let presence_prefix = format!("{topic}/presence");
-    let job_topic = format!("{topic}/job/queue");
-    let job_done_prefix = format!("{topic}/job/done");
+    // 全マイコンへの一斉配信(JOB)専用の、特別な名前"all"を宛先としたcmdトピック。
+    let all_cmd_topic = format!("{topic}/all/cmd");
+    // 各マイコンの報告(presence/ACK/RECEIVED/DONE)は、ワイルドカードでまとめて購読する。
+    let data_wildcard = format!("{topic}/+/data");
 
     let seq = ControllerSeqState::new();
 
@@ -230,20 +202,9 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
     mqttoptions.set_keep_alive(Duration::from_secs(5));
     let (client, mut connection) = Client::new(mqttoptions, 10);
 
-    // パソコン役はファイルを受け取らないのでOFFERトピックの購読は不要。
-    // 自分が送ったOFFERへの返事(ACK)、生TCP転送の結果(RECEIVED)、マイコンの在室確認(presence)、
-    // ジョブの完了報告(DONE)を購読する。
+    // パソコン役はコマンド(cmd)を送る側であって受け取る側ではないので、cmdトピックの購読は不要。
     client.subscribe(&topic, QoS::AtMostOnce).unwrap();
-    client.subscribe(&my_ack_topic, QoS::AtLeastOnce).unwrap();
-    client
-        .subscribe(format!("{received_prefix}/+"), QoS::AtLeastOnce)
-        .unwrap();
-    client
-        .subscribe(format!("{presence_prefix}/+"), QoS::AtLeastOnce)
-        .unwrap();
-    client
-        .subscribe(format!("{job_done_prefix}/+"), QoS::AtLeastOnce)
-        .unwrap();
+    client.subscribe(&data_wildcard, QoS::AtLeastOnce).unwrap();
 
     let pending_offers: PendingOffers = Arc::new(Mutex::new(HashMap::new()));
     let roster: Roster = Arc::new(Mutex::new(HashMap::new()));
@@ -257,9 +218,8 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
         let client = client.clone();
         let name = name.clone();
         let topic = topic.clone();
-        let offer_prefix = offer_prefix.clone();
         let pending_offers = Arc::clone(&pending_offers);
-        let job_topic = job_topic.clone();
+        let all_cmd_topic = all_cmd_topic.clone();
         let roster = Arc::clone(&roster);
         let inflight = Arc::clone(&inflight);
         let seq = seq.clone();
@@ -307,8 +267,8 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
                         content: content.to_string(),
                         seq: next_seq(&seq.job_counter),
                     };
-                    let payload = serde_json::to_vec(&job).unwrap();
-                    client.publish(&job_topic, QoS::AtLeastOnce, false, payload).unwrap();
+                    let payload = serde_json::to_vec(&CmdMsg::Job(job)).unwrap();
+                    client.publish(&all_cmd_topic, QoS::AtLeastOnce, false, payload).unwrap();
                     println!(
                         "[system] ジョブ{id}を{}台のマイコン({targets:?})へ配信しました。完了を待っています…",
                         targets.len()
@@ -375,13 +335,13 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
                     let offer = OfferMsg {
                         id,
                         from: name.clone(),
-                        to: to.to_string(),
                         filename: filename.clone(),
                         size: metadata.len(),
                         seq: next_seq(&seq.offer_counter),
                     };
-                    let offer_topic = format!("{offer_prefix}/{to}");
-                    let payload = serde_json::to_vec(&offer).unwrap();
+                    // 宛先(to)は、ペイロードではなくトピック自体（`<topic>/<to>/cmd`）で表す。
+                    let offer_topic = format!("{topic}/{to}/cmd");
+                    let payload = serde_json::to_vec(&CmdMsg::FileOffer(offer)).unwrap();
                     client.publish(&offer_topic, QoS::AtLeastOnce, false, payload).unwrap();
                     println!(
                         "[system] {to}へ {filename} ({} bytes) の送信を申し出ました。相手の応答を待っています…",
@@ -412,14 +372,26 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
             Ok(Event::Incoming(Packet::Publish(publish))) => {
                 let text = String::from_utf8_lossy(&publish.payload);
 
-                if publish.topic == my_ack_topic {
-                    handle_ack(&text, &pending_offers, &seq);
-                } else if publish.topic.starts_with(&received_prefix) {
-                    handle_file_received(&text, &seq);
-                } else if publish.topic.starts_with(&presence_prefix) {
-                    handle_presence(&publish.topic, &text, &presence_prefix, &roster, &seq);
-                } else if publish.topic.starts_with(&job_done_prefix) {
-                    handle_job_done(&text, &inflight, &seq);
+                if let Some(who) = parse_data_topic(&publish.topic, &topic) {
+                    let Ok(data) = serde_json::from_str::<DataMsg>(&text) else {
+                        continue;
+                    };
+                    // どのバリアントでも、そのマイコンの1本のdataトピックに乗っているので、
+                    // 欠落チェックは1箇所（seq.data_tracker）にまとめられる。
+                    let (seq_num, is_birth) = match &data {
+                        DataMsg::Presence(p) => (p.seq, p.status == "online"),
+                        DataMsg::FileAck(a) => (a.seq, false),
+                        DataMsg::FileReceived(r) => (r.seq, false),
+                        DataMsg::JobDone(d) => (d.seq, false),
+                    };
+                    check_seq(who, seq_num, &seq.data_tracker, is_birth);
+
+                    match data {
+                        DataMsg::Presence(p) => handle_presence(who, p, &roster),
+                        DataMsg::FileAck(a) => handle_ack(a, &pending_offers),
+                        DataMsg::FileReceived(r) => handle_file_received(who, r),
+                        DataMsg::JobDone(d) => handle_job_done(who, d, &inflight),
+                    }
                 } else if publish.topic == topic {
                     println!("{text}");
                 }

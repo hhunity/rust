@@ -22,7 +22,7 @@ use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 
 use mqtt_app::device::{handle_job, handle_offer};
 use mqtt_app::file_transfer::run_file_listener;
-use mqtt_app::messages::PresenceMsg;
+use mqtt_app::messages::{CmdMsg, DataMsg, PresenceMsg};
 use mqtt_app::seq::{next_seq, DeviceSeqState};
 
 fn main() {
@@ -50,16 +50,14 @@ fn main() {
     let port: u16 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1883);
     let topic = args.next().unwrap_or_else(|| "chat".to_string());
 
-    // ファイル送信・presence・ジョブ関連のトピックを、チャットのトピックから派生させる。
-    // 宛先・報告元の名前をトピックに含める構造にしている（詳しくはREADME参照）。
-    let offer_prefix = format!("{topic}/file/offer");
-    let my_offer_topic = format!("{offer_prefix}/{name}");
-    let ack_prefix = format!("{topic}/file/ack");
-    let received_prefix = format!("{topic}/file/received");
-    let presence_prefix = format!("{topic}/presence");
-    let my_presence_topic = format!("{presence_prefix}/{name}");
-    let job_topic = format!("{topic}/job/queue");
-    let job_done_prefix = format!("{topic}/job/done");
+    // このマイコン専用のトピックは2つだけ。
+    //   - cmd_topic  … ホスト（パソコン）から自分だけに向けたコマンド（OFFER）
+    //   - all_cmd_topic … 全マイコンへの一斉配信コマンド（JOB）
+    //   - data_topic … 自分から報告する側（presence・ACK・RECEIVED・DONEをまとめて1本）
+    // 名前は常に「そのトピックがどのマイコンのものか」だけを表す（詳しくはREADME参照）。
+    let cmd_topic = format!("{topic}/{name}/cmd");
+    let all_cmd_topic = format!("{topic}/all/cmd");
+    let data_topic = format!("{topic}/{name}/data");
 
     // このマイコンが送るメッセージ全種類ぶんのseqカウンタ・トラッカーをまとめて用意する。
     let seq = DeviceSeqState::new();
@@ -68,29 +66,29 @@ fn main() {
     let mut mqttoptions = MqttOptions::new(&name, host.clone(), port);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
 
-    // 自分のpresenceトピックにLast Will（異常切断時に代わりにブローカーがpublishしてくれる
+    // 自分のdataトピックにLast Will（異常切断時に代わりにブローカーがpublishしてくれる
     // 遺言メッセージ）を登録しておく。こうしておくと、電源断や通信断など「さようなら」を
     // 言えずに落ちた場合でも、ブローカーが自動で"offline"を配ってくれる。
-    // retain=trueにしているので、後からpresence topicをsubscribeしたパソコン役にも
+    // retain=trueにしているので、後からdataトピックをワイルドカード購読したパソコン役にも
     // 「今の状態」がすぐ届く。
-    let offline = serde_json::to_vec(&PresenceMsg { status: "offline".to_string(), seq: 0 }).unwrap();
-    mqttoptions.set_last_will(LastWill::new(&my_presence_topic, offline, QoS::AtLeastOnce, true));
+    let offline = serde_json::to_vec(&DataMsg::Presence(PresenceMsg { status: "offline".to_string(), seq: 0 })).unwrap();
+    mqttoptions.set_last_will(LastWill::new(&data_topic, offline, QoS::AtLeastOnce, true));
 
     // --- ③ 実際にMQTTブローカー（サーバー）へ接続する ---
     let (client, mut connection) = Client::new(mqttoptions, 10);
 
-    // チャット用トピックに加えて、自分宛てのOFFERと、全マイコン向けのJOBを購読する
+    // チャット用トピックに加えて、自分宛てのcmdと、全マイコン向けのcmdを購読する
     client.subscribe(&topic, QoS::AtMostOnce).unwrap();
-    client.subscribe(&my_offer_topic, QoS::AtLeastOnce).unwrap();
-    client.subscribe(&job_topic, QoS::AtLeastOnce).unwrap();
+    client.subscribe(&cmd_topic, QoS::AtLeastOnce).unwrap();
+    client.subscribe(&all_cmd_topic, QoS::AtLeastOnce).unwrap();
 
-    // 接続できたらすぐ自分のpresenceトピックに"online"をretain付きでpublishする
-    let online = serde_json::to_vec(&PresenceMsg {
+    // 接続できたらすぐ自分のdataトピックに"online"をretain付きでpublishする
+    let online = serde_json::to_vec(&DataMsg::Presence(PresenceMsg {
         status: "online".to_string(),
-        seq: next_seq(&seq.presence_counter),
-    })
+        seq: next_seq(&seq.data_counter),
+    }))
     .unwrap();
-    client.publish(&my_presence_topic, QoS::AtLeastOnce, true, online).unwrap();
+    client.publish(&data_topic, QoS::AtLeastOnce, true, online).unwrap();
 
     // 起動時に一度だけ固定ポートでlistenを開始し、そのままプログラムが終わるまで
     // ファイル受信を待ち受け続ける（C++でいう、`bind()`＋`listen()`をここで1回だけ行うイメージ）。
@@ -99,10 +97,9 @@ fn main() {
     println!("[system] {listen_port}番ポートで常時待ち受けを開始しました");
     {
         let client = client.clone();
-        let name = name.clone();
-        let received_prefix = received_prefix.clone();
-        let received_counter = seq.received_counter.clone();
-        thread::spawn(move || run_file_listener(listener, client, name, received_prefix, received_counter));
+        let data_topic = data_topic.clone();
+        let received_counter = seq.data_counter.clone();
+        thread::spawn(move || run_file_listener(listener, client, data_topic, received_counter));
     }
 
     // 別スレッドを立てて「キーボード入力 → チャット送信」を担当させる（デバッグ用の簡易機能）
@@ -135,10 +132,16 @@ fn main() {
             Ok(Event::Incoming(Packet::Publish(publish))) => {
                 let text = String::from_utf8_lossy(&publish.payload);
 
-                if publish.topic == my_offer_topic {
-                    handle_offer(&text, &name, &client, &ack_prefix, &host, port, listen_port, &seq);
-                } else if publish.topic == job_topic {
-                    handle_job(&text, &name, &client, &job_done_prefix, &seq);
+                if publish.topic == cmd_topic || publish.topic == all_cmd_topic {
+                    let Ok(cmd) = serde_json::from_str::<CmdMsg>(&text) else {
+                        continue;
+                    };
+                    match cmd {
+                        CmdMsg::FileOffer(offer) => {
+                            handle_offer(offer, &client, &data_topic, &host, port, listen_port, &seq)
+                        }
+                        CmdMsg::Job(job) => handle_job(job, &client, &data_topic, &seq),
+                    }
                 } else if publish.topic == topic {
                     println!("{text}");
                 }
