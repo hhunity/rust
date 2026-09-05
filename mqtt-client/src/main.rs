@@ -29,7 +29,11 @@ use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 // JSON文字列から構造体に読み戻したりできるようになる
 use serde::{Deserialize, Serialize};
 
-/// `<topic>/file/offer` のペイロード。「このファイルを送りたい」という申し出。
+/// `<topic>/file/offer/<宛先名>` のペイロード。「このファイルを送りたい」という申し出。
+///
+/// seqは、Sparkplug B（前回説明した産業IoT向けMQTT規約）の考え方を参考にした連番。
+/// このクライアントが何かをpublishするたびに1ずつ増える値で、受信側はこれを見て
+/// 「間の1通が届いていない（抜けている）」ことに気付けるようにする。
 #[derive(Serialize, Deserialize)]
 struct OfferMsg {
     id: String,
@@ -37,17 +41,21 @@ struct OfferMsg {
     to: String,
     filename: String,
     size: u64,
+    seq: u64,
 }
 
-/// `<topic>/file/ack` のペイロード。「ここ(host:port)に繋いで」という返事。
+/// `<topic>/file/ack/<宛先名>` のペイロード。「ここ(host:port)に繋いで」という返事。
 #[derive(Serialize, Deserialize)]
 struct AckMsg {
     id: String,
+    /// この返事を送っている（＝ファイルを受け取る）側の名前
+    from: String,
     host: String,
     port: u16,
+    seq: u64,
 }
 
-/// `<topic>/file/received` のペイロード。生TCP転送が終わった後の結果報告。
+/// `<topic>/file/received/<マイコン名>` のペイロード。生TCP転送が終わった後の結果報告。
 #[derive(Serialize, Deserialize)]
 struct ReceivedMsg {
     id: String,
@@ -55,6 +63,7 @@ struct ReceivedMsg {
     /// "ok" か "failed"
     status: String,
     size: u64,
+    seq: u64,
 }
 
 /// `<topic>/presence/<名前>` のペイロード。
@@ -62,20 +71,25 @@ struct ReceivedMsg {
 struct PresenceMsg {
     /// "online" か "offline"
     status: String,
+    seq: u64,
 }
 
 /// `<topic>/job/queue` のペイロード。全マイコンへの一斉配信ジョブ。
 #[derive(Serialize, Deserialize)]
 struct JobMsg {
     id: String,
+    /// このジョブを配信した（＝パソコン役の）名前
+    from: String,
     content: String,
+    seq: u64,
 }
 
-/// `<topic>/job/done` のペイロード。ジョブの完了報告。
+/// `<topic>/job/done/<マイコン名>` のペイロード。ジョブの完了報告。
 #[derive(Serialize, Deserialize)]
 struct DoneMsg {
     id: String,
     who: String,
+    seq: u64,
 }
 
 /// 送信申し出(id)ごとに「これから送るファイルのパス」を覚えておく辞書。
@@ -99,6 +113,90 @@ type InFlightState = Arc<Mutex<Option<InFlightJob>>>;
 
 /// ジョブを送ってから、完了報告が来ないマイコンを「エラー」と判断するまでの待ち時間
 const JOB_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 次に使うseq番号を発行するためのカウンタ。
+///
+/// 重要: **メッセージの種類（OFFERかJOBかなど）ごとに別々のSeqCounterを用意する**必要がある。
+/// 理由は、例えば`ACK`は「申し出た本人だけ」に届く専用トピックで、他の観測者には
+/// そもそも見えないメッセージだから。もし全種類で1つの共有カウンタを使うと、
+/// ACKの分だけ他の観測者から見て番号が「飛んで」見えてしまい、実際は何も欠落していないのに
+/// 誤って警告が出てしまう（実際にこの実装で一度その誤検知が起きた）。
+/// あるメッセージ種類を購読している人には、その種類のメッセージは必ず全部見えるはずなので、
+/// 種類ごとに分ければ正しく欠落を検知できる。
+type SeqCounter = Arc<Mutex<u64>>;
+
+/// 相手の名前ごとに「最後に見たseq番号」を覚えておく辞書。次に来たメッセージのseqと比べて、
+/// 1つ飛んでいたら「間の1通が抜けたかもしれない」と分かる。
+/// SeqCounterと同様、**メッセージの種類ごとに別々のSeqTrackerを使う**。
+type SeqTracker = Arc<Mutex<HashMap<String, u64>>>;
+
+/// SeqCounterから「次に使うseq番号」を1つ取り出し、内部のカウンタを1つ進める。
+fn next_seq(counter: &SeqCounter) -> u64 {
+    let mut n = counter.lock().unwrap();
+    let seq = *n;
+    *n += 1;
+    seq
+}
+
+/// 受信したメッセージのseq番号を確認し、直前に見た値から1つも増えていなければ
+/// （＝間の番号が抜けていれば）警告を表示する。呼び出す側は、メッセージの種類に対応する
+/// 専用のSeqTrackerを渡すこと（他の種類のトラッカーと混ぜて使わない）。
+///
+/// - 初めて見る名前の場合は比較のしようがないので、警告なしでそのまま記録するだけにする
+/// - is_birthがtrueのとき（presenceの"online"、Sparkplug BでいうBIRTH）は、再接続で
+///   カウンタが0から数え直されているのが正常なので、ここでも警告なしで記録し直す
+fn check_seq(from: &str, seq: u64, tracker: &SeqTracker, is_birth: bool) {
+    let mut last_seen = tracker.lock().unwrap();
+    if !is_birth {
+        if let Some(&last) = last_seen.get(from) {
+            if seq != last + 1 {
+                println!(
+                    "[system] 警告: {from}からのメッセージが抜けている可能性があります\
+                     （前回seq={last}, 今回seq={seq}）"
+                );
+            }
+        }
+    }
+    last_seen.insert(from.to_string(), seq);
+}
+
+/// メッセージ種類ごとのSeqCounter/SeqTrackerを1つにまとめた箱。
+/// 中身は全部Arc（参照カウント付きの共有ポインタ）なので、cloneしても中身は複製されず、
+/// 同じカウンタ・同じトラッカーを指したまま増える（スレッド間で共有するのに丁度いい）。
+#[derive(Clone)]
+struct SeqState {
+    offer_counter: SeqCounter,
+    offer_tracker: SeqTracker,
+    ack_counter: SeqCounter,
+    ack_tracker: SeqTracker,
+    received_counter: SeqCounter,
+    received_tracker: SeqTracker,
+    presence_counter: SeqCounter,
+    presence_tracker: SeqTracker,
+    job_counter: SeqCounter,
+    job_tracker: SeqTracker,
+    done_counter: SeqCounter,
+    done_tracker: SeqTracker,
+}
+
+impl SeqState {
+    fn new() -> Self {
+        SeqState {
+            offer_counter: Arc::new(Mutex::new(0)),
+            offer_tracker: Arc::new(Mutex::new(HashMap::new())),
+            ack_counter: Arc::new(Mutex::new(0)),
+            ack_tracker: Arc::new(Mutex::new(HashMap::new())),
+            received_counter: Arc::new(Mutex::new(0)),
+            received_tracker: Arc::new(Mutex::new(HashMap::new())),
+            presence_counter: Arc::new(Mutex::new(0)),
+            presence_tracker: Arc::new(Mutex::new(HashMap::new())),
+            job_counter: Arc::new(Mutex::new(0)),
+            job_tracker: Arc::new(Mutex::new(HashMap::new())),
+            done_counter: Arc::new(Mutex::new(0)),
+            done_tracker: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+}
 
 /// 入力行の先頭にある `/qos0 ` `/qos1 ` `/qos2 ` プレフィックスを読み取り、
 /// (QoS, プレフィックスを除いた本文) を返す。プレフィックスが無ければQoS1（AtLeastOnce）扱い。
@@ -173,10 +271,18 @@ fn send_file_to(host: &str, port: u16, id: &str, path: &Path) -> io::Result<()> 
 /// 接続が来るたびに別スレッドを立てて受信処理をし、このループ自体は次の接続を待ち続ける。
 /// これにより、何度でも（複数回・複数相手から）ファイルを受け取れる「常時待ち受け」になる。
 ///
-/// client・my_name・received_topicは、受信結果（成功/失敗）をMQTTで報告するために使う。
+/// client・my_name・received_topic_prefixは、受信結果（成功/失敗）をMQTTで報告するために使う。
 /// バルクデータ（ファイルの中身）はMQTTの外（生TCP）でやり取りしているので、この報告が無いと
 /// MQTTだけを見ている側からは「実際に届いたかどうか」が一切分からなくなってしまう。
-fn run_file_listener(listener: TcpListener, client: Client, my_name: String, received_topic: String) {
+/// 報告先トピックは`<received_topic_prefix>/<my_name>`（例: "chat/file/received/device1"）。
+fn run_file_listener(
+    listener: TcpListener,
+    client: Client,
+    my_name: String,
+    received_topic_prefix: String,
+    seq: SeqState,
+) {
+    let received_topic = format!("{received_topic_prefix}/{my_name}");
     // listener.incoming() は「接続が来るたびに1つずつ返してくれる、終わりのないイテレータ」
     for stream in listener.incoming() {
         let stream = match stream {
@@ -189,12 +295,15 @@ fn run_file_listener(listener: TcpListener, client: Client, my_name: String, rec
         let client = client.clone();
         let my_name = my_name.clone();
         let received_topic = received_topic.clone();
+        let seq = seq.clone();
         // 1件の受信処理に時間がかかっても次の接続を待てるように、別スレッドに任せる
-        thread::spawn(move || match receive_one_file(stream, &my_name, &client, &received_topic) {
-            Ok((id, filename, size, path)) => {
-                println!("[system] ジョブ{id}: 受信完了 {filename} ({size} bytes) -> {}", path.display());
+        thread::spawn(move || {
+            match receive_one_file(stream, &my_name, &client, &received_topic, &seq.received_counter) {
+                Ok((id, filename, size, path)) => {
+                    println!("[system] ジョブ{id}: 受信完了 {filename} ({size} bytes) -> {}", path.display());
+                }
+                Err(e) => eprintln!("[system] ファイル受信エラー: {e}"),
             }
-            Err(e) => eprintln!("[system] ファイル受信エラー: {e}"),
         });
     }
 }
@@ -210,6 +319,7 @@ fn receive_one_file(
     my_name: &str,
     client: &Client,
     received_topic: &str,
+    seq_counter: &SeqCounter,
 ) -> io::Result<(String, String, u64, PathBuf)> {
     // idの長さ(4バイト)と中身を読み取る
     let mut id_len_buf = [0u8; 4];
@@ -227,6 +337,7 @@ fn receive_one_file(
             who: my_name.to_string(),
             status: status.to_string(),
             size,
+            seq: next_seq(seq_counter),
         };
         // serde_json::to_vec: 構造体をJSONのバイト列に変換する
         let payload = serde_json::to_vec(&msg).unwrap();
@@ -289,18 +400,17 @@ fn handle_offer(
     payload: &str,
     my_name: &str,
     client: &Client,
-    ack_topic: &str,
+    ack_topic_prefix: &str,
     broker_host: &str,
     broker_port: u16,
     listen_port: Option<u16>,
+    seq: &SeqState,
 ) {
     // serde_json::from_str: JSON文字列を構造体に変換する。形が合わない・壊れたJSONならErrになる
     let Ok(offer) = serde_json::from_str::<OfferMsg>(payload) else {
         return;
     };
-    if offer.to != my_name {
-        return; // 自分宛てのオファーでなければ何もしない
-    }
+    check_seq(&offer.from, offer.seq, &seq.offer_tracker, false);
 
     let Some(port) = listen_port else {
         println!(
@@ -318,19 +428,28 @@ fn handle_offer(
         offer.from, offer.filename, offer.size
     );
 
-    // ここに繋いでほしい、という返事をMQTTで送り返す
-    let ack = AckMsg { id: offer.id, host, port };
+    // 返事は申し出てきた相手(offer.from)専用のトピックへ送り返す
+    // （例: ack_topic_prefixが"chat/file/ack"、offer.fromが"pc1"なら"chat/file/ack/pc1"）
+    let ack_topic = format!("{ack_topic_prefix}/{}", offer.from);
+    let ack = AckMsg {
+        id: offer.id,
+        from: my_name.to_string(),
+        host,
+        port,
+        seq: next_seq(&seq.ack_counter),
+    };
     let payload = serde_json::to_vec(&ack).unwrap();
-    client.publish(ack_topic, QoS::AtLeastOnce, false, payload).unwrap();
+    client.publish(&ack_topic, QoS::AtLeastOnce, false, payload).unwrap();
 }
 
 /// `AckMsg`（JSON）の返事を受け取ったときの処理。
 /// 自分が送った申し出(id)に対する返事だった場合、そのidに対応するファイルを
 /// 教えてもらったhost:portへ実際に送信する。
-fn handle_ack(payload: &str, pending_offers: &PendingOffers) {
+fn handle_ack(payload: &str, pending_offers: &PendingOffers, seq: &SeqState) {
     let Ok(ack) = serde_json::from_str::<AckMsg>(payload) else {
         return;
     };
+    check_seq(&ack.from, ack.seq, &seq.ack_tracker, false);
 
     // remove() は「辞書から取り出して削除する」。自分が送った申し出でなければNoneが返り何もしない
     let Some(path) = pending_offers.lock().unwrap().remove(&ack.id) else {
@@ -351,10 +470,11 @@ fn handle_ack(payload: &str, pending_offers: &PendingOffers) {
 /// `ReceivedMsg`（JSON）の、生TCPでのファイル転送結果の報告を受け取ったときの処理。
 /// ここではMQTT上に流れてきた結果をそのまま表示するだけだが、実運用ではここで
 /// 「失敗した分だけ再送する」といった処理を足していくことになる。
-fn handle_file_received(payload: &str) {
+fn handle_file_received(payload: &str, seq: &SeqState) {
     let Ok(received) = serde_json::from_str::<ReceivedMsg>(payload) else {
         return;
     };
+    check_seq(&received.who, received.seq, &seq.received_tracker, false);
 
     if received.status == "ok" {
         println!(
@@ -368,7 +488,13 @@ fn handle_file_received(payload: &str) {
 
 /// presenceトピック（`<topic>/presence/<名前>`）への`PresenceMsg`（JSON）通知を受け取ったときの処理。
 /// statusが"online"ならその名前を名簿に追加、それ以外（LWTによる"offline"）なら名簿から外す。
-fn handle_presence(publish_topic: &str, payload: &str, presence_prefix: &str, roster: &Roster) {
+fn handle_presence(
+    publish_topic: &str,
+    payload: &str,
+    presence_prefix: &str,
+    roster: &Roster,
+    seq: &SeqState,
+) {
     // 例: presence_prefixが"chat/presence"なら、"chat/presence/device1" から "device1" を取り出す
     let Some(who) = publish_topic.strip_prefix(presence_prefix).and_then(|s| s.strip_prefix('/'))
     else {
@@ -377,6 +503,9 @@ fn handle_presence(publish_topic: &str, payload: &str, presence_prefix: &str, ro
     let Ok(presence) = serde_json::from_str::<PresenceMsg>(payload) else {
         return;
     };
+    // "online"はSparkplug BでいうBIRTH相当（再接続でseqが0から数え直される）ので、
+    // 抜け検知をリセットするためis_birth=trueで呼ぶ
+    check_seq(who, presence.seq, &seq.presence_tracker, presence.status == "online");
 
     let mut roster = roster.lock().unwrap();
     if presence.status == "online" {
@@ -391,22 +520,25 @@ fn handle_presence(publish_topic: &str, payload: &str, presence_prefix: &str, ro
 /// `JobMsg`（JSON）のジョブ配信メッセージを受け取ったときの処理（マイコン役だけが反応する）。
 /// 実際の機器では「内容」に応じて印刷やモーター制御などをするところだが、このサンプルでは
 /// 少し待つ(sleep)ことで「処理に時間がかかる」ことだけを再現し、終わったら完了報告を返す。
-fn handle_job(payload: &str, my_name: &str, client: &Client, job_done_topic: &str) {
+fn handle_job(payload: &str, my_name: &str, client: &Client, job_done_topic_prefix: &str, seq: &SeqState) {
     let Ok(job) = serde_json::from_str::<JobMsg>(payload) else {
         return;
     };
+    check_seq(&job.from, job.seq, &seq.job_tracker, false);
 
     println!("[system] ジョブ{}を受信: {}（処理中…）", job.id, job.content);
 
     let my_name = my_name.to_string();
     let client = client.clone();
-    let job_done_topic = job_done_topic.to_string();
+    // 完了報告は自分専用のトピックへ送る（例: "chat/job/done/device1"）
+    let job_done_topic = format!("{job_done_topic_prefix}/{my_name}");
+    let done_counter = Arc::clone(&seq.done_counter);
 
     // 処理は時間がかかりうるので別スレッドに任せ、その間もMQTTの受信ループは止めない
     thread::spawn(move || {
         thread::sleep(Duration::from_secs(1)); // ここが実際の印刷・処理にあたる部分（今はダミー）
         println!("[system] ジョブ{}の処理が完了しました", job.id);
-        let done = DoneMsg { id: job.id, who: my_name };
+        let done = DoneMsg { id: job.id, who: my_name, seq: next_seq(&done_counter) };
         let payload = serde_json::to_vec(&done).unwrap();
         client.publish(&job_done_topic, QoS::AtLeastOnce, false, payload).unwrap();
     });
@@ -415,10 +547,11 @@ fn handle_job(payload: &str, my_name: &str, client: &Client, job_done_topic: &st
 /// `DoneMsg`（JSON）の完了報告を受け取ったときの処理。
 /// 自分が今配信中のジョブ(id)への報告であれば、/jobコマンドを実行して待っているスレッドへ、
 /// チャンネル(tx)を通じて「この名前は完了した」と伝える。
-fn handle_job_done(payload: &str, inflight: &InFlightState) {
+fn handle_job_done(payload: &str, inflight: &InFlightState, seq: &SeqState) {
     let Ok(done) = serde_json::from_str::<DoneMsg>(payload) else {
         return;
     };
+    check_seq(&done.who, done.seq, &seq.done_tracker, false);
 
     let guard = inflight.lock().unwrap();
     if let Some(job) = guard.as_ref() {
@@ -449,18 +582,33 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .filter(|&p: &u16| p != 0);
 
-    // ファイル送信の申し出(offer)と、その返事(ack)専用のトピックを、チャットのトピックから派生させる
-    // 例: topicが"chat"なら "chat/file/offer" と "chat/file/ack"
-    let offer_topic = format!("{topic}/file/offer");
-    let ack_topic = format!("{topic}/file/ack");
-    // 生TCPでのファイル転送が終わった後、マイコン側が結果(成功/失敗)を報告するためのトピック。
+    // ファイル送信・presence・ジョブ関連のトピックを、チャットのトピックから派生させる。
+    //
+    // Sparkplug B（前々回説明した産業IoT向けMQTT規約）を参考に、「宛先や報告元の名前を
+    // トピックの中に組み込む」構造にしている。例えばOFFERなら"chat/file/offer/<宛先名>"、
+    // presenceは元々"chat/presence/<名前>"だった。こうしておくと、
+    //   - 受け取る側は「自分宛てのトピックだけ」を購読すればよく、関係ないOFFERを
+    //     ペイロードの中身を見て捨てる、という無駄が無くなる
+    //   - 観測する側（パソコン役やログ収集）は"chat/file/received/+"のようにワイルドカードで
+    //     購読すれば、誰から来たものかトピック名だけで分かる
+    // という利点がある。
+    let offer_prefix = format!("{topic}/file/offer"); // 個々には "chat/file/offer/<宛先名>"
+    let my_offer_topic = format!("{offer_prefix}/{name}");
+    let ack_prefix = format!("{topic}/file/ack"); // 個々には "chat/file/ack/<申し出た人の名前>"
+    let my_ack_topic = format!("{ack_prefix}/{name}");
+    // 生TCPでのファイル転送が終わった後、マイコン側が結果(成功/失敗)を報告するためのトピック接頭辞。
     // これがMQTT上にあることで、MQTTだけを見ている人にも転送結果が分かるようになる
-    let file_received_topic = format!("{topic}/file/received");
-    // マイコンの在室確認(presence)、ジョブ配信、ジョブ完了報告用のトピック
+    let received_prefix = format!("{topic}/file/received"); // 個々には "chat/file/received/<マイコン名>"
+    // マイコンの在室確認(presence)用のトピック接頭辞
     let presence_prefix = format!("{topic}/presence"); // 個々のpresenceトピックは "chat/presence/<名前>" になる
     let my_presence_topic = format!("{presence_prefix}/{name}");
+    // ジョブは全マイコンへの一斉配信なので宛先を絞らずブローカーへそのままpublishする
     let job_topic = format!("{topic}/job/queue");
-    let job_done_topic = format!("{topic}/job/done");
+    // ジョブの完了報告は、報告してきたマイコンの名前をトピックに含める
+    let job_done_prefix = format!("{topic}/job/done"); // 個々には "chat/job/done/<マイコン名>"
+
+    // メッセージ種類ごとのseqカウンタ・トラッカーをまとめて用意する
+    let seq = SeqState::new();
 
     // --- ② MQTT接続の設定を作る ---
     let mut mqttoptions = MqttOptions::new(&name, host.clone(), port);
@@ -472,7 +620,9 @@ fn main() {
     // retain=trueにしているので、後からpresence topicをsubscribeしたクライアントにも
     // 「今の状態」がすぐ届く。
     if listen_port.is_some() {
-        let offline = serde_json::to_vec(&PresenceMsg { status: "offline".to_string() }).unwrap();
+        // 遺言メッセージのseqは0固定でよい（実際のカウンタはまだ動き出していない、DEATHは
+        // 「一番最後」の1通なので後続との抜け比較は発生しない）
+        let offline = serde_json::to_vec(&PresenceMsg { status: "offline".to_string(), seq: 0 }).unwrap();
         mqttoptions.set_last_will(LastWill::new(&my_presence_topic, offline, QoS::AtLeastOnce, true));
     }
 
@@ -480,25 +630,33 @@ fn main() {
     let (client, mut connection) = Client::new(mqttoptions, 10);
 
     // チャット用トピックに加えて、ファイル送信の申し出・返事、presence(在室確認)、
-    // ジョブ配信・完了報告のトピックも購読する
-    // "+" は1階層ぶんのワイルドカードなので、"chat/presence/+" で全マイコン分のpresenceをまとめて拾える
+    // ジョブ配信・完了報告のトピックも購読する。
+    // 自分宛てのOFFER/ACKは自分の名前が付いたトピックだけを購読すればよい。
+    // "+" は1階層ぶんのワイルドカードなので、"chat/file/received/+" で全マイコン分の結果を
+    // まとめて拾える（presenceも元々同じ考え方で"chat/presence/+"にしている）。
     client.subscribe(&topic, QoS::AtMostOnce).unwrap();
-    client.subscribe(&offer_topic, QoS::AtLeastOnce).unwrap();
-    client.subscribe(&ack_topic, QoS::AtLeastOnce).unwrap();
+    client.subscribe(&my_offer_topic, QoS::AtLeastOnce).unwrap();
+    client.subscribe(&my_ack_topic, QoS::AtLeastOnce).unwrap();
     client
-        .subscribe(&file_received_topic, QoS::AtLeastOnce)
+        .subscribe(format!("{received_prefix}/+"), QoS::AtLeastOnce)
         .unwrap();
     client
         .subscribe(format!("{presence_prefix}/+"), QoS::AtLeastOnce)
         .unwrap();
     client.subscribe(&job_topic, QoS::AtLeastOnce).unwrap();
-    client.subscribe(&job_done_topic, QoS::AtLeastOnce).unwrap();
+    client
+        .subscribe(format!("{job_done_prefix}/+"), QoS::AtLeastOnce)
+        .unwrap();
 
     // マイコン役は、接続できたらすぐ自分のpresenceトピックに"online"をretain付きでpublishする。
     // retain=trueにしておくことで、後からブローカーに繋いだ（=あとから/jobを実行する）パソコン役にも、
     // 「このマイコンは今オンラインだ」という状態がすぐに伝わる。
     if listen_port.is_some() {
-        let online = serde_json::to_vec(&PresenceMsg { status: "online".to_string() }).unwrap();
+        let online = serde_json::to_vec(&PresenceMsg {
+            status: "online".to_string(),
+            seq: next_seq(&seq.presence_counter),
+        })
+        .unwrap();
         client.publish(&my_presence_topic, QoS::AtLeastOnce, true, online).unwrap();
     }
 
@@ -517,8 +675,9 @@ fn main() {
         println!("[system] {port}番ポートで常時待ち受けを開始しました（マイコン役）");
         let client = client.clone();
         let name = name.clone();
-        let file_received_topic = file_received_topic.clone();
-        thread::spawn(move || run_file_listener(listener, client, name, file_received_topic));
+        let received_prefix = received_prefix.clone();
+        let seq = seq.clone();
+        thread::spawn(move || run_file_listener(listener, client, name, received_prefix, seq));
     }
 
     // --- ④ 別スレッドを立てて「キーボード入力 → メッセージ送信」を担当させる ---
@@ -526,11 +685,12 @@ fn main() {
         let client = client.clone();
         let name = name.clone();
         let topic = topic.clone();
-        let offer_topic = offer_topic.clone();
+        let offer_prefix = offer_prefix.clone();
         let pending_offers = Arc::clone(&pending_offers);
         let job_topic = job_topic.clone();
         let roster = Arc::clone(&roster);
         let inflight = Arc::clone(&inflight);
+        let seq = seq.clone();
 
         thread::spawn(move || {
             let stdin = io::stdin();
@@ -572,7 +732,12 @@ fn main() {
                     let (tx, rx) = mpsc::channel::<String>();
                     *inflight.lock().unwrap() = Some(InFlightJob { id: id.clone(), tx });
 
-                    let job = JobMsg { id: id.clone(), content: content.to_string() };
+                    let job = JobMsg {
+                        id: id.clone(),
+                        from: name.clone(),
+                        content: content.to_string(),
+                        seq: next_seq(&seq.job_counter),
+                    };
                     let payload = serde_json::to_vec(&job).unwrap();
                     client.publish(&job_topic, QoS::AtLeastOnce, false, payload).unwrap();
                     println!(
@@ -642,7 +807,10 @@ fn main() {
                         to: to.to_string(),
                         filename: filename.clone(),
                         size: metadata.len(),
+                        seq: next_seq(&seq.offer_counter),
                     };
+                    // 宛先の名前を組み込んだトピック（例: "chat/file/offer/device1"）へpublishする
+                    let offer_topic = format!("{offer_prefix}/{to}");
                     let payload = serde_json::to_vec(&offer).unwrap();
                     client.publish(&offer_topic, QoS::AtLeastOnce, false, payload).unwrap();
                     println!(
@@ -678,22 +846,22 @@ fn main() {
             Ok(Event::Incoming(Packet::Publish(publish))) => {
                 let text = String::from_utf8_lossy(&publish.payload);
 
-                if publish.topic == offer_topic {
-                    handle_offer(&text, &name, &client, &ack_topic, &host, port, listen_port);
-                } else if publish.topic == ack_topic {
-                    handle_ack(&text, &pending_offers);
-                } else if publish.topic == file_received_topic {
-                    handle_file_received(&text);
+                if publish.topic == my_offer_topic {
+                    handle_offer(&text, &name, &client, &ack_prefix, &host, port, listen_port, &seq);
+                } else if publish.topic == my_ack_topic {
+                    handle_ack(&text, &pending_offers, &seq);
+                } else if publish.topic.starts_with(&received_prefix) {
+                    handle_file_received(&text, &seq);
                 } else if publish.topic.starts_with(&presence_prefix) {
-                    handle_presence(&publish.topic, &text, &presence_prefix, &roster);
+                    handle_presence(&publish.topic, &text, &presence_prefix, &roster, &seq);
                 } else if publish.topic == job_topic {
                     // ジョブに反応して実際に処理をするのはマイコン役（listen_portを指定している側）だけ。
                     // パソコン役はジョブを配る側なので、自分宛ての配信を受け取っても無視する。
                     if listen_port.is_some() {
-                        handle_job(&text, &name, &client, &job_done_topic);
+                        handle_job(&text, &name, &client, &job_done_prefix, &seq);
                     }
-                } else if publish.topic == job_done_topic {
-                    handle_job_done(&text, &inflight);
+                } else if publish.topic.starts_with(&job_done_prefix) {
+                    handle_job_done(&text, &inflight, &seq);
                 } else if publish.topic == topic {
                     println!("{text}");
                 }
