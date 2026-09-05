@@ -168,13 +168,18 @@ MQTTの正式な産業IoT向け規約であるSparkplug Bをそのまま採用�
 `OFFER`・`ACK`・`RECEIVED`・`presence`・`JOB完了報告`は、すべて`<種別のトピック>/<関係する名前>`
 という形にしています（`JOB`本体だけは全マイコン向けの一斉配信なので例外的に宛先を持ちません）。
 
-| トピック | 名前の意味 |
-|---|---|
-| `<topic>/file/offer/<宛先名>` | ファイルを受け取る側（マイコン） |
-| `<topic>/file/ack/<申し出た人の名前>` | 申し出た（送信する）側（パソコン） |
-| `<topic>/file/received/<マイコン名>` | 受信結果を報告するマイコン |
-| `<topic>/presence/<名前>` | 在室確認するマイコン |
-| `<topic>/job/done/<マイコン名>` | ジョブ完了を報告するマイコン |
+| トピック | 名前の意味 | ペイロード（JSON） |
+|---|---|---|
+| `<topic>/file/offer/<宛先名>` | ファイルを受け取る側（マイコン） | `{"id", "from", "to", "filename", "size", "seq"}` |
+| `<topic>/file/ack/<申し出た人の名前>` | 申し出た（送信する）側（パソコン） | `{"id", "from", "host", "port", "seq"}` |
+| `<topic>/file/received/<マイコン名>` | 受信結果を報告するマイコン | `{"id", "who", "status", "size", "seq"}`（`status`は`"ok"`か`"failed"`） |
+| `<topic>/presence/<名前>` | 在室確認するマイコン | `{"status", "seq"}`（`status`は`"online"`か`"offline"`） |
+| `<topic>/job/queue` | なし（全マイコンへの一斉配信） | `{"id", "from", "content", "seq"}` |
+| `<topic>/job/done/<マイコン名>` | ジョブ完了を報告するマイコン | `{"id", "who", "seq"}` |
+
+各フィールドの型や意味は`src/messages.rs`（`OfferMsg`・`AckMsg`・`ReceivedMsg`・`PresenceMsg`・
+`JobMsg`・`DoneMsg`構造体）にコメント付きで定義されています。`cargo doc`で生成したドキュメントの
+`messages`モジュールでも同じ内容が見られます。
 
 受け取る側は自分に関係あるトピックだけを購読すればよく、無関係なOFFERをペイロードの中身を
 見てから捨てる、という無駄がありません。一方で観測したい側（パソコン役）は
