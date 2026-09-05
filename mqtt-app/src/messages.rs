@@ -16,22 +16,34 @@
 //! 全メンバがpublicですが、Rustの`struct`はC++の`class`同様デフォルトが非公開（private）
 //! なので、外から読み書きしたいフィールドには明示的に`pub`を付ける必要があります。
 //!
-//! ## トピックとメッセージ種別の対応（Sparkplug Bを参考にしたCMD/DATAの分け方）
+//! ## トピックとメッセージ種別の対応（Sparkplug Bのmessage_type名をそのまま使用）
 //!
-//! このプロジェクトのトピックは、`<topic>/cmd/<マイコンの名前>`と`<topic>/data/<マイコンの
-//! 名前>`の2種類が中心です（詳しくは`mqtt-app`のREADMEを参照）。1つのトピックに
-//! 複数種類のメッセージが乗るので、「これはどの種類のメッセージか」をJSON自身に
-//! `"type"`フィールドとして持たせています。それを表すのが下の`CmdMsg`・`DataMsg`という
-//! 2つの`enum`です。
+//! このプロジェクトのトピックは`<topic>/<message_type>/<マイコンの名前>`という形で、
+//! `message_type`にはSparkplug B本家の名前をそのまま使っています（詳しくは`mqtt-app`の
+//! READMEを参照）。
+//!
+//! - `NBIRTH` … マイコンが接続した（起動）ことの通知
+//! - `NDEATH` … マイコンが切断した（終了）ことの通知（Last Willで代理publishされる）
+//! - `NDATA`  … マイコンからの、動作中の継続的な報告（ACK・受信結果・ジョブ完了など）
+//! - `NCMD`   … ホスト（パソコン）からマイコンへの命令（ファイル送信の申し出・ジョブ配信）
+//!
+//! `NBIRTH`/`NDEATH`はトピック自体が意味（オンライン/オフライン）を語るので、ペイロードは
+//! `seq`だけの[`BirthDeathMsg`]です。一方`NDATA`/`NCMD`は複数種類のメッセージが同じ
+//! トピックに乗るので、JSON自身に`"type"`フィールドを持たせて中身を区別しています。
+//! それを表すのが下の`CmdMsg`・`DataMsg`という2つの`enum`です。
 
 use serde::{Deserialize, Serialize};
 
-/// `<topic>/cmd/<宛先の名前>`に乗る、ホスト（パソコン）から特定/全マイコンへの命令。
+/// `NCMD`（`<topic>/NCMD/<宛先の名前>`）に乗る、ホスト（パソコン）から特定/全マイコンへの命令。
 ///
 /// `enum`の各バリアント（`FileOffer`・`Job`）は、中に別々の型（`OfferMsg`・`JobMsg`）の
 /// データを持てます。これはC++でいう`std::variant<OfferMsg, JobMsg>`にかなり近いもので、
 /// 「今どちらが入っているか」を`match`で必ず全パターン確認させられる点も同じです
 /// （C++の`std::variant`を`std::visit`で扱うときの「全パターン網羅を強制される」感覚です）。
+///
+/// これはSparkplug B本家の`NCMD`が「具体的な命令の種類ごとにトピックを分けず、
+/// ペイロード側（本家ではメトリクス、本プロジェクトでは`"type"`タグ）で区別する」という
+/// 設計をそのまま踏襲したものです。
 ///
 /// `#[serde(tag = "type", rename_all = "snake_case")]`は、JSONにしたときに
 /// `{"type": "file_offer", ...}`や`{"type": "job", ...}`のように、バリアント名を
@@ -44,21 +56,33 @@ pub enum CmdMsg {
     Job(JobMsg),
 }
 
-/// `<topic>/data/<自分の名前>`に乗る、マイコン自身が自分について報告するメッセージ。
-/// ホスト側は`<topic>/data/+`のようにワイルドカード購読して、全マイコンの報告を
+/// `NDATA`（`<topic>/NDATA/<自分の名前>`）に乗る、マイコン自身の動作中の継続的な報告。
+/// ホスト側は`<topic>/NDATA/+`のようにワイルドカード購読して、全マイコンの報告を
 /// まとめて受け取る（`CmdMsg`と同様、中身の判別は`"type"`フィールドで行う）。
+///
+/// 接続・切断そのものの通知は`NDATA`ではなく[`BirthDeathMsg`]（`NBIRTH`/`NDEATH`）が
+/// 別途担当するので、ここには含まれない。
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DataMsg {
-    Presence(PresenceMsg),
     FileAck(AckMsg),
     FileReceived(ReceivedMsg),
     JobDone(DoneMsg),
 }
 
+/// `NBIRTH`・`NDEATH`の中身。
+///
+/// オンラインかオフラインかは**トピック自体**（`NBIRTH`か`NDEATH`か）が表しているので、
+/// ペイロードには持たせていない（トピックとペイロードで同じ情報を重複させない、という
+/// このプロジェクト全体の方針に合わせている）。残るのは欠落検知用の`seq`だけ。
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BirthDeathMsg {
+    pub seq: u64,
+}
+
 /// `CmdMsg::FileOffer`の中身。「このファイルを送りたい」という申し出。
 ///
-/// 送り先のマイコン名はトピック（`<topic>/cmd/<宛先>`）自体が表しているので、
+/// 送り先のマイコン名はトピック（`<topic>/NCMD/<宛先>`）自体が表しているので、
 /// ペイロードには持たせていない（送り主である`from`＝パソコン役の名前だけを持つ）。
 ///
 /// seqは、Sparkplug B（産業IoT向けMQTT規約）の考え方を参考にした連番。
@@ -73,7 +97,7 @@ pub struct OfferMsg {
     pub seq: u64,
 }
 
-/// `CmdMsg::Job`の中身。`<topic>/cmd/all`に乗る、全マイコンへの一斉配信ジョブ。
+/// `CmdMsg::Job`の中身。`<topic>/NCMD/all`に乗る、全マイコンへの一斉配信ジョブ。
 /// 「全員」という宛先はトピック自体（`all`という特別な名前）が表している。
 #[derive(Serialize, Deserialize, Debug)]
 pub struct JobMsg {
@@ -87,7 +111,7 @@ pub struct JobMsg {
 /// `DataMsg::FileAck`の中身。「ここ(host:port)に繋いで」という返事。
 ///
 /// これを送っている（＝ファイルを受け取る）マイコンの名前はトピック
-/// （`<topic>/data/<自分の名前>`）自体が表しているので、ペイロードには持たせていない。
+/// （`<topic>/NDATA/<自分の名前>`）自体が表しているので、ペイロードには持たせていない。
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AckMsg {
     pub id: String,
@@ -106,17 +130,21 @@ pub struct ReceivedMsg {
     pub seq: u64,
 }
 
-/// `DataMsg::Presence`の中身。
-#[derive(Serialize, Deserialize, Debug)]
-pub struct PresenceMsg {
-    /// "online" か "offline"
-    pub status: String,
-    pub seq: u64,
-}
-
 /// `DataMsg::JobDone`の中身。ジョブの完了報告。
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DoneMsg {
     pub id: String,
+    pub seq: u64,
+}
+
+/// `<topic>/STATE/<パソコンの名前>`の中身（Sparkplug Bの`STATE`に相当）。
+///
+/// マイコンと違い、パソコン（ホストアプリケーション）はオンライン/オフラインの
+/// 2状態しか無く、`NBIRTH`のような詳しい起動証明書は本家でも作らないので、
+/// トピックを分けず`status`フィールド1つで表す、という本家と同じ簡易な作りにしている。
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PresenceMsg {
+    /// "online" か "offline"
+    pub status: String,
     pub seq: u64,
 }

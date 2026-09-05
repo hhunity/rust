@@ -22,13 +22,13 @@ use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 
 use mqtt_app::device::{handle_job, handle_offer};
 use mqtt_app::file_transfer::run_file_listener;
-use mqtt_app::messages::{CmdMsg, DataMsg, PresenceMsg};
+use mqtt_app::messages::{BirthDeathMsg, CmdMsg, PresenceMsg};
 use mqtt_app::seq::{check_seq, next_seq, DeviceSeqState};
 
-/// 受信したpublishのトピックが `<topic>/state/<パソコンの名前>` の形なら、
+/// 受信したpublishのトピックが `<topic>/STATE/<パソコンの名前>` の形なら、
 /// その`<パソコンの名前>`部分を取り出す。一致しなければ`None`。
 fn parse_state_topic<'a>(publish_topic: &'a str, topic: &str) -> Option<&'a str> {
-    publish_topic.strip_prefix(topic)?.strip_prefix("/state/")
+    publish_topic.strip_prefix(topic)?.strip_prefix("/STATE/")
 }
 
 fn main() {
@@ -56,19 +56,22 @@ fn main() {
     let port: u16 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1883);
     let topic = args.next().unwrap_or_else(|| "chat".to_string());
 
-    // このマイコンが関わるトピックは3つ。
-    //   - cmd_topic      … ホスト（パソコン）から自分だけに向けたコマンド（OFFER）
-    //   - all_cmd_topic  … 全マイコンへの一斉配信コマンド（JOB）
-    //   - data_topic     … 自分から報告する側（presence・ACK・RECEIVED・DONEをまとめて1本）
-    // Sparkplug B本家（`spBv1.0/<group_id>/<message_type>/<edge_node_id>`）に倣い、
-    // 種別(cmd/data)を名前より先に置く順番にしている。名前は常に「そのトピックが
-    // どのマイコンのものか」だけを表す（詳しくはREADME参照）。
-    let cmd_topic = format!("{topic}/cmd/{name}");
-    let all_cmd_topic = format!("{topic}/cmd/all");
-    let data_topic = format!("{topic}/data/{name}");
-    // パソコン（ホストアプリケーション）自身の生死を知らせるstateトピックは、
+    // このマイコンが関わるトピックは5つ。Sparkplug B本家のmessage_type名
+    // （`spBv1.0/<group_id>/<message_type>/<edge_node_id>`）をそのまま使っている。
+    //   - cmd_topic      … ホスト（パソコン）から自分だけに向けた命令（NCMD）。中身はOFFER
+    //   - all_cmd_topic  … 全マイコンへの一斉配信命令（NCMD、宛先名は特別な"all"）。中身はJOB
+    //   - birth_topic    … 自分の接続通知（NBIRTH）。起動時に1回だけretain publishする
+    //   - death_topic    … 自分の切断通知（NDEATH）。Last Willとしてあらかじめ登録しておく
+    //   - data_topic     … 自分からの継続的な報告（NDATA）。ACK・RECEIVED・DONEをまとめて1本
+    // 名前は常に「そのトピックがどのマイコンのものか」だけを表す（詳しくはREADME参照）。
+    let cmd_topic = format!("{topic}/NCMD/{name}");
+    let all_cmd_topic = format!("{topic}/NCMD/all");
+    let birth_topic = format!("{topic}/NBIRTH/{name}");
+    let death_topic = format!("{topic}/NDEATH/{name}");
+    let data_topic = format!("{topic}/NDATA/{name}");
+    // パソコン（ホストアプリケーション）自身の生死を知らせるSTATEトピックは、
     // 複数のパソコンがいる可能性もあるのでワイルドカードでまとめて購読する。
-    let state_wildcard = format!("{topic}/state/+");
+    let state_wildcard = format!("{topic}/STATE/+");
 
     // このマイコンが送るメッセージ全種類ぶんのseqカウンタ・トラッカーをまとめて用意する。
     let seq = DeviceSeqState::new();
@@ -77,30 +80,26 @@ fn main() {
     let mut mqttoptions = MqttOptions::new(&name, host.clone(), port);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
 
-    // 自分のdataトピックにLast Will（異常切断時に代わりにブローカーがpublishしてくれる
+    // 自分のNDEATHトピックにLast Will（異常切断時に代わりにブローカーがpublishしてくれる
     // 遺言メッセージ）を登録しておく。こうしておくと、電源断や通信断など「さようなら」を
-    // 言えずに落ちた場合でも、ブローカーが自動で"offline"を配ってくれる。
-    // retain=trueにしているので、後からdataトピックをワイルドカード購読したパソコン役にも
-    // 「今の状態」がすぐ届く。
-    let offline = serde_json::to_vec(&DataMsg::Presence(PresenceMsg { status: "offline".to_string(), seq: 0 })).unwrap();
-    mqttoptions.set_last_will(LastWill::new(&data_topic, offline, QoS::AtLeastOnce, true));
+    // 言えずに落ちた場合でも、ブローカーが自動でNDEATHを配ってくれる。
+    // retain=trueにしているので、後からNDEATHをワイルドカード購読したパソコン役にも
+    // 「切断した」という事実がすぐ届く。
+    let death = serde_json::to_vec(&BirthDeathMsg { seq: 0 }).unwrap();
+    mqttoptions.set_last_will(LastWill::new(&death_topic, death, QoS::AtLeastOnce, true));
 
     // --- ③ 実際にMQTTブローカー（サーバー）へ接続する ---
     let (client, mut connection) = Client::new(mqttoptions, 10);
 
-    // チャット用トピックに加えて、自分宛てのcmdと、全マイコン向けのcmdを購読する
+    // チャット用トピックに加えて、自分宛てのNCMDと、全マイコン向けのNCMDを購読する
     client.subscribe(&topic, QoS::AtMostOnce).unwrap();
     client.subscribe(&cmd_topic, QoS::AtLeastOnce).unwrap();
     client.subscribe(&all_cmd_topic, QoS::AtLeastOnce).unwrap();
     client.subscribe(&state_wildcard, QoS::AtLeastOnce).unwrap();
 
-    // 接続できたらすぐ自分のdataトピックに"online"をretain付きでpublishする
-    let online = serde_json::to_vec(&DataMsg::Presence(PresenceMsg {
-        status: "online".to_string(),
-        seq: next_seq(&seq.data_counter),
-    }))
-    .unwrap();
-    client.publish(&data_topic, QoS::AtLeastOnce, true, online).unwrap();
+    // 接続できたらすぐ自分のNBIRTHをretain付きでpublishする
+    let birth = serde_json::to_vec(&BirthDeathMsg { seq: next_seq(&seq.presence_counter) }).unwrap();
+    client.publish(&birth_topic, QoS::AtLeastOnce, true, birth).unwrap();
 
     // 起動時に一度だけ固定ポートでlistenを開始し、そのままプログラムが終わるまで
     // ファイル受信を待ち受け続ける（C++でいう、`bind()`＋`listen()`をここで1回だけ行うイメージ）。

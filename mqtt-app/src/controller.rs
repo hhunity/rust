@@ -17,7 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 
-use crate::messages::{AckMsg, CmdMsg, DataMsg, DoneMsg, JobMsg, OfferMsg, PresenceMsg, ReceivedMsg};
+use crate::messages::{AckMsg, BirthDeathMsg, CmdMsg, DataMsg, DoneMsg, JobMsg, OfferMsg, PresenceMsg, ReceivedMsg};
 use crate::seq::{check_seq, next_seq, ControllerSeqState};
 
 /// 送信申し出(id)ごとに「これから送るファイルのパス」を覚えておく辞書。
@@ -71,13 +71,17 @@ fn parse_qos_prefix(line: &str) -> (QoS, &str) {
     (QoS::AtLeastOnce, line)
 }
 
-/// 受信したpublishのトピックが `<topic>/data/<名前>` の形なら、その`<名前>`部分を取り出す。
-/// 一致しなければ`None`。
+/// 受信したpublishのトピックが `<topic>/<message_type>/<名前>` の形なら、その`<名前>`部分を
+/// 取り出す。`message_type`が一致しなければ`None`。
 ///
 /// `Option<&str>`を返しているのは、余計な文字列コピーをせず、元の`publish_topic`の一部を
 /// そのまま指す「借用」で済ませるためです（C++の`std::string_view`を返す関数に近い発想）。
-fn parse_data_topic<'a>(publish_topic: &'a str, topic: &str) -> Option<&'a str> {
-    publish_topic.strip_prefix(topic)?.strip_prefix("/data/")
+fn parse_named_topic<'a>(publish_topic: &'a str, topic: &str, message_type: &str) -> Option<&'a str> {
+    publish_topic
+        .strip_prefix(topic)?
+        .strip_prefix('/')?
+        .strip_prefix(message_type)?
+        .strip_prefix('/')
 }
 
 /// ファイルの中身を、繋いだ相手(TcpStream)へ送りつける。
@@ -157,18 +161,20 @@ fn handle_file_received(who: &str, received: ReceivedMsg) {
     }
 }
 
-/// `PresenceMsg`（`DataMsg::Presence`の中身）を受け取ったときの処理。
-fn handle_presence(who: &str, presence: PresenceMsg, roster: &Roster) {
-    let mut roster = roster.lock().unwrap();
-    if presence.status == "online" {
-        // insert()の戻り値は「上書きする前にそこにあった古い値」（無ければNone）。
-        // C++のstd::mapならoperator[]で代入した後、以前の値は捨てられてしまいますが、
-        // Rustのinsert()は古い値を捨てずにOption<V>として返してくれるので、
-        // 「新規追加だったか、既存の更新だったか」をこの1行で判定できます。
-        if roster.insert(who.to_string(), true) != Some(true) {
-            println!("[system] {who} がオンラインになりました");
-        }
-    } else if roster.remove(who).is_some() {
+/// `NBIRTH`（マイコンが接続した）を受け取ったときの処理。
+fn handle_birth(who: &str, roster: &Roster) {
+    // insert()の戻り値は「上書きする前にそこにあった古い値」（無ければNone）。
+    // C++のstd::mapならoperator[]で代入した後、以前の値は捨てられてしまいますが、
+    // Rustのinsert()は古い値を捨てずにOption<V>として返してくれるので、
+    // 「新規追加だったか、既存の更新だったか」をこの1行で判定できます。
+    if roster.lock().unwrap().insert(who.to_string(), true) != Some(true) {
+        println!("[system] {who} がオンラインになりました");
+    }
+}
+
+/// `NDEATH`（マイコンが切断した）を受け取ったときの処理。
+fn handle_death(who: &str, roster: &Roster) {
+    if roster.lock().unwrap().remove(who).is_some() {
         println!("[system] {who} がオフラインになりました");
     }
 }
@@ -188,12 +194,14 @@ fn handle_job_done(who: &str, done: DoneMsg, inflight: &InFlightState) {
 /// この関数はプログラムが終わるまでブロックし続ける
 /// （C++でいう、`main()`の中の`while (true) { ... }`メインループに相当する部分です）。
 pub fn run(name: String, host: String, port: u16, topic: String) {
-    // 全マイコンへの一斉配信(JOB)専用の、特別な名前"all"を宛先としたcmdトピック。
-    let all_cmd_topic = format!("{topic}/cmd/all");
-    // 各マイコンの報告(presence/ACK/RECEIVED/DONE)は、ワイルドカードでまとめて購読する。
-    let data_wildcard = format!("{topic}/data/+");
-    // パソコン自身の生死を知らせるstateトピック（Sparkplug Bの`STATE`に相当）。
-    let state_topic = format!("{topic}/state/{name}");
+    // 全マイコンへの一斉配信(JOB)専用の、特別な名前"all"を宛先としたNCMDトピック。
+    let all_cmd_topic = format!("{topic}/NCMD/all");
+    // 各マイコンの接続・切断・継続報告は、ワイルドカードでまとめて購読する。
+    let birth_wildcard = format!("{topic}/NBIRTH/+");
+    let death_wildcard = format!("{topic}/NDEATH/+");
+    let data_wildcard = format!("{topic}/NDATA/+");
+    // パソコン自身の生死を知らせるSTATEトピック（Sparkplug Bの`STATE`そのもの）。
+    let state_topic = format!("{topic}/STATE/{name}");
 
     let seq = ControllerSeqState::new();
 
@@ -208,8 +216,10 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
 
     let (client, mut connection) = Client::new(mqttoptions, 10);
 
-    // パソコン役はコマンド(cmd)を送る側であって受け取る側ではないので、cmdトピックの購読は不要。
+    // パソコン役はコマンド(NCMD)を送る側であって受け取る側ではないので、NCMDトピックの購読は不要。
     client.subscribe(&topic, QoS::AtMostOnce).unwrap();
+    client.subscribe(&birth_wildcard, QoS::AtLeastOnce).unwrap();
+    client.subscribe(&death_wildcard, QoS::AtLeastOnce).unwrap();
     client.subscribe(&data_wildcard, QoS::AtLeastOnce).unwrap();
 
     // 接続できたらすぐ自分のstateトピックに"online"をretain付きでpublishする
@@ -353,8 +363,8 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
                         size: metadata.len(),
                         seq: next_seq(&seq.offer_counter),
                     };
-                    // 宛先(to)は、ペイロードではなくトピック自体（`<topic>/cmd/<to>`）で表す。
-                    let offer_topic = format!("{topic}/cmd/{to}");
+                    // 宛先(to)は、ペイロードではなくトピック自体（`<topic>/NCMD/<to>`）で表す。
+                    let offer_topic = format!("{topic}/NCMD/{to}");
                     let payload = serde_json::to_vec(&CmdMsg::FileOffer(offer)).unwrap();
                     client.publish(&offer_topic, QoS::AtLeastOnce, false, payload).unwrap();
                     println!(
@@ -386,22 +396,34 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
             Ok(Event::Incoming(Packet::Publish(publish))) => {
                 let text = String::from_utf8_lossy(&publish.payload);
 
-                if let Some(who) = parse_data_topic(&publish.topic, &topic) {
+                if let Some(who) = parse_named_topic(&publish.topic, &topic, "NBIRTH") {
+                    let Ok(msg) = serde_json::from_str::<BirthDeathMsg>(&text) else {
+                        continue;
+                    };
+                    // NBIRTHは接続のたびにseqが0から数え直される（再起動すればカウンタは
+                    // リセットされる）のが正常な動きなので、is_birth=trueで警告を抑える。
+                    check_seq(who, msg.seq, &seq.presence_tracker, true);
+                    handle_birth(who, &roster);
+                } else if let Some(who) = parse_named_topic(&publish.topic, &topic, "NDEATH") {
+                    let Ok(msg) = serde_json::from_str::<BirthDeathMsg>(&text) else {
+                        continue;
+                    };
+                    check_seq(who, msg.seq, &seq.presence_tracker, false);
+                    handle_death(who, &roster);
+                } else if let Some(who) = parse_named_topic(&publish.topic, &topic, "NDATA") {
                     let Ok(data) = serde_json::from_str::<DataMsg>(&text) else {
                         continue;
                     };
-                    // どのバリアントでも、そのマイコンの1本のdataトピックに乗っているので、
+                    // どのバリアントでも、そのマイコンの1本のNDATAトピックに乗っているので、
                     // 欠落チェックは1箇所（seq.data_tracker）にまとめられる。
-                    let (seq_num, is_birth) = match &data {
-                        DataMsg::Presence(p) => (p.seq, p.status == "online"),
-                        DataMsg::FileAck(a) => (a.seq, false),
-                        DataMsg::FileReceived(r) => (r.seq, false),
-                        DataMsg::JobDone(d) => (d.seq, false),
+                    let seq_num = match &data {
+                        DataMsg::FileAck(a) => a.seq,
+                        DataMsg::FileReceived(r) => r.seq,
+                        DataMsg::JobDone(d) => d.seq,
                     };
-                    check_seq(who, seq_num, &seq.data_tracker, is_birth);
+                    check_seq(who, seq_num, &seq.data_tracker, false);
 
                     match data {
-                        DataMsg::Presence(p) => handle_presence(who, p, &roster),
                         DataMsg::FileAck(a) => handle_ack(a, &pending_offers),
                         DataMsg::FileReceived(r) => handle_file_received(who, r),
                         DataMsg::JobDone(d) => handle_job_done(who, d, &inflight),
