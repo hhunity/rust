@@ -64,6 +64,20 @@ MQTTは大きなバイナリデータの配信には向いていないため、*
 意図的に別々のCargoクレート（共有ライブラリなし）にしているため、通信フォーマットを変えるときは
 両方のファイルを一緒に直す必要があります。
 
+## APIドキュメント（メッセージ一覧）の生成
+
+ソースコード中の`///`・`//!`ドキュメントコメントから、ブラウザで見られるHTML形式のドキュメントを
+`cargo doc`（Rust標準のrustdoc）で生成できます。
+
+```sh
+cargo doc --no-deps --document-private-items --open
+```
+
+生成されたドキュメントのトップページから`messages`モジュールへ進むと、`OfferMsg`・`AckMsg`・
+`ReceivedMsg`・`PresenceMsg`・`JobMsg`・`DoneMsg`という、MQTT上でやり取りする全メッセージの
+一覧（各フィールドの説明コメント込み）が見られます。詳しいオプションの意味は`mqtt-server`の
+READMEを参照してください。
+
 ## トピック構造とseq番号（Sparkplug Bを参考に一部だけ採用）
 
 MQTTの正式な産業IoT向け規約であるSparkplug Bをそのまま採用するのは今回の規模では大掛かりすぎる
