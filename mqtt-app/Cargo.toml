@@ -1,0 +1,32 @@
+[package]
+name = "mqtt-app"
+version = "0.1.0"
+edition = "2021"
+
+# C++でいうと、この[package]セクションはプロジェクト名やバージョンを書く場所で、
+# 下の[[bin]]は「このプロジェクトから実行ファイルを何本作るか」の設定です。
+# CMakeでいう add_executable(mqtt-server src/bin/mqtt-server.rs) を
+# 2回書いているようなものだと思ってください。
+#
+# Cargo（Rustのビルドツール）は、src/bin/ の下に置いた .rs ファイルを
+# 自動的に「同名の実行ファイル」として認識するので、実は下の[[bin]]は
+# 省略しても同じ結果になります（分かりやすさのために明示しています）。
+
+[[bin]]
+name = "mqtt-server"
+path = "src/bin/mqtt-server.rs"
+
+[[bin]]
+name = "mqtt-client"
+path = "src/bin/mqtt-client.rs"
+
+[dependencies]
+# rumqttd: MQTTブローカー（サーバー）本体。mqtt-serverだけが使う
+rumqttd = "0.20"
+# rumqttc: MQTTクライアント。mqtt-server（パソコン役）・mqtt-client（マイコン役）の両方が使う
+rumqttc = "0.25"
+# serde/serde_json: C++でいうところの、構造体をJSON文字列に変換するnlohmann::jsonのような
+# ライブラリ。#[derive(Serialize, Deserialize)] を構造体に付けるだけで、変換コードを
+# 自動生成してくれる（C++でいうリフレクションが無い代わりに、マクロでコード生成する）
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
