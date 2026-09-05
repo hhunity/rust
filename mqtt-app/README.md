@@ -199,13 +199,16 @@ MQTTの正式な産業IoT向け規約であるSparkplug Bをそのまま採用�
 見てから捨てる、という無駄がありません。一方で観測したい側（パソコン役）は
 `<topic>/file/received/+`のようにワイルドカード購読すれば、誰から来た結果でもまとめて拾えます。
 
-**Sparkplug Bとの対応**: 本家Sparkplug Bのトピック（`spBv1.0/<group_id>/<message_type>/
-<edge_node_id>/<device_id>`）でも、末尾の名前（`edge_node_id`/`device_id`）は上と同じ2パターンに
-分かれます。コマンド系（`NCMD`・`DCMD`）は①宛先（このノード/デバイスへ命令を送る）、
-状態報告系（`NBIRTH`・`NDATA`・`NDEATH`・`DBIRTH`・`DDATA`・`DDEATH`）は②送信者自身
-（自分の生存確認やデータを報告する）という向きになっており、本プロジェクトの
-OFFER/ACK（①宛先）とRECEIVED/presence/JOB完了報告（②送信者自身）という分け方は、
-このSparkplug Bの設計と同じ考え方です。
+**Sparkplug Bとの対応**: 本家Sparkplug Bのトピックは、ノードレベルのメッセージ
+（`N`で始まる`NBIRTH`・`NDEATH`・`NDATA`・`NCMD`）が`spBv1.0/<group_id>/<message_type>/
+<edge_node_id>`、デバイスレベルのメッセージ（`D`で始まる`DBIRTH`・`DDEATH`・`DDATA`・`DCMD`）が
+`spBv1.0/<group_id>/<message_type>/<edge_node_id>/<device_id>`という形で、`device_id`が
+付くのは`D`系だけです。ただしどちらも末尾の名前（`edge_node_id`または`device_id`）が
+指すものは上と同じ2パターンに分かれます。コマンド系（`NCMD`・`DCMD`）は①宛先
+（このノード/デバイスへ命令を送る）、状態報告系（`NBIRTH`・`NDATA`・`NDEATH`・`DBIRTH`・
+`DDATA`・`DDEATH`）は②送信者自身（自分の生存確認やデータを報告する）という向きになっており、
+本プロジェクトのOFFER/ACK（①宛先）とRECEIVED/presence/JOB完了報告（②送信者自身）という
+分け方は、このSparkplug Bの設計と同じ考え方です。
 
 ### seq番号：メッセージの欠落検知
 
