@@ -15,7 +15,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use rumqttc::{Client, Event, MqttOptions, Packet, QoS};
+use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 
 use crate::messages::{AckMsg, CmdMsg, DataMsg, DoneMsg, JobMsg, OfferMsg, PresenceMsg, ReceivedMsg};
 use crate::seq::{check_seq, next_seq, ControllerSeqState};
@@ -71,16 +71,13 @@ fn parse_qos_prefix(line: &str) -> (QoS, &str) {
     (QoS::AtLeastOnce, line)
 }
 
-/// 受信したpublishのトピックが `<topic>/<名前>/data` の形なら、その`<名前>`部分を取り出す。
+/// 受信したpublishのトピックが `<topic>/data/<名前>` の形なら、その`<名前>`部分を取り出す。
 /// 一致しなければ`None`。
 ///
 /// `Option<&str>`を返しているのは、余計な文字列コピーをせず、元の`publish_topic`の一部を
 /// そのまま指す「借用」で済ませるためです（C++の`std::string_view`を返す関数に近い発想）。
 fn parse_data_topic<'a>(publish_topic: &'a str, topic: &str) -> Option<&'a str> {
-    publish_topic
-        .strip_prefix(topic)?
-        .strip_prefix('/')?
-        .strip_suffix("/data")
+    publish_topic.strip_prefix(topic)?.strip_prefix("/data/")
 }
 
 /// ファイルの中身を、繋いだ相手(TcpStream)へ送りつける。
@@ -192,19 +189,36 @@ fn handle_job_done(who: &str, done: DoneMsg, inflight: &InFlightState) {
 /// （C++でいう、`main()`の中の`while (true) { ... }`メインループに相当する部分です）。
 pub fn run(name: String, host: String, port: u16, topic: String) {
     // 全マイコンへの一斉配信(JOB)専用の、特別な名前"all"を宛先としたcmdトピック。
-    let all_cmd_topic = format!("{topic}/all/cmd");
+    let all_cmd_topic = format!("{topic}/cmd/all");
     // 各マイコンの報告(presence/ACK/RECEIVED/DONE)は、ワイルドカードでまとめて購読する。
-    let data_wildcard = format!("{topic}/+/data");
+    let data_wildcard = format!("{topic}/data/+");
+    // パソコン自身の生死を知らせるstateトピック（Sparkplug Bの`STATE`に相当）。
+    let state_topic = format!("{topic}/state/{name}");
 
     let seq = ControllerSeqState::new();
 
     let mut mqttoptions = MqttOptions::new(&name, host.clone(), port);
     mqttoptions.set_keep_alive(Duration::from_secs(5));
+
+    // マイコン役と同様に、自分のstateトピックにLast Willを登録しておく。
+    // パソコンが異常終了しても、ブローカーが自動で"offline"を配ってくれるので、
+    // マイコン側は「今指示を出す人がいるかどうか」を知ることができる。
+    let offline = serde_json::to_vec(&PresenceMsg { status: "offline".to_string(), seq: 0 }).unwrap();
+    mqttoptions.set_last_will(LastWill::new(&state_topic, offline, QoS::AtLeastOnce, true));
+
     let (client, mut connection) = Client::new(mqttoptions, 10);
 
     // パソコン役はコマンド(cmd)を送る側であって受け取る側ではないので、cmdトピックの購読は不要。
     client.subscribe(&topic, QoS::AtMostOnce).unwrap();
     client.subscribe(&data_wildcard, QoS::AtLeastOnce).unwrap();
+
+    // 接続できたらすぐ自分のstateトピックに"online"をretain付きでpublishする
+    let online = serde_json::to_vec(&PresenceMsg {
+        status: "online".to_string(),
+        seq: next_seq(&seq.state_counter),
+    })
+    .unwrap();
+    client.publish(&state_topic, QoS::AtLeastOnce, true, online).unwrap();
 
     let pending_offers: PendingOffers = Arc::new(Mutex::new(HashMap::new()));
     let roster: Roster = Arc::new(Mutex::new(HashMap::new()));
@@ -339,8 +353,8 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
                         size: metadata.len(),
                         seq: next_seq(&seq.offer_counter),
                     };
-                    // 宛先(to)は、ペイロードではなくトピック自体（`<topic>/<to>/cmd`）で表す。
-                    let offer_topic = format!("{topic}/{to}/cmd");
+                    // 宛先(to)は、ペイロードではなくトピック自体（`<topic>/cmd/<to>`）で表す。
+                    let offer_topic = format!("{topic}/cmd/{to}");
                     let payload = serde_json::to_vec(&CmdMsg::FileOffer(offer)).unwrap();
                     client.publish(&offer_topic, QoS::AtLeastOnce, false, payload).unwrap();
                     println!(

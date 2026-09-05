@@ -23,7 +23,13 @@ use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 use mqtt_app::device::{handle_job, handle_offer};
 use mqtt_app::file_transfer::run_file_listener;
 use mqtt_app::messages::{CmdMsg, DataMsg, PresenceMsg};
-use mqtt_app::seq::{next_seq, DeviceSeqState};
+use mqtt_app::seq::{check_seq, next_seq, DeviceSeqState};
+
+/// 受信したpublishのトピックが `<topic>/state/<パソコンの名前>` の形なら、
+/// その`<パソコンの名前>`部分を取り出す。一致しなければ`None`。
+fn parse_state_topic<'a>(publish_topic: &'a str, topic: &str) -> Option<&'a str> {
+    publish_topic.strip_prefix(topic)?.strip_prefix("/state/")
+}
 
 fn main() {
     // --- ① コマンドライン引数（起動時に渡した文字列）を読み取る ---
@@ -50,14 +56,19 @@ fn main() {
     let port: u16 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1883);
     let topic = args.next().unwrap_or_else(|| "chat".to_string());
 
-    // このマイコン専用のトピックは2つだけ。
-    //   - cmd_topic  … ホスト（パソコン）から自分だけに向けたコマンド（OFFER）
-    //   - all_cmd_topic … 全マイコンへの一斉配信コマンド（JOB）
-    //   - data_topic … 自分から報告する側（presence・ACK・RECEIVED・DONEをまとめて1本）
-    // 名前は常に「そのトピックがどのマイコンのものか」だけを表す（詳しくはREADME参照）。
-    let cmd_topic = format!("{topic}/{name}/cmd");
-    let all_cmd_topic = format!("{topic}/all/cmd");
-    let data_topic = format!("{topic}/{name}/data");
+    // このマイコンが関わるトピックは3つ。
+    //   - cmd_topic      … ホスト（パソコン）から自分だけに向けたコマンド（OFFER）
+    //   - all_cmd_topic  … 全マイコンへの一斉配信コマンド（JOB）
+    //   - data_topic     … 自分から報告する側（presence・ACK・RECEIVED・DONEをまとめて1本）
+    // Sparkplug B本家（`spBv1.0/<group_id>/<message_type>/<edge_node_id>`）に倣い、
+    // 種別(cmd/data)を名前より先に置く順番にしている。名前は常に「そのトピックが
+    // どのマイコンのものか」だけを表す（詳しくはREADME参照）。
+    let cmd_topic = format!("{topic}/cmd/{name}");
+    let all_cmd_topic = format!("{topic}/cmd/all");
+    let data_topic = format!("{topic}/data/{name}");
+    // パソコン（ホストアプリケーション）自身の生死を知らせるstateトピックは、
+    // 複数のパソコンがいる可能性もあるのでワイルドカードでまとめて購読する。
+    let state_wildcard = format!("{topic}/state/+");
 
     // このマイコンが送るメッセージ全種類ぶんのseqカウンタ・トラッカーをまとめて用意する。
     let seq = DeviceSeqState::new();
@@ -81,6 +92,7 @@ fn main() {
     client.subscribe(&topic, QoS::AtMostOnce).unwrap();
     client.subscribe(&cmd_topic, QoS::AtLeastOnce).unwrap();
     client.subscribe(&all_cmd_topic, QoS::AtLeastOnce).unwrap();
+    client.subscribe(&state_wildcard, QoS::AtLeastOnce).unwrap();
 
     // 接続できたらすぐ自分のdataトピックに"online"をretain付きでpublishする
     let online = serde_json::to_vec(&DataMsg::Presence(PresenceMsg {
@@ -141,6 +153,18 @@ fn main() {
                             handle_offer(offer, &client, &data_topic, &host, port, listen_port, &seq)
                         }
                         CmdMsg::Job(job) => handle_job(job, &client, &data_topic, &seq),
+                    }
+                } else if let Some(host_name) = parse_state_topic(&publish.topic, &topic) {
+                    // パソコン（ホストアプリケーション）の生死通知。今は表示するだけだが、
+                    // 「今指示を出す人がいるか」を知る手がかりとして持たせてある。
+                    let Ok(state) = serde_json::from_str::<PresenceMsg>(&text) else {
+                        continue;
+                    };
+                    check_seq(host_name, state.seq, &seq.host_state_tracker, state.status == "online");
+                    if state.status == "online" {
+                        println!("[system] パソコン({host_name})がオンラインになりました");
+                    } else {
+                        println!("[system] パソコン({host_name})がオフラインになりました");
                     }
                 } else if publish.topic == topic {
                     println!("{text}");

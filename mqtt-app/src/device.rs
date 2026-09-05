@@ -3,7 +3,7 @@
 //! ここは`mqtt-client`実行ファイルだけが使うモジュールです。
 //! 生TCPでの実際のファイル受信は[`crate::file_transfer`]モジュールが担当します。
 //!
-//! `<topic>/<自分の名前>/cmd`か`<topic>/all/cmd`に届いた[`crate::messages::CmdMsg`]の
+//! `<topic>/cmd/<自分の名前>`か`<topic>/cmd/all`に届いた[`crate::messages::CmdMsg`]の
 //! 中身を、呼び出し側（`mqtt-client.rs`）が既に`match`で振り分けた後、
 //! `OfferMsg`/`JobMsg`それぞれに対応するのがこの2関数です。
 
@@ -18,7 +18,7 @@ use crate::seq::{check_seq, next_seq, DeviceSeqState};
 
 /// `OfferMsg`（`CmdMsg::FileOffer`の中身）を受け取ったときの処理。
 ///
-/// このメッセージは、自分専用のトピック（`<topic>/<自分の名前>/cmd`）にしか
+/// このメッセージは、自分専用のトピック（`<topic>/cmd/<自分の名前>`）にしか
 /// 届かないように設計してある（詳しくはREADMEのトピック構造の節を参照）ので、
 /// 「これは本当に自分宛てか？」というチェックはここでは不要です（トピック自体が保証しています）。
 ///

@@ -35,12 +35,12 @@ use std::sync::{Arc, Mutex};
 /// 混ぜてしまうと、番号が「飛んで」見えて誤って警告を出してしまいます（実際に開発中に
 /// この誤検知が起きたことがあります）。
 ///
-/// このプロジェクトのトピックは3種類（`<topic>/<名前>/cmd`・`<topic>/all/cmd`・
-/// `<topic>/<名前>/data`）なので、それぞれに対応するカウンタ／トラッカーを用意します
-/// （`<topic>/<名前>/data`には元々presence・ACK・RECEIVED・DONEの4種類のメッセージが
-/// 乗りますが、全部同じトピックに乗る＝観測者からは全部見えるので、まとめて1つの
-/// カウンタで構いません。これはSparkplug B本家が「ノード1つにつきseqは1系列」と
-/// している設計にも合わせた形です）。
+/// このプロジェクトのトピックは4種類（`<topic>/cmd/<名前>`・`<topic>/cmd/all`・
+/// `<topic>/data/<名前>`・`<topic>/state/<パソコンの名前>`）なので、それぞれに対応する
+/// カウンタ／トラッカーを用意します（`<topic>/data/<名前>`には元々presence・ACK・
+/// RECEIVED・DONEの4種類のメッセージが乗りますが、全部同じトピックに乗る＝観測者からは
+/// 全部見えるので、まとめて1つのカウンタで構いません。これはSparkplug B本家が
+/// 「ノード1つにつきseqは1系列」としている設計にも合わせた形です）。
 pub type SeqCounter = Arc<Mutex<u64>>;
 
 /// 相手の名前ごとに「最後に見たseq番号」を覚えておく辞書。
@@ -113,13 +113,15 @@ pub fn check_seq(from: &str, seq: u64, tracker: &SeqTracker, is_birth: bool) {
 /// 複数のスレッドが同じ実体を共有し続けます（shared_ptrをコピーする感覚と同じです）。
 #[derive(Clone)]
 pub struct ControllerSeqState {
-    /// 自分が送るOFFER（`<topic>/<宛先>/cmd`、宛先ごとに別トピック）のseqカウンタ
+    /// 自分が送るOFFER（`<topic>/cmd/<宛先>`、宛先ごとに別トピック）のseqカウンタ
     pub offer_counter: SeqCounter,
-    /// 自分が送るJOB（`<topic>/all/cmd`）のseqカウンタ
+    /// 自分が送るJOB（`<topic>/cmd/all`）のseqカウンタ
     pub job_counter: SeqCounter,
-    /// 各マイコンの`<topic>/<名前>/data`の欠落検知用トラッカー
+    /// 各マイコンの`<topic>/data/<名前>`の欠落検知用トラッカー
     /// （マイコンの名前ごとに、最後に見たseqを覚えておく）
     pub data_tracker: SeqTracker,
+    /// 自分（パソコン）自身の生死を知らせる`<topic>/state/<自分の名前>`のseqカウンタ
+    pub state_counter: SeqCounter,
 }
 
 impl ControllerSeqState {
@@ -133,22 +135,27 @@ impl ControllerSeqState {
             offer_counter: new_counter(),
             job_counter: new_counter(),
             data_tracker: new_tracker(),
+            state_counter: new_counter(),
         }
     }
 }
 
 /// マイコン役（`mqtt-client`）が使うseq状態。
 /// マイコン役は「OFFER・JOBを受け取る側」「自分のdataトピック（presence・ACK・RECEIVED・
-/// DONEをまとめたもの）を送る側」なので、パソコン役とはちょうど逆の組み合わせを持つ。
+/// DONEをまとめたもの）を送る側」「パソコンのstateトピックを受け取る側」を持つ。
 #[derive(Clone)]
 pub struct DeviceSeqState {
-    /// 受け取るOFFER（`<topic>/<自分の名前>/cmd`）の欠落検知用トラッカー
+    /// 受け取るOFFER（`<topic>/cmd/<自分の名前>`）の欠落検知用トラッカー
     pub offer_tracker: SeqTracker,
-    /// 受け取るJOB（`<topic>/all/cmd`）の欠落検知用トラッカー
+    /// 受け取るJOB（`<topic>/cmd/all`）の欠落検知用トラッカー
     pub job_tracker: SeqTracker,
-    /// 自分が送る`<topic>/<自分の名前>/data`のseqカウンタ
+    /// 自分が送る`<topic>/data/<自分の名前>`のseqカウンタ
     /// （presence・ACK・RECEIVED・DONEをまとめて、この1本のカウンタを使う）
     pub data_counter: SeqCounter,
+    /// パソコンの`<topic>/state/<パソコンの名前>`の欠落検知用トラッカー
+    /// （パソコンの名前ごとに、最後に見たseqを覚えておく。将来複数パソコンが
+    /// 居ても対応できるようにHashMapベースのトラッカーにしている）
+    pub host_state_tracker: SeqTracker,
 }
 
 impl DeviceSeqState {
@@ -157,6 +164,7 @@ impl DeviceSeqState {
             offer_tracker: new_tracker(),
             job_tracker: new_tracker(),
             data_counter: new_counter(),
+            host_state_tracker: new_tracker(),
         }
     }
 }

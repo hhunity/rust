@@ -18,15 +18,15 @@
 //!
 //! ## トピックとメッセージ種別の対応（Sparkplug Bを参考にしたCMD/DATAの分け方）
 //!
-//! このプロジェクトのトピックは、`<topic>/<マイコンの名前>/cmd`と`<topic>/<マイコンの
-//! 名前>/data`の2種類だけです（詳しくは`mqtt-app`のREADMEを参照）。1つのトピックに
+//! このプロジェクトのトピックは、`<topic>/cmd/<マイコンの名前>`と`<topic>/data/<マイコンの
+//! 名前>`の2種類が中心です（詳しくは`mqtt-app`のREADMEを参照）。1つのトピックに
 //! 複数種類のメッセージが乗るので、「これはどの種類のメッセージか」をJSON自身に
 //! `"type"`フィールドとして持たせています。それを表すのが下の`CmdMsg`・`DataMsg`という
 //! 2つの`enum`です。
 
 use serde::{Deserialize, Serialize};
 
-/// `<topic>/<宛先の名前>/cmd`に乗る、ホスト（パソコン）から特定/全マイコンへの命令。
+/// `<topic>/cmd/<宛先の名前>`に乗る、ホスト（パソコン）から特定/全マイコンへの命令。
 ///
 /// `enum`の各バリアント（`FileOffer`・`Job`）は、中に別々の型（`OfferMsg`・`JobMsg`）の
 /// データを持てます。これはC++でいう`std::variant<OfferMsg, JobMsg>`にかなり近いもので、
@@ -44,8 +44,8 @@ pub enum CmdMsg {
     Job(JobMsg),
 }
 
-/// `<topic>/<自分の名前>/data`に乗る、マイコン自身が自分について報告するメッセージ。
-/// ホスト側は`<topic>/+/data`のようにワイルドカード購読して、全マイコンの報告を
+/// `<topic>/data/<自分の名前>`に乗る、マイコン自身が自分について報告するメッセージ。
+/// ホスト側は`<topic>/data/+`のようにワイルドカード購読して、全マイコンの報告を
 /// まとめて受け取る（`CmdMsg`と同様、中身の判別は`"type"`フィールドで行う）。
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -58,7 +58,7 @@ pub enum DataMsg {
 
 /// `CmdMsg::FileOffer`の中身。「このファイルを送りたい」という申し出。
 ///
-/// 送り先のマイコン名はトピック（`<topic>/<宛先>/cmd`）自体が表しているので、
+/// 送り先のマイコン名はトピック（`<topic>/cmd/<宛先>`）自体が表しているので、
 /// ペイロードには持たせていない（送り主である`from`＝パソコン役の名前だけを持つ）。
 ///
 /// seqは、Sparkplug B（産業IoT向けMQTT規約）の考え方を参考にした連番。
@@ -73,7 +73,7 @@ pub struct OfferMsg {
     pub seq: u64,
 }
 
-/// `CmdMsg::Job`の中身。`<topic>/all/cmd`に乗る、全マイコンへの一斉配信ジョブ。
+/// `CmdMsg::Job`の中身。`<topic>/cmd/all`に乗る、全マイコンへの一斉配信ジョブ。
 /// 「全員」という宛先はトピック自体（`all`という特別な名前）が表している。
 #[derive(Serialize, Deserialize, Debug)]
 pub struct JobMsg {
@@ -87,7 +87,7 @@ pub struct JobMsg {
 /// `DataMsg::FileAck`の中身。「ここ(host:port)に繋いで」という返事。
 ///
 /// これを送っている（＝ファイルを受け取る）マイコンの名前はトピック
-/// （`<topic>/<自分の名前>/data`）自体が表しているので、ペイロードには持たせていない。
+/// （`<topic>/data/<自分の名前>`）自体が表しているので、ペイロードには持たせていない。
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AckMsg {
     pub id: String,

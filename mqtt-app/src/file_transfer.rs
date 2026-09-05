@@ -49,7 +49,7 @@ pub fn detect_local_ip(broker_host: &str, broker_port: u16) -> String {
 /// client・data_topicは、受信結果（成功/失敗）をMQTTで報告するために使う。
 /// バルクデータ（ファイルの中身）はMQTTの外（生TCP）でやり取りしているので、この報告が無いと
 /// MQTTだけを見ている側からは「実際に届いたかどうか」が一切分からなくなってしまう。
-/// 報告先は自分自身のdataトピック（`<topic>/<自分の名前>/data`）。
+/// 報告先は自分自身のdataトピック（`<topic>/data/<自分の名前>`）。
 pub fn run_file_listener(
     listener: TcpListener,
     client: Client,
