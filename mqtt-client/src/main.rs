@@ -84,22 +84,27 @@ fn detect_local_ip(broker_host: &str, broker_port: u16) -> String {
 /// ファイルの中身を、繋いだ相手(TcpStream)へ送りつける。
 ///
 /// 自前の単純な通信ルール（プロトコル）を使う:
-///   1. ファイル名の長さ(u32、4バイト・ビッグエンディアン)
-///   2. ファイル名の中身（UTF-8のバイト列）
+///   1. id（OFFER/ACKと同じ申し出id）の長さ(u32)＋中身（UTF-8バイト列）
+///   2. ファイル名の長さ(u32、4バイト・ビッグエンディアン)＋中身（UTF-8のバイト列）
 ///   3. ファイルサイズ(u64、8バイト・ビッグエンディアン)
 ///   4. ファイルの中身そのもの
-/// 受け取る側(receive_file関数)はこの順番通りに読み取る。
-fn send_file_to(host: &str, port: u16, path: &Path) -> io::Result<()> {
+/// idを一緒に送ることで、受け取った側が「これはどの申し出に対応する受信か」を
+/// MQTTでの受信完了通知に含められるようになる。受け取る側(receive_one_file関数)は
+/// この順番通りに読み取る。
+fn send_file_to(host: &str, port: u16, id: &str, path: &Path) -> io::Result<()> {
     // TcpStream::connect で相手(host:port)へTCP接続する
     let mut stream = TcpStream::connect((host, port))?;
+
+    // to_be_bytes(): 数値を「決まった順番のバイト列」に変換する（ネットワーク越しにやり取りする定番の方法）
+    let id_bytes = id.as_bytes();
+    stream.write_all(&(id_bytes.len() as u32).to_be_bytes())?;
+    stream.write_all(id_bytes)?;
 
     let filename = path
         .file_name()
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_else(|| "file".to_string());
     let filename_bytes = filename.as_bytes();
-
-    // to_be_bytes(): 数値を「決まった順番のバイト列」に変換する（ネットワーク越しにやり取りする定番の方法）
     stream.write_all(&(filename_bytes.len() as u32).to_be_bytes())?;
     stream.write_all(filename_bytes)?;
 
@@ -115,7 +120,11 @@ fn send_file_to(host: &str, port: u16, path: &Path) -> io::Result<()> {
 /// 固定ポートのTcpListenerで、来た接続を延々と受け付け続ける（マイコン役が起動時に1回呼ぶ）。
 /// 接続が来るたびに別スレッドを立てて受信処理をし、このループ自体は次の接続を待ち続ける。
 /// これにより、何度でも（複数回・複数相手から）ファイルを受け取れる「常時待ち受け」になる。
-fn run_file_listener(listener: TcpListener) {
+///
+/// client・my_name・received_topicは、受信結果（成功/失敗）をMQTTで報告するために使う。
+/// バルクデータ（ファイルの中身）はMQTTの外（生TCP）でやり取りしているので、この報告が無いと
+/// MQTTだけを見ている側からは「実際に届いたかどうか」が一切分からなくなってしまう。
+fn run_file_listener(listener: TcpListener, client: Client, my_name: String, received_topic: String) {
     // listener.incoming() は「接続が来るたびに1つずつ返してくれる、終わりのないイテレータ」
     for stream in listener.incoming() {
         let stream = match stream {
@@ -125,10 +134,13 @@ fn run_file_listener(listener: TcpListener) {
                 continue;
             }
         };
+        let client = client.clone();
+        let my_name = my_name.clone();
+        let received_topic = received_topic.clone();
         // 1件の受信処理に時間がかかっても次の接続を待てるように、別スレッドに任せる
-        thread::spawn(move || match receive_one_file(stream) {
-            Ok((filename, size, path)) => {
-                println!("[system] 受信完了: {filename} ({size} bytes) -> {}", path.display());
+        thread::spawn(move || match receive_one_file(stream, &my_name, &client, &received_topic) {
+            Ok((id, filename, size, path)) => {
+                println!("[system] ジョブ{id}: 受信完了 {filename} ({size} bytes) -> {}", path.display());
             }
             Err(e) => eprintln!("[system] ファイル受信エラー: {e}"),
         });
@@ -136,8 +148,48 @@ fn run_file_listener(listener: TcpListener) {
 }
 
 /// すでに繋がっている1本のTCP接続(stream)から、send_file_toが送ってきたファイルを読み取って保存する。
-/// 戻り値は (受け取ったファイル名, サイズ, 保存先パス)。
-fn receive_one_file(mut stream: TcpStream) -> io::Result<(String, u64, PathBuf)> {
+/// 戻り値は (id, 受け取ったファイル名, サイズ, 保存先パス)。
+///
+/// idが読み取れた後は、途中で失敗しても成功しても、必ずreceived_topicへMQTTで結果を
+/// publishする（"RECEIVED|id|自分の名前|OK or FAILED|受信できたバイト数"）。
+/// これでPC側（や他の監視者）は、MQTTを見ているだけで生TCP転送の結果まで分かるようになる。
+fn receive_one_file(
+    mut stream: TcpStream,
+    my_name: &str,
+    client: &Client,
+    received_topic: &str,
+) -> io::Result<(String, String, u64, PathBuf)> {
+    // idの長さ(4バイト)と中身を読み取る
+    let mut id_len_buf = [0u8; 4];
+    stream.read_exact(&mut id_len_buf)?;
+    let id_len = u32::from_be_bytes(id_len_buf) as usize;
+    let mut id_buf = vec![0u8; id_len];
+    stream.read_exact(&mut id_buf)?;
+    let id = String::from_utf8_lossy(&id_buf).to_string();
+
+    // ここから先で失敗したら、idが分かっているのでMQTTへ"FAILED"を報告してからエラーを返す
+    let result = receive_file_body(&mut stream);
+    let report = |status: &str, size: u64| {
+        let msg = format!("RECEIVED|{id}|{my_name}|{status}|{size}");
+        // publish自体が失敗しても、ここでできることは無いので無視する
+        let _ = client.publish(received_topic, QoS::AtLeastOnce, false, msg.as_bytes());
+    };
+
+    match result {
+        Ok((filename, size, save_path)) => {
+            report("OK", size);
+            Ok((id, filename, size, save_path))
+        }
+        Err(e) => {
+            report("FAILED", 0);
+            Err(e)
+        }
+    }
+}
+
+/// receive_one_fileのうち、「idを読んだ後」のファイル名・サイズ・中身を読み取る部分だけを
+/// 切り出した関数。戻り値は (受け取ったファイル名, サイズ, 保存先パス)。
+fn receive_file_body(stream: &mut TcpStream) -> io::Result<(String, u64, PathBuf)> {
     // ファイル名の長さ(4バイト)を読み取る
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf)?;
@@ -159,7 +211,7 @@ fn receive_one_file(mut stream: TcpStream) -> io::Result<(String, u64, PathBuf)>
 
     // stream.take(size): 「このストリームから最大size バイトだけ読む」という制限付きの読み取り口を作る
     // （これが無いと「ファイルの終わり」がどこか分からず、ずっと読み続けようとしてしまう）
-    let mut limited = (&mut stream).take(size);
+    let mut limited = stream.take(size);
     io::copy(&mut limited, &mut out_file)?;
 
     Ok((filename, size, save_path))
@@ -230,13 +282,32 @@ fn handle_ack(payload: &str, pending_offers: &PendingOffers) {
     };
 
     let host = host.to_string();
+    let id = id.to_string();
     println!("[system] {host}:{port} へ接続してファイルを送信します…");
 
     // ファイル送信も時間がかかるので別スレッドに任せ、キーボード入力の受付は止めないようにする
-    thread::spawn(move || match send_file_to(&host, port, &path) {
+    // 受信できたかどうかの結果はreceived_topic経由でMQTTで報告されるので、ここでは送信できたか
+    // （相手に届くところまで送り切れたか）だけを表示する
+    thread::spawn(move || match send_file_to(&host, port, &id, &path) {
         Ok(()) => println!("[system] 送信完了: {}", path.display()),
         Err(e) => eprintln!("[system] ファイル送信エラー: {e}"),
     });
+}
+
+/// 「RECEIVED|id|マイコン名|OK or FAILED|サイズ」という、生TCPでのファイル転送結果の
+/// 報告を受け取ったときの処理。ここではMQTT上に流れてきた結果をそのまま表示するだけだが、
+/// 実運用ではここで「失敗した分だけ再送する」といった処理を足していくことになる。
+fn handle_file_received(payload: &str) {
+    let parts: Vec<&str> = payload.split('|').collect();
+    let [_, id, who, status, size] = parts.as_slice() else {
+        return;
+    };
+
+    if *status == "OK" {
+        println!("[system] ジョブ{id}: {who} が受信完了しました（{size} bytes）");
+    } else {
+        println!("[system] ジョブ{id}: {who} での受信に失敗しました");
+    }
 }
 
 /// presenceトピック（`<topic>/presence/<名前>`）への通知を受け取ったときの処理。
@@ -325,6 +396,9 @@ fn main() {
     // 例: topicが"chat"なら "chat/file/offer" と "chat/file/ack"
     let offer_topic = format!("{topic}/file/offer");
     let ack_topic = format!("{topic}/file/ack");
+    // 生TCPでのファイル転送が終わった後、マイコン側が結果(成功/失敗)を報告するためのトピック。
+    // これがMQTT上にあることで、MQTTだけを見ている人にも転送結果が分かるようになる
+    let file_received_topic = format!("{topic}/file/received");
     // マイコンの在室確認(presence)、ジョブ配信、ジョブ完了報告用のトピック
     let presence_prefix = format!("{topic}/presence"); // 個々のpresenceトピックは "chat/presence/<名前>" になる
     let my_presence_topic = format!("{presence_prefix}/{name}");
@@ -359,6 +433,9 @@ fn main() {
     client.subscribe(&offer_topic, QoS::AtLeastOnce).unwrap();
     client.subscribe(&ack_topic, QoS::AtLeastOnce).unwrap();
     client
+        .subscribe(&file_received_topic, QoS::AtLeastOnce)
+        .unwrap();
+    client
         .subscribe(format!("{presence_prefix}/+"), QoS::AtLeastOnce)
         .unwrap();
     client.subscribe(&job_topic, QoS::AtLeastOnce).unwrap();
@@ -386,7 +463,10 @@ fn main() {
         let listener = TcpListener::bind(("0.0.0.0", port))
             .unwrap_or_else(|e| panic!("{port}番ポートでのlisten開始に失敗しました: {e}"));
         println!("[system] {port}番ポートで常時待ち受けを開始しました（マイコン役）");
-        thread::spawn(move || run_file_listener(listener));
+        let client = client.clone();
+        let name = name.clone();
+        let file_received_topic = file_received_topic.clone();
+        thread::spawn(move || run_file_listener(listener, client, name, file_received_topic));
     }
 
     // --- ④ 別スレッドを立てて「キーボード入力 → メッセージ送信」を担当させる ---
@@ -546,6 +626,8 @@ fn main() {
                     handle_offer(&text, &name, &client, &ack_topic, &host, port, listen_port);
                 } else if publish.topic == ack_topic {
                     handle_ack(&text, &pending_offers);
+                } else if publish.topic == file_received_topic {
+                    handle_file_received(&text);
                 } else if publish.topic.starts_with(&presence_prefix) {
                     handle_presence(&publish.topic, &text, &presence_prefix, &roster);
                 } else if publish.topic == job_topic {
