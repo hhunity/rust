@@ -32,6 +32,11 @@ fn parse_state_topic<'a>(publish_topic: &'a str, topic: &str) -> Option<&'a str>
 }
 
 fn main() {
+    // ログ出力の仕組み（`log`クレート）を初期化する。環境変数`RUST_LOG=mqtt_app=info`を
+    // 指定して起動すると、MQTTのpublish/受信ログが見えるようになる
+    // （詳しくは[`mqtt_app::mqtt_log`]参照）。
+    env_logger::init();
+
     // --- ① コマンドライン引数（起動時に渡した文字列）を読み取る ---
     // `.skip(1)`は「0番目（実行ファイル名）を読み飛ばす」という意味です。
     let mut args = std::env::args().skip(1);
@@ -104,6 +109,7 @@ fn main() {
 
     // 接続できたらすぐ自分のNBIRTHをretain付きでpublishする
     let birth = serde_json::to_vec(&BirthDeathMsg { seq: next_seq(&seq.presence_counter) }).unwrap();
+    mqtt_app::mqtt_log::log_publish(&birth_topic, &birth);
     client.publish(&birth_topic, QoS::AtLeastOnce, true, birth).unwrap();
 
     // 起動時に一度だけ固定ポートでlistenを開始し、そのままプログラムが終わるまで
@@ -135,6 +141,7 @@ fn main() {
                     continue;
                 }
                 let message = format!("{name}: {line}");
+                mqtt_app::mqtt_log::log_publish(&topic, message.as_bytes());
                 client.publish(&topic, QoS::AtLeastOnce, false, message.as_bytes()).unwrap();
             }
         });
@@ -147,6 +154,7 @@ fn main() {
         match notification {
             Ok(Event::Incoming(Packet::Publish(publish))) => {
                 let text = String::from_utf8_lossy(&publish.payload);
+                mqtt_app::mqtt_log::log_receive(&publish.topic, &publish.payload);
 
                 if publish.topic == cmd_topic || publish.topic == all_cmd_topic {
                     let Ok(cmd) = serde_json::from_str::<CmdMsg>(&text) else {

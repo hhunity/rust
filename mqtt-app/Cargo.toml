@@ -30,3 +30,8 @@ rumqttc = "0.25"
 # 自動生成してくれる（C++でいうリフレクションが無い代わりに、マクロでコード生成する）
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# log/env_logger: C++でいう spdlog のようなログ出力の仕組み。`log`はログ出力用の
+# 共通インターフェース（マクロ）だけを提供する薄いクレートで、実際に画面へ出力する
+# 処理は`env_logger`が担当する（環境変数`RUST_LOG`でログの詳しさを制御できる）。
+log = "0.4"
+env_logger = "0.11"

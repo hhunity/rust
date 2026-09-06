@@ -18,6 +18,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 
 use crate::messages::{AckMsg, BirthDeathMsg, CmdMsg, DataMsg, DoneMsg, JobMsg, OfferMsg, PresenceMsg, ReceivedMsg};
+use crate::mqtt_log;
 use crate::seq::{check_seq, next_seq, ControllerSeqState};
 
 /// 送信申し出(id)ごとに「これから送るファイルのパス」を覚えておく辞書。
@@ -228,6 +229,7 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
         seq: next_seq(&seq.state_counter),
     })
     .unwrap();
+    mqtt_log::log_publish(&state_topic, &online);
     client.publish(&state_topic, QoS::AtLeastOnce, true, online).unwrap();
 
     let pending_offers: PendingOffers = Arc::new(Mutex::new(HashMap::new()));
@@ -292,6 +294,7 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
                         seq: next_seq(&seq.job_counter),
                     };
                     let payload = serde_json::to_vec(&CmdMsg::Job(job)).unwrap();
+                    mqtt_log::log_publish(&all_cmd_topic, &payload);
                     client.publish(&all_cmd_topic, QoS::AtLeastOnce, false, payload).unwrap();
                     println!(
                         "[system] ジョブ{id}を{}台のマイコン({targets:?})へ配信しました。完了を待っています…",
@@ -366,6 +369,7 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
                     // 宛先(to)は、ペイロードではなくトピック自体（`<topic>/NCMD/<to>`）で表す。
                     let offer_topic = format!("{topic}/NCMD/{to}");
                     let payload = serde_json::to_vec(&CmdMsg::FileOffer(offer)).unwrap();
+                    mqtt_log::log_publish(&offer_topic, &payload);
                     client.publish(&offer_topic, QoS::AtLeastOnce, false, payload).unwrap();
                     println!(
                         "[system] {to}へ {filename} ({} bytes) の送信を申し出ました。相手の応答を待っています…",
@@ -377,6 +381,7 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
                 // ここに来たら普通のチャットメッセージ
                 let (qos, text) = parse_qos_prefix(&line);
                 let message = format!("{name}: {text}");
+                mqtt_log::log_publish(&topic, message.as_bytes());
                 client.publish(&topic, qos, false, message.as_bytes()).unwrap();
             }
         });
@@ -395,6 +400,7 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
         match notification {
             Ok(Event::Incoming(Packet::Publish(publish))) => {
                 let text = String::from_utf8_lossy(&publish.payload);
+                mqtt_log::log_receive(&publish.topic, &publish.payload);
 
                 if let Some(who) = parse_named_topic(&publish.topic, &topic, "NBIRTH") {
                     let Ok(msg) = serde_json::from_str::<BirthDeathMsg>(&text) else {

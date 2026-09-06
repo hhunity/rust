@@ -13,6 +13,7 @@ use std::time::Duration;
 use rumqttc::{Client, QoS};
 
 use crate::messages::{AckMsg, DataMsg, DoneMsg, JobMsg, OfferMsg};
+use crate::mqtt_log;
 use crate::seq::{check_seq, next_seq, DeviceSeqState};
 
 /// `OfferMsg`（`CmdMsg::FileOffer`の中身）を受け取ったときの処理。
@@ -50,6 +51,7 @@ pub fn handle_offer(
         seq: next_seq(&seq.data_counter),
     };
     let payload = serde_json::to_vec(&DataMsg::FileAck(ack)).unwrap();
+    mqtt_log::log_publish(data_topic, &payload);
     client.publish(data_topic, QoS::AtLeastOnce, false, payload).unwrap();
 }
 
@@ -72,6 +74,7 @@ pub fn handle_job(job: JobMsg, client: &Client, data_topic: &str, seq: &DeviceSe
         println!("[system] ジョブ{}の処理が完了しました", job.id);
         let done = DoneMsg { id: job.id, seq: next_seq(&data_counter) };
         let payload = serde_json::to_vec(&DataMsg::JobDone(done)).unwrap();
+        mqtt_log::log_publish(&data_topic, &payload);
         client.publish(&data_topic, QoS::AtLeastOnce, false, payload).unwrap();
     });
 }

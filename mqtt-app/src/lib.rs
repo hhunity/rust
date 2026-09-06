@@ -18,6 +18,7 @@
 //!
 //! - [`messages`] — MQTT上でやり取りするメッセージの形（JSON）。いわば通信プロトコルの定義書
 //! - [`seq`] — メッセージの抜け（欠落）を検知するための連番の仕組み
+//! - [`mqtt_log`] — publish/受信のたびにログを出すための小さな共通ヘルパー
 //! - [`broker`] — MQTTブローカー（サーバー本体）の起動処理。`mqtt-server`だけが使う
 //! - [`controller`] — 「パソコン役」の指示出しロジック（チャット・`/send`・`/job`）。`mqtt-server`だけが使う
 //! - [`file_transfer`] — 「マイコン役」の、生TCPでのファイル受信ロジック。`mqtt-client`だけが使う
@@ -99,4 +100,5 @@ pub mod controller;
 pub mod device;
 pub mod file_transfer;
 pub mod messages;
+pub mod mqtt_log;
 pub mod seq;

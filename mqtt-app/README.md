@@ -256,6 +256,29 @@ MQTTは大きなバイナリデータの配信には向いていないため、*
 返す、という簡易的な処理をします。実機では、この「1秒待つ」部分を実際の印刷やモーター制御など
 の処理に置き換えることになります。
 
+## ログ出力（MQTTのpublish/受信を確認する）
+
+`[system]`で始まる行は、コマンドの結果など人間向けの表示です。それとは別に、**MQTTで
+実際に何をpublish/受信したか**（トピック名とペイロードそのもの）を1行ずつログに出す
+仕組みを`log`/`env_logger`クレートで用意しています（`src/mqtt_log.rs`参照）。
+
+デフォルトでは何も表示されません。環境変数`RUST_LOG`で有効にします：
+
+```sh
+RUST_LOG=mqtt_app=info cargo run --bin mqtt-server
+RUST_LOG=mqtt_app=info cargo run --bin mqtt-client -- device1 9101
+```
+
+```
+[2026-09-06T03:40:28Z INFO  mqtt_app::mqtt_log] [MQTT送信] topic=chat/NCMD/device1 payload={"type":"file_offer","id":"pc-...","from":"pc","filename":"testfile.txt","size":15,"seq":0}
+[2026-09-06T03:40:28Z INFO  mqtt_app::mqtt_log] [MQTT受信] topic=chat/NDATA/device1 payload={"type":"file_ack","id":"pc-...","host":"127.0.0.1","port":19041,"seq":0}
+```
+
+**`RUST_LOG=info`のように、クレート名を付けずに指定しないでください**。それだと依存
+クレートである`rumqttd`（ブローカー本体）の内部ログまで大量に表示され、自分たちの
+MQTT通信ログが埋もれてしまいます。`mqtt_app=info`のように**自分のクレート名だけ**を
+指定するのがポイントです。
+
 ## プロジェクトの中身
 
 ```

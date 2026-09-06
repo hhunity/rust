@@ -112,6 +112,7 @@ fn receive_one_file(
     let report = |status: &str, size: u64| {
         let msg = ReceivedMsg { id: id.clone(), status: status.to_string(), size, seq: next_seq(seq_counter) };
         let payload = serde_json::to_vec(&DataMsg::FileReceived(msg)).unwrap();
+        crate::mqtt_log::log_publish(data_topic, &payload);
         // publish自体が失敗しても、ここでできることは無いので無視する
         // （`let _ = ...` は、C++でいう「戻り値を(void)キャストして意図的に捨てる」のと同じ）
         let _ = client.publish(data_topic, QoS::AtLeastOnce, false, payload);
