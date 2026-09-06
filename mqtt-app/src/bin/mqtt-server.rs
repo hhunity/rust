@@ -25,14 +25,6 @@ use mqtt_app::{broker, controller};
 /// C++の`main`と違い、コマンドライン引数は明示的な`argc`/`argv`ではなく、
 /// `std::env::args()`という「イテレータ」を通じて取得します。
 fn main() {
-    // ログ出力の仕組み（`log`クレート）を初期化する。これを呼ばないと、コード中の
-    // `log::info!`などは何も出力されない（C++でいう、ロガーライブラリを使う前に
-    // 一度だけ`spdlog::init()`のような初期化を呼ぶのと同じ）。
-    // 環境変数`RUST_LOG=mqtt_app=info`を指定して起動すると、MQTTのpublish/受信ログが
-    // 見えるようになる（`rumqttd`など依存クレートの内部ログを混ぜたくないので、
-    // クレート名を指定する。詳しくは[`mqtt_app::mqtt_log`]参照）。
-    env_logger::init();
-
     // 1番目の引数: ブローカーの待ち受けポート（省略時は1883）。
     // `.nth(1)`が「0番目（実行ファイル名）を飛ばして1番目を取る」に相当し、
     // `.and_then(...)`はC++でいう「Optionalの値があれば変換し、無ければ無いまま」という連鎖処理、
@@ -45,6 +37,16 @@ fn main() {
     let name = std::env::args().nth(2).unwrap_or_else(|| "pc".to_string());
     // 3番目の引数: チャット・ファイル送信などの基点になるトピック（省略時は"chat"）
     let topic = std::env::args().nth(3).unwrap_or_else(|| "chat".to_string());
+    // 4番目の引数（省略可）: ログの出力先ファイル。省略時は標準エラー出力のまま。
+    let log_file = std::env::args().nth(4);
+
+    // ログ出力の仕組み（`log`クレート）を初期化する。これを呼ばないと、コード中の
+    // `log::info!`などは何も出力されない（C++でいう、ロガーライブラリを使う前に
+    // 一度だけ`spdlog::init()`のような初期化を呼ぶのと同じ）。
+    // 環境変数`RUST_LOG=mqtt_app=info`を指定して起動すると、MQTTのpublish/受信ログが
+    // 見えるようになる（`rumqttd`など依存クレートの内部ログを混ぜたくないので、
+    // クレート名を指定する。詳しくは[`mqtt_app::mqtt_log`]参照）。
+    mqtt_app::mqtt_log::init_logger(log_file.as_deref());
 
     // ブローカーを別スレッドで起動する（broker::runはブロックし続けるので別スレッド必須）。
     // `thread::spawn(move || ...)` はC++の`std::thread(lambda)`と同じですが、`move`により

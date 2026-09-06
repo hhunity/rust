@@ -32,24 +32,19 @@ fn parse_state_topic<'a>(publish_topic: &'a str, topic: &str) -> Option<&'a str>
 }
 
 fn main() {
-    // ログ出力の仕組み（`log`クレート）を初期化する。環境変数`RUST_LOG=mqtt_app=info`を
-    // 指定して起動すると、MQTTのpublish/受信ログが見えるようになる
-    // （詳しくは[`mqtt_app::mqtt_log`]参照）。
-    env_logger::init();
-
     // --- ① コマンドライン引数（起動時に渡した文字列）を読み取る ---
     // `.skip(1)`は「0番目（実行ファイル名）を読み飛ばす」という意味です。
     let mut args = std::env::args().skip(1);
 
     let name = args.next().unwrap_or_else(|| {
-        eprintln!("usage: mqtt-client <name> <listen_port> [host] [port] [topic]");
+        eprintln!("usage: mqtt-client <name> <listen_port> [host] [port] [topic] [log_file]");
         std::process::exit(1);
     });
     // マイコン役は必ずTCP待ち受けを行うので、listen_portは省略できない必須引数にしている。
     let listen_port: u16 = args
         .next()
         .unwrap_or_else(|| {
-            eprintln!("usage: mqtt-client <name> <listen_port> [host] [port] [topic]");
+            eprintln!("usage: mqtt-client <name> <listen_port> [host] [port] [topic] [log_file]");
             std::process::exit(1);
         })
         .parse()
@@ -60,6 +55,13 @@ fn main() {
     let host = args.next().unwrap_or_else(|| "127.0.0.1".to_string());
     let port: u16 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1883);
     let topic = args.next().unwrap_or_else(|| "chat".to_string());
+    // 6番目の引数（省略可）: ログの出力先ファイル。省略時は標準エラー出力のまま。
+    let log_file = args.next();
+
+    // ログ出力の仕組み（`log`クレート）を初期化する。環境変数`RUST_LOG=mqtt_app=info`を
+    // 指定して起動すると、MQTTのpublish/受信ログが見えるようになる
+    // （詳しくは[`mqtt_app::mqtt_log`]参照）。
+    mqtt_app::mqtt_log::init_logger(log_file.as_deref());
 
     // 自分のIPアドレスを起動時に1回だけ調べておく（DHCPで配布された後にこのプログラムを
     // 起動する運用を前提にしているので、動いている最中にIPが変わることは想定しない。

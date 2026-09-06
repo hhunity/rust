@@ -16,6 +16,31 @@
 //! `RUST_LOG=info`のように**クレート名を付けずに**指定すると、依存クレートである
 //! `rumqttd`（ブローカー本体）の内部ログまで大量に表示されてしまうので注意してください。
 //! `mqtt_app=info`のように**自分のクレート名だけを指定する**のがおすすめです。
+//!
+//! ## ログをファイルへ書き出す
+//!
+//! `mqtt-server`・`mqtt-client`はどちらも、最後の引数として**ログの出力先ファイル**を
+//! 受け付けます（省略すれば、これまで通り標準エラー出力に表示されます）。詳しくは
+//! `mqtt-app`のREADMEを参照してください。
+
+/// ログ出力の仕組み（`log`クレート）を初期化する。
+///
+/// `log_file`に`Some(path)`が渡されたら、そのファイルへログを書き出す（無ければ
+/// 新規作成する。既にある場合は中身を空にしてから書き込む）。`None`ならこれまで通り
+/// 標準エラー出力（stderr）に書き出す。
+///
+/// `env_logger::Builder`はC++でいう「ロガーの設定を組み立てるビルダーオブジェクト」に
+/// 近いもので、`.target(...)`のような「メソッドチェーン」で設定を1つずつ足していき、
+/// 最後に`.init()`を呼んで確定させる、という使い方をします。
+pub fn init_logger(log_file: Option<&str>) {
+    let mut builder = env_logger::Builder::from_default_env();
+    if let Some(path) = log_file {
+        let file = std::fs::File::create(path)
+            .unwrap_or_else(|e| panic!("ログファイル{path}の作成に失敗しました: {e}"));
+        builder.target(env_logger::Target::Pipe(Box::new(file)));
+    }
+    builder.init();
+}
 
 /// MQTTへpublishするときに、送信内容を1行ログに出す。
 ///

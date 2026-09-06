@@ -41,16 +41,20 @@ cargo run --bin mqtt-client
 ### パソコン役の起動
 
 ```sh
-cargo run --bin mqtt-server -- [ポート番号] [名前] [トピック]
+cargo run --bin mqtt-server -- [ポート番号] [名前] [トピック] [ログファイル]
 
 # 例（すべて省略）
 cargo run --bin mqtt-server
 
 # 例（明示的に指定）
 cargo run --bin mqtt-server -- 1883 pc chat
+
+# 例（MQTT通信ログをファイルへ書き出す）
+RUST_LOG=mqtt_app=info cargo run --bin mqtt-server -- 1883 pc chat mqtt-server.log
 ```
 
-引数はすべて省略可能で、それぞれ `1883` / `pc` / `chat` がデフォルトです。
+引数はすべて省略可能で、それぞれ `1883` / `pc` / `chat` / （標準エラー出力）が
+デフォルトです。`ログファイル`について詳しくは後述の「ログ出力」の節を参照してください。
 
 起動すると、中で2つのことが順番に起きます。
 
@@ -81,7 +85,7 @@ cargo run --bin mqtt-server -- 1883 pc chat
 ### マイコン役の起動
 
 ```sh
-cargo run --bin mqtt-client -- <名前> <listen_port> [host] [port] [topic]
+cargo run --bin mqtt-client -- <名前> <listen_port> [host] [port] [topic] [log_file]
 
 # 例（パソコンと同じマシンで動作確認する場合）
 cargo run --bin mqtt-client -- device1 9101 127.0.0.1 1883 chat
@@ -89,11 +93,15 @@ cargo run --bin mqtt-client -- device2 9102 127.0.0.1 1883 chat
 
 # 例（別のマシンから、パソコン(192.168.1.20)のブローカーへ繋ぐ場合）
 cargo run --bin mqtt-client -- device1 9101 192.168.1.20 1883 chat
+
+# 例（MQTT通信ログをファイルへ書き出す）
+RUST_LOG=mqtt_app=info cargo run --bin mqtt-client -- device1 9101 127.0.0.1 1883 chat mqtt-client.log
 ```
 
-`<名前>`と`<listen_port>`は必須、`host`・`port`・`topic`は省略可能で、それぞれ`127.0.0.1`/
-`1883`/`chat`がデフォルトです。マイコン役は必ずファイル受信用のTCP待ち受けを行うため、
-`listen_port`（他のマイコンと重複しない番号）は省略できません。
+`<名前>`と`<listen_port>`は必須、`host`・`port`・`topic`・`log_file`は省略可能で、
+それぞれ`127.0.0.1`/`1883`/`chat`/（標準エラー出力）がデフォルトです。マイコン役は
+必ずファイル受信用のTCP待ち受けを行うため、`listen_port`（他のマイコンと重複しない
+番号）は省略できません。`log_file`について詳しくは後述の「ログ出力」の節を参照してください。
 
 **`host`は「パソコン」ではなく「MQTTブローカーの住所」を指定する引数です**（今回はパソコンが
 ブローカーを兼ねているので、実質パソコンのアドレスと同じ値になります）。上の例のように
@@ -278,6 +286,21 @@ RUST_LOG=mqtt_app=info cargo run --bin mqtt-client -- device1 9101
 クレートである`rumqttd`（ブローカー本体）の内部ログまで大量に表示され、自分たちの
 MQTT通信ログが埋もれてしまいます。`mqtt_app=info`のように**自分のクレート名だけ**を
 指定するのがポイントです。
+
+### ログをファイルへ書き出す
+
+`mqtt-server`・`mqtt-client`はどちらも、**最後の引数としてログの出力先ファイル**を
+受け付けます（省略すればこれまで通り標準エラー出力に表示されます）。
+
+```sh
+RUST_LOG=mqtt_app=info cargo run --bin mqtt-server -- 1883 pc chat mqtt-server.log
+RUST_LOG=mqtt_app=info cargo run --bin mqtt-client -- device1 9101 127.0.0.1 1883 chat mqtt-client.log
+```
+
+`[system]`で始まる人間向けの表示（`println!`によるもの）はこれまで通り標準出力に
+残り、`log`クレート経由のMQTT通信ログだけがファイルの方へ書き出されます（2つの出力先を
+分けて使い分けられる、ということです）。指定したファイルが無ければ新規作成、既に
+あれば中身を空にしてから書き込みます（`init_logger`関数、`src/mqtt_log.rs`参照）。
 
 ## プロジェクトの中身
 
