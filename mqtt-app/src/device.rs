@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use rumqttc::{Client, QoS};
 
-use crate::file_transfer::detect_local_ip;
 use crate::messages::{AckMsg, DataMsg, DoneMsg, JobMsg, OfferMsg};
 use crate::seq::{check_seq, next_seq, DeviceSeqState};
 
@@ -22,29 +21,34 @@ use crate::seq::{check_seq, next_seq, DeviceSeqState};
 /// 届かないように設計してある（詳しくはREADMEのトピック構造の節を参照）ので、
 /// 「これは本当に自分宛てか？」というチェックはここでは不要です（トピック自体が保証しています）。
 ///
-/// 「ここに繋いで」という返事(ACK)を、今のIPアドレス＋固定ポートで、自分のdataトピックへ
+/// 「ここに繋いで」という返事(ACK)を、自分のIPアドレス＋固定ポートで、自分のdataトピックへ
 /// publishする（待ち受け自体はもう起動時から動いているので、ここで新しく始める必要はない）。
+/// `my_host`は起動時に1回だけ調べたもの（[`crate::file_transfer::detect_local_ip`]参照）を
+/// そのまま渡してもらう想定（DHCPで配布された後に起動する運用を前提に、OFFERのたびに
+/// 調べ直すことはしていない）。
 pub fn handle_offer(
     offer: OfferMsg,
     client: &Client,
     data_topic: &str,
-    broker_host: &str,
-    broker_port: u16,
+    my_host: &str,
     listen_port: u16,
     seq: &DeviceSeqState,
 ) {
     check_seq(&offer.from, offer.seq, &seq.offer_tracker, false);
 
-    // DHCPなどでIPアドレスが変わっている可能性があるので、返事のたびに毎回調べ直す（ポート番号は固定のまま）
-    let host = detect_local_ip(broker_host, broker_port);
     println!(
-        "[system] {}さんから {} ({} bytes) を受け取ります（{host}:{listen_port} で待ち受け中）",
+        "[system] {}さんから {} ({} bytes) を受け取ります（{my_host}:{listen_port} で待ち受け中）",
         offer.from, offer.filename, offer.size
     );
 
     // 返事は自分自身のdataトピックへpublishする（誰から見てもこれは「自分からの報告」なので、
     // 相手の名前をトピックに含める必要はない）。
-    let ack = AckMsg { id: offer.id, host, port: listen_port, seq: next_seq(&seq.data_counter) };
+    let ack = AckMsg {
+        id: offer.id,
+        host: my_host.to_string(),
+        port: listen_port,
+        seq: next_seq(&seq.data_counter),
+    };
     let payload = serde_json::to_vec(&DataMsg::FileAck(ack)).unwrap();
     client.publish(data_topic, QoS::AtLeastOnce, false, payload).unwrap();
 }

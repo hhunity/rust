@@ -21,7 +21,7 @@ use std::time::Duration;
 use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 
 use mqtt_app::device::{handle_job, handle_offer};
-use mqtt_app::file_transfer::run_file_listener;
+use mqtt_app::file_transfer::{detect_local_ip, run_file_listener};
 use mqtt_app::messages::{BirthDeathMsg, CmdMsg, PresenceMsg};
 use mqtt_app::seq::{check_seq, next_seq, DeviceSeqState};
 
@@ -55,6 +55,11 @@ fn main() {
     let host = args.next().unwrap_or_else(|| "127.0.0.1".to_string());
     let port: u16 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1883);
     let topic = args.next().unwrap_or_else(|| "chat".to_string());
+
+    // 自分のIPアドレスを起動時に1回だけ調べておく（DHCPで配布された後にこのプログラムを
+    // 起動する運用を前提にしているので、動いている最中にIPが変わることは想定しない。
+    // もし動的な環境で使うなら、OFFERを受け取るたびに調べ直す設計に戻す必要がある）。
+    let my_host = detect_local_ip(&host, port);
 
     // このマイコンが関わるトピックは5つ。Sparkplug B本家のmessage_type名
     // （`spBv1.0/<group_id>/<message_type>/<edge_node_id>`）をそのまま使っている。
@@ -149,7 +154,7 @@ fn main() {
                     };
                     match cmd {
                         CmdMsg::FileOffer(offer) => {
-                            handle_offer(offer, &client, &data_topic, &host, port, listen_port, &seq)
+                            handle_offer(offer, &client, &data_topic, &my_host, listen_port, &seq)
                         }
                         CmdMsg::Job(job) => handle_job(job, &client, &data_topic, &seq),
                     }
