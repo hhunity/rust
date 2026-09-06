@@ -126,6 +126,82 @@ MQTTでのOFFER/ACKのやり取りを通じて実行時に決まる住所**だ�
 もし動いている途中でIPが変わりうる環境で使うなら、OFFERを受け取るたびに調べ直す設計に
 戻す必要があります）。
 
+### 検討したが採用しなかった設計：パソコン⇔ブローカーの同一プロセス内直結（`rumqttd`のLink）
+
+パソコンは実はブローカーと同じプロセスで動いているので、上の表の「接続しにいく側①」も
+TCPソケットを使わず、`rumqttd`が提供する`Broker::link()`という**同一プロセス内で直結する
+専用API**（`LinkTx`/`LinkRx`）に置き換えられないか検討しました。期待したメリットは、
+同じプロセス内なのにTCPソケットを経由する無駄が無くなることと、`mqtt-server.rs`の
+`thread::sleep(300ms)`（ブローカー起動待ちのその場しのぎ）が不要になることでした。
+
+実際に依存クレート`rumqttd 0.20.0`のソース（`src/link/local.rs`）を確認したところ、
+次の理由で見送りました。
+
+1. **お手軽な`LinkTx::publish()`は、QoS::AtMostOnce・retain=falseに固定されている**
+   （ソースコード上、値がハードコードされていて変更できません）。今回はパソコンの
+   `STATE`（"online"）をretain=trueで送る必要があり、OFFER/JOBもQoS::AtLeastOnceで
+   送っているため、そのままでは使えません。
+2. QoS/retainを自分で指定できる低レベルな`send()`もありますが、これは`async fn`です
+   （ただし中身を読むと実際には一度も`.await`していないので、フルの`tokio`ランタイム
+   なしでも軽量に呼び出せそうではあります）。
+3. **そもそも、パソコン⇔ブローカー間だけを直結しても、実は意味が薄いです**。MQTTの
+   仕様では、ブローカーが購読者へ配信するQoSは`min(publishされたQoS, 購読者が指定した
+   QoS)`で決まります（保証は実際にやり取りして初めて成立するものなので、両端のうち
+   弱い方に合わせるしかない、という理屈です）。マイコンは実際のネットワーク越しの
+   購読者なので、もしパソコン側のpublishをQoS::AtMostOnceに落としてしまうと、
+   **マイコンがどれだけ高いQoSで購読していても、配信は常にAtMostOnceまで格下げされて
+   しまいます**。パソコン⇔ブローカー間が同一プロセスで信頼できても、ブローカー⇔
+   マイコン間は今まで通り本物の（不安定になりうる）ネットワークなので、そちらの
+   保証を弱めるわけにはいきません。
+
+結論として、**手軽な方法（`publish()`）はQoS/retainの制約で使えず、制約を回避できる
+方法（`send()`）を使うくらいなら乗り換える旨味（お手軽さ）が無い**と判断し、パソコン
+⇔ブローカー間も今まで通り普通のTCP接続（`rumqttc::Client`）のままにしています。
+
+### 起動からファイル送信までの流れ（シーケンス図）
+
+ここまでの説明を、実際の時系列に沿って1枚の図にまとめます。
+
+```mermaid
+sequenceDiagram
+    actor ユーザー
+    participant パソコン
+    participant ブローカー
+    participant マイコン
+
+    Note over パソコン,ブローカー: パソコンの起動（mqtt-server）
+    パソコン->>ブローカー: (スレッドとして起動) 0.0.0.0:1883 で待ち受け開始
+    Note over パソコン: 300ms待つ（起動待ちのその場しのぎ）
+    パソコン->>ブローカー: CONNECT（127.0.0.1へ、普通のMQTTクライアントとして）
+    パソコン->>ブローカー: SUBSCRIBE chat, NBIRTH/+, NDEATH/+, NDATA/+
+    パソコン->>ブローカー: PUBLISH(retain) STATE/pc {"online"}
+
+    Note over マイコン,ブローカー: マイコンの起動（mqtt-client）
+    マイコン->>マイコン: detect_local_ip()で自分のIPを起動時に1回だけ調べる
+    マイコン->>ブローカー: CONNECT（Last WillとしてNDEATH/device1を登録）
+    マイコン->>ブローカー: SUBSCRIBE chat, NCMD/device1, NCMD/all, STATE/+
+    マイコン->>ブローカー: PUBLISH(retain) NBIRTH/device1 {seq:0}
+    ブローカー->>パソコン: NBIRTH/device1 を転送
+    パソコン->>パソコン: rosterにdevice1を追加、「オンラインになりました」
+
+    Note over ユーザー,マイコン: ファイル送信（/send device1 photo.png）
+    ユーザー->>パソコン: /send device1 photo.png
+    パソコン->>ブローカー: PUBLISH NCMD/device1 {file_offer, id, filename, size}
+    ブローカー->>マイコン: NCMD/device1 を転送
+    マイコン->>マイコン: handle_offer（自分のhost:listen_portでACKを作成）
+    マイコン->>ブローカー: PUBLISH NDATA/device1 {file_ack, host, port}
+    ブローカー->>パソコン: NDATA/device1 を転送
+    パソコン->>パソコン: handle_ack（pending_offersからファイルパスを取得）
+    パソコン->>マイコン: 生TCP接続（id＋ファイル名＋サイズ＋中身）
+    マイコン->>マイコン: ファイルを保存
+    マイコン->>ブローカー: PUBLISH NDATA/device1 {file_received, status:"ok"}
+    ブローカー->>パソコン: NDATA/device1 を転送
+    パソコン->>ユーザー: 「受信完了しました」と表示
+```
+
+ファイルの中身そのもの（「生TCP接続」の1行）だけが、ブローカーを経由しない唯一の
+やり取りです。それ以外は全部MQTT（ブローカー経由）で行われています。
+
 ### チャット
 
 行を入力してEnterを押すと`<名前>: <入力内容>`が`<topic>`にpublishされます
