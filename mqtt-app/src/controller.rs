@@ -262,7 +262,18 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
                 }
 
                 // "/job 内容": 今オンラインの全マイコンへ一斉配信し、全員完了するまで待つ
-                if let Some(content) = line.strip_prefix("/job ") {
+                //
+                // `line.strip_prefix("/job ")`（末尾にスペース）だけで判定していると、
+                // 内容を付けずに"/job"とだけ打った場合にスペースが無く一致しなくなり、
+                // このifを素通りして下の「普通のチャットメッセージ」として送られてしまう、
+                // という紛らわしい挙動になっていました。`line == "/job"`も合わせて拾い、
+                // 内容が空なら使い方を案内するようにしています。
+                if line == "/job" || line.starts_with("/job ") {
+                    let content = line.strip_prefix("/job").unwrap().trim();
+                    if content.is_empty() {
+                        println!("[system] 使い方: /job <内容>");
+                        continue;
+                    }
                     // ロックした瞬間の名簿を「今回のジョブの宛先」として写し取る
                     // （HashSet<String>はC++のstd::unordered_set<std::string>に相当）
                     let targets: HashSet<String> = roster
@@ -334,7 +345,12 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
                 }
 
                 // "/send 宛先の名前 ファイルパス": ファイル送信の申し出
-                if let Some(rest) = line.strip_prefix("/send ") {
+                //
+                // `/job`と同じ理由で、`line == "/send"`（引数無し）も合わせて拾う。
+                // 引数が足りない場合は、下の`split_once`が`None`を返すので、
+                // 既存の使い方案内にそのまま繋がる。
+                if line == "/send" || line.starts_with("/send ") {
+                    let rest = line.strip_prefix("/send").unwrap().trim();
                     // split_once(' ') で「最初のスペースの前後」に文字列を2つに割る
                     // （C++のstd::string::find(' ')＋substr()を1回で済ませたイメージ）
                     let Some((to, path_str)) = rest.split_once(' ') else {

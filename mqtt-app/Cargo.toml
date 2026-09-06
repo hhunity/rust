@@ -35,3 +35,8 @@ serde_json = "1"
 # 処理は`env_logger`が担当する（環境変数`RUST_LOG`でログの詳しさを制御できる）。
 log = "0.4"
 env_logger = "0.11"
+# clap: コマンドライン引数を解析するクレート。C++でいう`CLI11`や`boost::program_options`、
+# `getopt_long`に相当します。`--port 1883`のような「名前付き引数」を、構造体1つに
+# `#[derive(Parser)]`を付けるだけで解析できるようにしてくれます（順番を気にせず、
+# 好きな引数だけを指定できる）。
+clap = { version = "4", features = ["derive"] }

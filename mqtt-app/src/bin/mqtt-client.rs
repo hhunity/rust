@@ -25,38 +25,51 @@ use mqtt_app::file_transfer::{detect_local_ip, run_file_listener};
 use mqtt_app::messages::{BirthDeathMsg, CmdMsg, PresenceMsg};
 use mqtt_app::seq::{check_seq, next_seq, DeviceSeqState};
 
+use clap::Parser;
+
 /// 受信したpublishのトピックが `<topic>/STATE/<パソコンの名前>` の形なら、
 /// その`<パソコンの名前>`部分を取り出す。一致しなければ`None`。
 fn parse_state_topic<'a>(publish_topic: &'a str, topic: &str) -> Option<&'a str> {
     publish_topic.strip_prefix(topic)?.strip_prefix("/STATE/")
 }
 
-fn main() {
-    // --- ① コマンドライン引数（起動時に渡した文字列）を読み取る ---
-    // `.skip(1)`は「0番目（実行ファイル名）を読み飛ばす」という意味です。
-    let mut args = std::env::args().skip(1);
+// コマンドライン引数の形を表す構造体（`mqtt-server.rs`と同様、`clap`の`derive`機能を使う）。
+//
+// `name`・`listen_port`には`default_value`を付けていないので、**指定必須の引数**になります
+// （`clap`が自動で「必須です」というエラーを出してくれるので、自分で`unwrap_or_else`を
+// 書いて`exit(1)`する必要がありません）。構造体自体に`//`（`///`ではなく）を使っているのは、
+// この説明文が`--help`の出力に混ざってしまわないようにするためです。
+#[derive(Parser)]
+#[command(about = "マイコン役：パソコンからの指示を受けて、ファイルを受信したりジョブを実行したりする実行ファイル")]
+struct Args {
+    /// このマイコン自身のMQTTクライアントID
+    #[arg(short, long)]
+    name: String,
 
-    let name = args.next().unwrap_or_else(|| {
-        eprintln!("usage: mqtt-client <name> <listen_port> [host] [port] [topic] [log_file]");
-        std::process::exit(1);
-    });
-    // マイコン役は必ずTCP待ち受けを行うので、listen_portは省略できない必須引数にしている。
-    let listen_port: u16 = args
-        .next()
-        .unwrap_or_else(|| {
-            eprintln!("usage: mqtt-client <name> <listen_port> [host] [port] [topic] [log_file]");
-            std::process::exit(1);
-        })
-        .parse()
-        .unwrap_or_else(|_| {
-            eprintln!("listen_portは数値で指定してください");
-            std::process::exit(1);
-        });
-    let host = args.next().unwrap_or_else(|| "127.0.0.1".to_string());
-    let port: u16 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1883);
-    let topic = args.next().unwrap_or_else(|| "chat".to_string());
-    // 6番目の引数（省略可）: ログの出力先ファイル。省略時は標準エラー出力のまま。
-    let log_file = args.next();
+    /// ファイル受信用のTCP待ち受けポート
+    #[arg(long)]
+    listen_port: u16,
+
+    /// MQTTブローカーの住所（パソコンのアドレス）
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+
+    /// MQTTブローカーのポート
+    #[arg(short, long, default_value_t = 1883)]
+    port: u16,
+
+    /// チャット・ファイル送信などの基点になるトピック
+    #[arg(short, long, default_value = "chat")]
+    topic: String,
+
+    /// ログの出力先ファイル（省略時は標準エラー出力）
+    #[arg(short, long)]
+    log_file: Option<String>,
+}
+
+fn main() {
+    let args = Args::parse();
+    let Args { name, listen_port, host, port, topic, log_file } = args;
 
     // ログ出力の仕組み（`log`クレート）を初期化する。環境変数`RUST_LOG=mqtt_app=info`を
     // 指定して起動すると、MQTTのpublish/受信ログが見えるようになる

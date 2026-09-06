@@ -60,20 +60,32 @@ cargo run --bin mqtt-client
 ### パソコン役の起動
 
 ```sh
-cargo run --bin mqtt-server -- [ポート番号] [名前] [トピック] [ログファイル]
+cargo run --bin mqtt-server -- [OPTIONS]
+
+# 使い方の一覧を見る
+cargo run --bin mqtt-server -- --help
 
 # 例（すべて省略）
 cargo run --bin mqtt-server
 
-# 例（明示的に指定）
-cargo run --bin mqtt-server -- 1883 pc chat
+# 例（ポートと名前だけ指定。他は省略してデフォルトのまま）
+cargo run --bin mqtt-server -- --port 1883 --name pc
 
 # 例（MQTT通信ログをファイルへ書き出す）
-RUST_LOG=mqtt_app=info cargo run --bin mqtt-server -- 1883 pc chat mqtt-server.log
+RUST_LOG=mqtt_app=info cargo run --bin mqtt-server -- --log-file mqtt-server.log
 ```
 
-引数はすべて省略可能で、それぞれ `1883` / `pc` / `chat` / （標準エラー出力）が
-デフォルトです。`ログファイル`について詳しくは後述の「ログ出力」の節を参照してください。
+| 引数 | 短縮形 | デフォルト |
+|---|---|---|
+| `--port <PORT>` | `-p` | `1883` |
+| `--name <NAME>` | `-n` | `pc` |
+| `--topic <TOPIC>` | `-t` | `chat` |
+| `--log-file <PATH>` | `-l` | （標準エラー出力） |
+
+全部省略可能で、コマンドライン引数の解析には`clap`クレートを使っています。
+`--`の後に必要な引数だけを好きな順番で指定でき、`--port`のように省略形（`-p`）でも
+指定できます。`--help`を付けて実行すると、この一覧が自動生成された形で表示されます。
+`log-file`について詳しくは後述の「ログ出力」の節を参照してください。
 
 起動すると、中で2つのことが順番に起きます。
 
@@ -104,23 +116,35 @@ RUST_LOG=mqtt_app=info cargo run --bin mqtt-server -- 1883 pc chat mqtt-server.l
 ### マイコン役の起動
 
 ```sh
-cargo run --bin mqtt-client -- <名前> <listen_port> [host] [port] [topic] [log_file]
+cargo run --bin mqtt-client -- --name <名前> --listen-port <ポート番号> [OPTIONS]
+
+# 使い方の一覧を見る
+cargo run --bin mqtt-client -- --help
 
 # 例（パソコンと同じマシンで動作確認する場合）
-cargo run --bin mqtt-client -- device1 9101 127.0.0.1 1883 chat
-cargo run --bin mqtt-client -- device2 9102 127.0.0.1 1883 chat
+cargo run --bin mqtt-client -- --name device1 --listen-port 9101
+cargo run --bin mqtt-client -- --name device2 --listen-port 9102
 
 # 例（別のマシンから、パソコン(192.168.1.20)のブローカーへ繋ぐ場合）
-cargo run --bin mqtt-client -- device1 9101 192.168.1.20 1883 chat
+cargo run --bin mqtt-client -- --name device1 --listen-port 9101 --host 192.168.1.20
 
 # 例（MQTT通信ログをファイルへ書き出す）
-RUST_LOG=mqtt_app=info cargo run --bin mqtt-client -- device1 9101 127.0.0.1 1883 chat mqtt-client.log
+RUST_LOG=mqtt_app=info cargo run --bin mqtt-client -- --name device1 --listen-port 9101 --log-file mqtt-client.log
 ```
 
-`<名前>`と`<listen_port>`は必須、`host`・`port`・`topic`・`log_file`は省略可能で、
-それぞれ`127.0.0.1`/`1883`/`chat`/（標準エラー出力）がデフォルトです。マイコン役は
-必ずファイル受信用のTCP待ち受けを行うため、`listen_port`（他のマイコンと重複しない
-番号）は省略できません。`log_file`について詳しくは後述の「ログ出力」の節を参照してください。
+| 引数 | 短縮形 | 必須/デフォルト |
+|---|---|---|
+| `--name <NAME>` | `-n` | **必須** |
+| `--listen-port <PORT>` | （無し） | **必須** |
+| `--host <HOST>` | （無し） | `127.0.0.1` |
+| `--port <PORT>` | `-p` | `1883` |
+| `--topic <TOPIC>` | `-t` | `chat` |
+| `--log-file <PATH>` | `-l` | （標準エラー出力） |
+
+`--name`・`--listen-port`だけは必須で、指定し忘れると`clap`が「必須です」という
+エラーを表示して終了します（マイコン役は必ずファイル受信用のTCP待ち受けを行うため、
+`--listen-port`＝他のマイコンと重複しない番号、は省略できません）。それ以外は全部
+省略可能です。`log-file`について詳しくは後述の「ログ出力」の節を参照してください。
 
 **`host`は「パソコン」ではなく「MQTTブローカーの住所」を指定する引数です**（今回はパソコンが
 ブローカーを兼ねているので、実質パソコンのアドレスと同じ値になります）。上の例のように
@@ -139,11 +163,11 @@ RUST_LOG=mqtt_app=info cargo run --bin mqtt-client -- device1 9101 127.0.0.1 188
 
 | 誰 | 役割 | 何のための住所か | 決め方 |
 |---|---|---|---|
-| パソコン | 待ち受け（ブローカー） | マイコン・パソコン自身、双方からのMQTT接続を受け付ける | `0.0.0.0:<ポート>`固定（`broker.rs`）。ポート番号はmqtt-serverの第1引数（省略時`1883`） |
+| パソコン | 待ち受け（ブローカー） | マイコン・パソコン自身、双方からのMQTT接続を受け付ける | `0.0.0.0:<ポート>`固定（`broker.rs`）。ポート番号はmqtt-serverの`--port`引数（省略時`1883`） |
 | パソコン | 接続しにいく側①（MQTTクライアント） | コントローラ自身が、同じマシンのブローカーへMQTTで接続する | `127.0.0.1:<ポート>`固定（`mqtt-server.rs`）。同じプロセス内なので常にループバック |
 | パソコン | 接続しにいく側②（TCPクライアント） | ファイル送信時、申し出た相手のマイコンへ生TCPで接続しにいく | **CLI引数では指定しない**。マイコンからのACKメッセージに書かれている`host`/`port`を実行時にそのまま使う（`handle_ack`参照） |
-| マイコン | 待ち受け（ファイル受信用TCPサーバー） | パソコンから送られてくるファイルを、生TCPで受け取る | `0.0.0.0:<listen_port>`（`mqtt-client.rs`）。`listen_port`はmqtt-clientの第2引数（**必須、省略不可**） |
-| マイコン | 接続しにいく側（MQTTクライアント） | ブローカーへMQTTで接続する | mqtt-clientの第3・第4引数`host`/`port`（省略時`127.0.0.1`/`1883`）。別マシン運用時はパソコンの実LAN IPを指定する |
+| マイコン | 待ち受け（ファイル受信用TCPサーバー） | パソコンから送られてくるファイルを、生TCPで受け取る | `0.0.0.0:<listen_port>`（`mqtt-client.rs`）。`listen_port`はmqtt-clientの`--listen-port`引数（**必須、省略不可**） |
+| マイコン | 接続しにいく側（MQTTクライアント） | ブローカーへMQTTで接続する | mqtt-clientの`--host`/`--port`引数（省略時`127.0.0.1`/`1883`）。別マシン運用時はパソコンの実LAN IPを指定する |
 
 パソコンの「接続しにいく側②」だけ他と毛色が違うのは、**人間がCLI引数で決める住所ではなく、
 MQTTでのOFFER/ACKのやり取りを通じて実行時に決まる住所**だからです。マイコン自身のIPは
@@ -293,7 +317,7 @@ MQTTは大きなバイナリデータの配信には向いていないため、*
 
 ```sh
 RUST_LOG=mqtt_app=info cargo run --bin mqtt-server
-RUST_LOG=mqtt_app=info cargo run --bin mqtt-client -- device1 9101
+RUST_LOG=mqtt_app=info cargo run --bin mqtt-client -- --name device1 --listen-port 9101
 ```
 
 ```
@@ -308,12 +332,12 @@ MQTT通信ログが埋もれてしまいます。`mqtt_app=info`のように**�
 
 ### ログをファイルへ書き出す
 
-`mqtt-server`・`mqtt-client`はどちらも、**最後の引数としてログの出力先ファイル**を
-受け付けます（省略すればこれまで通り標準エラー出力に表示されます）。
+`mqtt-server`・`mqtt-client`はどちらも、**`--log-file`（`-l`）引数でログの出力先ファイル**を
+指定できます（省略すればこれまで通り標準エラー出力に表示されます）。
 
 ```sh
-RUST_LOG=mqtt_app=info cargo run --bin mqtt-server -- 1883 pc chat mqtt-server.log
-RUST_LOG=mqtt_app=info cargo run --bin mqtt-client -- device1 9101 127.0.0.1 1883 chat mqtt-client.log
+RUST_LOG=mqtt_app=info cargo run --bin mqtt-server -- --log-file mqtt-server.log
+RUST_LOG=mqtt_app=info cargo run --bin mqtt-client -- --name device1 --listen-port 9101 --log-file mqtt-client.log
 ```
 
 `[system]`で始まる人間向けの表示（`println!`によるもの）はこれまで通り標準出力に
