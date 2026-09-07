@@ -27,16 +27,29 @@ docker run --rm -it --gpus all ml-gpu:latest
 
 ### 方式C: 既存のRadonPy環境(env: radonpy)に差分だけpipで追加する (doc/ml-diff-pip-download.ps1)
 
-**既に`doc/radonpy-offline-install.sh`でRadonPy用のconda環境(env: radonpy)を
-構築済みで、そこに追加したいだけ**の場合はこれが一番手軽。pandas/numpy/
-rdkit/matplotlibは既にRadonPy環境に入っているので、残りの
-`scikit-learn` / `tqdm` / `jupyter` / `torch` だけをpipで追加する。
+**既にRadonPy用のconda環境(env: radonpy)を構築済みで、そこに追加したいだけ**
+の場合はこれが一番手軽。pandas/numpy/rdkit/matplotlibは既にRadonPy環境に
+入っているので、残りの`scikit-learn` / `tqdm` / `jupyter` / `torch` だけを
+pipで追加する。
 
 condaで追加しようとすると、GPU版pytorchが要求する新しいmklにpsi4/lammpsも
-巻き込まれてバージョンアップ・再ビルドされてしまう(psi4 1.9.1→1.11、
-lammps再ビルド等。実機で確認済み)。pipはcondaの依存関係解決を経由しない
-ため、psi4/lammps/mkl/numpy/scipy等の既存condaパッケージには一切触れずに
-追加できる(pip install前後で`conda list`の出力が完全一致することを確認済み)。
+巻き込まれてバージョンアップ・再ビルドされてしまう(実機相当の環境で確認済み)。
+pipはcondaの依存関係解決を経由しないため、psi4/lammps/mkl/numpy/scipy等の
+既存condaパッケージには一切触れずに追加できる(pip install前後で
+`conda list`の出力が完全一致することを、**doc/Dockerfile.radonpy方式
+(python=3.13, psi4=1.10)の環境で実際に確認済み**)。
+
+**重要: RadonPy環境のPythonバージョンを必ず確認すること。**
+`doc/Dockerfile.radonpy` / `doc/Dockerfile.radonpy-gpu` で構築した場合は
+**python=3.13**、古い`doc/radonpy-offline-install.sh`で構築した場合は
+python=3.11と、このリポジトリ内でも構築方法によってバージョンが異なる
+(python=3.13の方が新しく、`libint2.so.2`関連の既知の不具合も無い)。
+`ml-diff-pip-download.ps1`はデフォルトでpython=3.13向けにwheelを取得する
+ようになっているので、実機がpython=3.11の場合はスクリプト内の
+`--python-version` / `--abi` を `311` / `cp311` に書き換えること:
+```bash
+conda activate radonpy && python --version   # 実機で確認
+```
 
 ```powershell
 # Windows側(ネット接続あり)
@@ -50,10 +63,14 @@ conda activate radonpy
 python -c "import pandas, rdkit, sklearn, torch; print('ok')"
 ```
 
-このtorchはPyPI版(CUDA 12.4系ランタイムをnvidia-\*-cu12パッケージとして
-同梱)で、方式A/BのCUDA 13.3系とは系統が異なる点に注意。NVIDIAドライバは
-新しいCUDAランタイムにも後方互換があるため、13.3対応ドライバがあれば
-問題なく動くはず。
+このtorchはPyPI版(バージョンを2.10.0に固定。CUDA 12.8系ランタイムを
+`nvidia-*-cu12`パッケージとして同梱)で、方式A/BのCUDA 13.3系とは系統が
+異なる点に注意。NVIDIAドライバは新しいCUDAランタイムにも後方互換がある
+ため、13.3対応ドライバがあれば問題なく動くはず。torchのバージョンを
+明示固定しているのにも理由がある: 未指定のままだと、より新しいtorch
+(2.11以降)が要求する`nvidia-cudnn-cu13`等が現時点ではPyPI上にプレース
+ホルダーしか存在せず、pipが大量のバージョンを総当たりした末に
+`ResolutionImpossible`になることを確認したため。
 
 まだRadonPy環境が無く、これから8つ全部(pandas, numpy, scikit-learn,
 torch, matplotlib, tqdm, rdkit, jupyter)を新規に入れたいだけなら、

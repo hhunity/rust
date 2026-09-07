@@ -4,7 +4,11 @@
 # scikit-learn / tqdm / jupyter / torch だけを追加でオフライン導入する。
 #
 # 前提:
-#   - doc/radonpy-offline-install.sh で env: radonpy が既に構築済みであること
+#   - env: radonpy が既に構築済みであること(doc/Dockerfile.radonpy方式=
+#     python=3.13 でも、doc/radonpy-offline-install.sh方式=python=3.11 でも
+#     どちらでもよいが、wheels/がそのPythonバージョン向けに正しく
+#     ダウンロードされていること。doc/ml-diff-pip-download.ps1側の
+#     コメント参照)
 #   - このスクリプトと同じ場所に wheels/ (Windows側の.\wheelsをコピーしたもの)
 #     があること
 #
