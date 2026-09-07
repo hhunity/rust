@@ -42,6 +42,21 @@
 #   doc/ml-conda-windows-download.ps1のconda版はCUDA 13.3系で、
 #   厳密には別のマイナーバージョンだが、同じCUDA 13系列なので
 #   実機のドライバ(13.3対応)でそのまま動くはず。
+# - 【重要・Windows上で実行すると起きる問題】torchのCUDA関連依存
+#   (nvidia-cudnn-cu13, nvidia-nccl-cu13 等)には、torch側のメタデータで
+#   `; platform_system == "Linux"` という条件(PEP 508環境マーカー)が
+#   付いている。この条件は`--platform`(wheelのタグ照合用)では制御でき
+#   ず、**pipを実行している実際のOS**で評価される。そのため、この
+#   スクリプトをWindows上で実行すると`platform_system`が`"Windows"`と
+#   評価され、cudnn/nccl等のCUDAライブラリ一式が"該当なし"として
+#   静かに(エラーも出さずに)スキップされてしまう。実際に発生を確認済み
+#   (torch本体の.whl(約550MB)だけ落ちて、残りが落ちない)。
+#   対策として、これらのパッケージをtorchの依存経由ではなく
+#   **明示的に個別指定**することで回避する(明示指定した場合はマーカー
+#   条件によるフィルタが適用されないため)。バージョンはtorch==2.14.0が
+#   要求する値と完全に一致させる必要がある(異なると依存関係エラーに
+#   なる)。torchのバージョンを変更する場合は、対応するこれらのバージョンも
+#   `pip download --no-deps torch==<version>` 等で事前に確認し直すこと。
 
 $ErrorActionPreference = "Stop"
 
@@ -63,6 +78,15 @@ $pipArgs += "--platform", "manylinux2010_x86_64"
 $pipArgs += "--platform", "manylinux1_x86_64"
 $pipArgs += "-d", ".\wheels"
 $pipArgs += "torch==2.14.0", "scikit-learn", "tqdm", "jupyter"
+# torchのLinux限定・CUDA関連依存を明示指定(Windows上でのマーカー
+# フィルタ問題の回避。バージョンはtorch==2.14.0の要求値と一致させている)
+$pipArgs += "cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3"
+$pipArgs += "cuda-bindings==13.3.1"
+$pipArgs += "nvidia-cudnn-cu13==9.24.0.43"
+$pipArgs += "nvidia-cusparselt-cu13==0.8.1"
+$pipArgs += "nvidia-nccl-cu13==2.30.7"
+$pipArgs += "nvidia-nvshmem-cu13==3.4.5"
+$pipArgs += "triton==3.8.0"
 
 python -m pip @pipArgs
 
