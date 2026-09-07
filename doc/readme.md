@@ -1,8 +1,32 @@
 
-## 機械学習系パッケージ (doc/ml-conda-windows-download.ps1)
+## 機械学習系パッケージ (doc/ml-conda-windows-download.ps1 / doc/Dockerfile.ml-gpu)
 
 pandas, numpy, scikit-learn, pytorch(GPU/CUDA版), matplotlib, tqdm, rdkit,
-jupyter を Ubuntu 22.04 (jammy) にオフラインで入れるための一式。
+jupyter をオフライン環境で使うための一式。用途に応じて2通りのやり方を
+用意している(どちらも実際に動作確認済み)。
+
+### 方式A: Dockerイメージごと転送する (doc/Dockerfile.ml-gpu) — 一番簡単
+
+`doc/Dockerfile.radonpy` / `doc/Dockerfile.radonpy-gpu` と全く同じ考え方。
+ネットに繋がった環境で普通に`docker build`し、できたイメージを
+`docker save`で1個のファイルに固めてオフライン機へ転送、`docker load`
+するだけ。conda用パッケージを個別に集めたりglibcバージョンを気にしたり
+する必要が一切ない(Dockerfile冒頭のコメントに具体的なコマンドあり)。
+実機にDockerとNVIDIA Container Toolkitのセットアップが必要になる点だけ
+トレードオフ。
+
+```bash
+docker build -f doc/Dockerfile.ml-gpu -t ml-gpu:latest .
+docker save ml-gpu:latest | gzip > ml-gpu-image.tar.gz
+# USB等で転送後、オフライン機側で:
+docker load < ml-gpu-image.tar.gz
+docker run --rm -it --gpus all ml-gpu:latest
+```
+
+コンテナに入らず、ホストのconda環境として直接使いたい場合は方式Bを使う。
+
+### 方式B: condaパッケージを集めて実機のconda環境に組み込む (doc/ml-conda-windows-download.ps1)
+
 **RadonPyと全く同じ「スクリプト2本で完結」方式**(`doc/radonpy-windows-download.ps1`
 + `doc/radonpy-offline-install.sh` と同じ考え方)を使う。実際に
 ダウンロード→転送→`--offline`でのconda create→import・jupyter起動まで
