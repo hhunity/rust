@@ -1,4 +1,72 @@
 
+## 機械学習系パッケージ (doc/ml-conda-urls-gpu.txt)
+
+pandas, numpy, scikit-learn, pytorch(GPU/CUDA版), matplotlib, tqdm, rdkit,
+jupyter を Ubuntu 22.04 (jammy) にオフラインで入れるための、conda-forge
+パッケージ(依存関係含む)のダウンロードURL一覧です。326個、合計約3.0GB。
+
+対象環境:
+- Ubuntu 22.04 (jammy) / glibc 2.35
+- GPU(CUDA)版。CUDAは13.3系(`doc/radonpy-cuda-toolkit-urls.txt`と同じ系統)
+  - pytorchはconda-forgeの `cuda130` ビルドが選ばれる
+  - CPU版が良い場合は下記生成コマンドから `"pytorch=*=*cuda*"` と
+    `"cuda-version=13.3"` の指定を外せばよい(その場合`__cuda`仮想パッケージの
+    上書きも不要)
+- Python 3.11 (RadonPy側と合わせた)
+
+### 生成方法
+
+Windows側でも実行できる(Miniforge/Minicondaがインストール済みで、
+ネットに繋がっている前提)。`pytorch>=1.11`はGPUドライバの有無を
+`__cuda`という仮想パッケージで判定する仕様のため、GPUが無い/Windows上で
+解決する場合は `CONDA_OVERRIDE_CUDA` で明示的に「CUDA 13.3が使える」と
+偽装してやる必要がある(`CONDA_OVERRIDE_GLIBC`/`CONDA_OVERRIDE_ARCHSPEC`と
+同じ考え方)。
+
+```powershell
+conda config --remove channels defaults 2>$null
+conda config --add channels conda-forge
+conda config --set channel_priority strict
+
+$env:CONDA_SUBDIR = "linux-64"
+$env:CONDA_OVERRIDE_GLIBC = "2.35"
+$env:CONDA_OVERRIDE_ARCHSPEC = "0"
+$env:CONDA_OVERRIDE_CUDA = "13.3"     # GPU版が不要ならこの行とpytorch/cuda-versionの指定を外す
+
+conda create -n ml_dl -y --override-channels -c conda-forge --download-only `
+  python=3.11 pandas numpy scikit-learn matplotlib tqdm rdkit jupyter `
+  "pytorch=*=*cuda*" "cuda-version=13.3"
+```
+
+このリポジトリの `doc/ml-conda-urls-gpu.txt` は、上記と同じ条件で
+`conda create --dry-run --json` を実行し、解決されたパッケージのURLを
+抽出したものです(`conda create --download-only` の代わりにURL一覧だけ
+欲しい場合はこちらを使う)。
+
+### オフライン環境での使い方
+
+conda用パッケージは、ダウンロードしたファイルを置くだけでは
+`conda install`から認識されない(パッケージインデックスが必要)。
+以下のように**ローカルchannel**として`conda index`を通してから使う:
+
+```bash
+mkdir -p local-channel/linux-64 local-channel/noarch
+# ダウンロードした.conda/.tar.bz2を、URLのパス通り linux-64/ と noarch/ に振り分けて配置
+
+conda install -n base -y conda-index   # まだ無ければ
+conda index local-channel/
+
+conda create -n ml --offline --override-channels \
+  -c file://$(pwd)/local-channel -c conda-forge \
+  python=3.11 pandas numpy scikit-learn matplotlib tqdm rdkit jupyter pytorch
+```
+
+(RadonPy用の`doc/radonpy-windows-download.ps1` + `doc/radonpy-offline-install.sh`
+のペアのように、`--download-only`で集めた`pkgs/`ディレクトリを丸ごとコピーして
+`--offline`でconda createする方式でも同じ結果になる。むしろそちらの方が
+repodataキャッシュも一緒に付いてくるので簡単。URL一覧はダウンロード
+マネージャ等を使いたい場合の代替手段。)
+
 ## RadonPy (git) を使うのに必要なファイル (doc/radonpy-files.md)
 
 ポリマー物性の全自動計算ライブラリ RadonPy (https://github.com/RadonPy/RadonPy)
