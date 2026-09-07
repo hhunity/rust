@@ -53,11 +53,18 @@ conda用パッケージは、ダウンロードしたファイルを置くだけ
 以下のように**ローカルchannel**として`conda index`を通してから使う。
 手元(このリポジトリの検証環境)で実際に動作確認済みの手順:
 
+Windows側のダウンロード時点で、URLの `linux-64`/`noarch` の区分どおりに
+自動でフォルダ分けしてくれる `doc/ml-conda-windows-download.ps1` を用意した
+(単純にURLを1個ずつ順にInvoke-WebRequestするだけだと、全ファイルが
+フラットな1フォルダに落ちてどれがlinux-64向け/noarch向けか分からなくなる
+ため)。`doc/ml-conda-urls-gpu.txt` と同じフォルダに置いて実行すると、
+`local-channel/linux-64/`・`local-channel/noarch/` に仕分けながら
+ダウンロードしてくれる。生成された `local-channel` フォルダを丸ごと
+Linux実機へコピーする。
+
 ```bash
-# 1. ダウンロードしたファイルを、URLのパス構造通りに配置する
-#    (linux-64向けは linux-64/、noarchは noarch/ フォルダへ)
-mkdir -p local-channel/linux-64 local-channel/noarch
-# 例: ml-conda-urls-gpu.txt を1行ずつ読み、URLのpathに応じて振り分けて配置
+# 1. (Windows側で ml-conda-windows-download.ps1 を実行済みなら、
+#     local-channel/ フォルダをそのままコピーしてきているのでこの手順は不要)
 
 # 2. ローカルchannelとしてインデックスを作る(conda-index が無ければ先に導入)
 conda install -n base -y conda-index
