@@ -26,35 +26,45 @@
 #
 # 注意点(ハマったポイント):
 # - torchのバージョンを明示指定しないと、pipが全バージョンを総当たりして
-#   矛盾(ResolutionImpossible)を起こすことがある(新しめのtorchが要求する
-#   nvidia-cudnn-cu13が現時点ではPyPIにプレースホルダーしか存在しない等)。
-#   このため以下ではtorchのバージョンを2.10.0に固定している
-#   (CUDA 12.8系ランタイムを同梱)。より新しいtorchを試したい場合は
-#   バージョン番号を変えてよいが、その場合`nvidia-cudnn-cu13`等の
-#   実体が存在するか事前に確認すること。
-# - torch本体は新しめのmanylinux_2_28タグでビルドされているが、依存する
-#   nvidia-*-cu12パッケージ群は古いmanylinux2014/manylinux_2_17/
-#   manylinux_2_27等バラバラのタグを使っているため、--platformは
-#   複数列挙する必要がある(1つだけ指定すると解決できるパッケージが
-#   見つからずエラーになる)。
-# - doc/Dockerfile.ml-gpu / doc/ml-conda-windows-download.ps1のconda版
-#   はCUDA 13.3系だが、こちらのpip版はCUDA 12.8系。系統が異なる点に注意
-#   (実機のNVIDIAドライバは新しいCUDAランタイムにも後方互換があるため、
-#   13.3対応ドライバならこちらも動作するはず)。
+#   矛盾(ResolutionImpossible)を起こすことがある。バージョン固定が必須。
+#   以下ではtorch==2.14.0(CUDA 13.0系ランタイム同梱、"+cu130"ビルド)に
+#   固定している。実機のドライバがCUDA 12.x世代までしか対応していない
+#   場合は "torch==2.10.0" (CUDA 12.8系)に変更するとよい。
+# - torch本体・依存パッケージ群でmanylinuxのタグがバラバラ(パッケージ
+#   ごとにビルド時のglibcバージョンをそのままタグにしているため、
+#   manylinux_2_17/2_18/2_24/2_25/2_26/2_27/2_28や旧来のmanylinux1/2010/
+#   2014などが混在する)。pipは--platformで指定した文字列と完全一致する
+#   タグしか受け付けない(自動的な下位互換の判定はクロス指定時は
+#   働かない)ため、--platformを glibc 2.12〜2.31 まで総当たりで
+#   列挙している。1つだけ指定すると解決できないパッケージが出てエラーに
+#   なることを確認済み。
+# - このtorchはCUDA 13.0系。doc/Dockerfile.ml-gpu /
+#   doc/ml-conda-windows-download.ps1のconda版はCUDA 13.3系で、
+#   厳密には別のマイナーバージョンだが、同じCUDA 13系列なので
+#   実機のドライバ(13.3対応)でそのまま動くはず。
 
 $ErrorActionPreference = "Stop"
 
 New-Item -ItemType Directory -Force -Path .\wheels | Out-Null
 
-python -m pip download --no-cache-dir --timeout 300 --retries 8 `
-  --only-binary=:all: --python-version 313 --implementation cp --abi cp313 `
-  --platform manylinux_2_28_x86_64 --platform manylinux_2_27_x86_64 `
-  --platform manylinux_2_26_x86_64 --platform manylinux_2_24_x86_64 `
-  --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64 `
-  --platform manylinux2010_x86_64 --platform manylinux1_x86_64 `
-  --platform manylinux_2_12_x86_64 `
-  -d .\wheels `
-  "torch==2.10.0" scikit-learn tqdm jupyter
+# manylinuxのglibcバージョンタグをglibc 2.12〜2.31まで総当たりで列挙
+# (配列にして -Args 経由で渡すことで、引用符やエスケープの問題を避ける)
+$pipArgs = @(
+  "download", "--no-cache-dir", "--timeout", "300", "--retries", "8",
+  "--only-binary=:all:", "--python-version", "313",
+  "--implementation", "cp", "--abi", "cp313"
+)
+foreach ($v in 12..31) {
+  $pipArgs += "--platform"
+  $pipArgs += "manylinux_2_${v}_x86_64"
+}
+$pipArgs += "--platform", "manylinux2014_x86_64"
+$pipArgs += "--platform", "manylinux2010_x86_64"
+$pipArgs += "--platform", "manylinux1_x86_64"
+$pipArgs += "-d", ".\wheels"
+$pipArgs += "torch==2.14.0", "scikit-learn", "tqdm", "jupyter"
+
+python -m pip @pipArgs
 
 Write-Host "=== 完了 ==="
 Write-Host ".\wheels フォルダをUSB等でLinux実機へコピーしてください"

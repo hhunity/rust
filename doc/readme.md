@@ -63,14 +63,26 @@ conda activate radonpy
 python -c "import pandas, rdkit, sklearn, torch; print('ok')"
 ```
 
-このtorchはPyPI版(バージョンを2.10.0に固定。CUDA 12.8系ランタイムを
-`nvidia-*-cu12`パッケージとして同梱)で、方式A/BのCUDA 13.3系とは系統が
-異なる点に注意。NVIDIAドライバは新しいCUDAランタイムにも後方互換がある
-ため、13.3対応ドライバがあれば問題なく動くはず。torchのバージョンを
-明示固定しているのにも理由がある: 未指定のままだと、より新しいtorch
-(2.11以降)が要求する`nvidia-cudnn-cu13`等が現時点ではPyPI上にプレース
-ホルダーしか存在せず、pipが大量のバージョンを総当たりした末に
-`ResolutionImpossible`になることを確認したため。
+このtorchはPyPI版(バージョンを`2.14.0`に固定。CUDA 13.0系ランタイムを
+`nvidia-*-cu13`パッケージとして同梱、`torch.__version__`は`2.14.0+cu130`
+になる)で、方式A/BのCUDA 13.3系と同じCUDA 13系列。実際に
+`conda run -n radonpy pip install ...`→importまで動作確認済み。
+
+torchのバージョンを明示固定しているのには理由がある。未指定のままだと
+pipが大量のバージョンを総当たりして`ResolutionImpossible`になることが
+ある(複数バージョンのtorchが互いに矛盾するnvidia-\*パッケージを要求する
+ため)。
+
+また`--platform`をglibc 2.12〜2.31まで総当たりで列挙しているのにも理由が
+ある。NVIDIA配布のパッケージは、公式のmanylinuxポリシー区切り
+(`manylinux_2_17`/`manylinux_2_28`等)ではなく、**ビルド時に使った
+glibcバージョンをそのままタグにする**独自ルールを使っており、
+`nvidia-cuda-cupti`は`manylinux_2_25`、`nvidia-nccl-cu13`は
+`manylinux_2_18`のように、依存パッケージごとにバラバラな半端な数字が
+出てくる。Windows→Linuxのクロスプラットフォームダウンロード
+(`--platform`指定)では、pipは指定した文字列と完全一致するタグしか
+受け付けない(実機上で直接`pip install`する場合のような自動的な
+下位互換判定は働かない)ため、これを全部手動で列挙する必要がある。
 
 まだRadonPy環境が無く、これから8つ全部(pandas, numpy, scikit-learn,
 torch, matplotlib, tqdm, rdkit, jupyter)を新規に入れたいだけなら、
