@@ -23,7 +23,41 @@ docker load < ml-gpu-image.tar.gz
 docker run --rm -it --gpus all ml-gpu:latest
 ```
 
-コンテナに入らず、ホストのconda環境として直接使いたい場合は方式Bを使う。
+コンテナに入らず、ホストのconda環境として直接使いたい場合は方式B/Cを使う。
+
+### 方式C: 既存のRadonPy環境(env: radonpy)に差分だけpipで追加する (doc/ml-diff-pip-download.ps1)
+
+**既に`doc/radonpy-offline-install.sh`でRadonPy用のconda環境(env: radonpy)を
+構築済みで、そこに追加したいだけ**の場合はこれが一番手軽。pandas/numpy/
+rdkit/matplotlibは既にRadonPy環境に入っているので、残りの
+`scikit-learn` / `tqdm` / `jupyter` / `torch` だけをpipで追加する。
+
+condaで追加しようとすると、GPU版pytorchが要求する新しいmklにpsi4/lammpsも
+巻き込まれてバージョンアップ・再ビルドされてしまう(psi4 1.9.1→1.11、
+lammps再ビルド等。実機で確認済み)。pipはcondaの依存関係解決を経由しない
+ため、psi4/lammps/mkl/numpy/scipy等の既存condaパッケージには一切触れずに
+追加できる(pip install前後で`conda list`の出力が完全一致することを確認済み)。
+
+```powershell
+# Windows側(ネット接続あり)
+.\ml-diff-pip-download.ps1
+```
+
+```bash
+# Linux実機側(オフラインでOK。env: radonpyが既に構築済みであること)
+bash ml-diff-pip-install.sh
+conda activate radonpy
+python -c "import pandas, rdkit, sklearn, torch; print('ok')"
+```
+
+このtorchはPyPI版(CUDA 12.4系ランタイムをnvidia-\*-cu12パッケージとして
+同梱)で、方式A/BのCUDA 13.3系とは系統が異なる点に注意。NVIDIAドライバは
+新しいCUDAランタイムにも後方互換があるため、13.3対応ドライバがあれば
+問題なく動くはず。
+
+まだRadonPy環境が無く、これから8つ全部(pandas, numpy, scikit-learn,
+torch, matplotlib, tqdm, rdkit, jupyter)を新規に入れたいだけなら、
+差分ではなく方式A(Docker)か方式Bを使う方が素直。
 
 ### 方式B: condaパッケージを集めて実機のconda環境に組み込む (doc/ml-conda-windows-download.ps1)
 
