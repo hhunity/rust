@@ -3,7 +3,9 @@
 
 pandas, numpy, scikit-learn, pytorch(GPU/CUDA版), matplotlib, tqdm, rdkit,
 jupyter を Ubuntu 22.04 (jammy) にオフラインで入れるための、conda-forge
-パッケージ(依存関係含む)のダウンロードURL一覧です。326個、合計約3.0GB。
+パッケージ(依存関係含む)のダウンロードURL一覧です。286個、合計約2.9GB。
+**この手順は実際にダウンロード→ローカルchannel化→`conda create`→
+import・jupyter起動まで動作確認済みです。**
 
 対象環境:
 - Ubuntu 22.04 (jammy) / glibc 2.35
@@ -13,6 +15,7 @@ jupyter を Ubuntu 22.04 (jammy) にオフラインで入れるための、conda
     `"cuda-version=13.3"` の指定を外せばよい(その場合`__cuda`仮想パッケージの
     上書きも不要)
 - Python 3.11 (RadonPy側と合わせた)
+- `matplotlib`ではなく`matplotlib-base`を使用(理由は下記「ハマりどころ」参照)
 
 ### 生成方法
 
@@ -34,7 +37,7 @@ $env:CONDA_OVERRIDE_ARCHSPEC = "0"
 $env:CONDA_OVERRIDE_CUDA = "13.3"     # GPU版が不要ならこの行とpytorch/cuda-versionの指定を外す
 
 conda create -n ml_dl -y --override-channels -c conda-forge --download-only `
-  python=3.11 pandas numpy scikit-learn matplotlib tqdm rdkit jupyter `
+  python=3.11 pandas numpy scikit-learn matplotlib-base tqdm rdkit jupyter `
   "pytorch=*=*cuda*" "cuda-version=13.3"
 ```
 
@@ -43,29 +46,61 @@ conda create -n ml_dl -y --override-channels -c conda-forge --download-only `
 抽出したものです(`conda create --download-only` の代わりにURL一覧だけ
 欲しい場合はこちらを使う)。
 
-### オフライン環境での使い方
+### オフライン環境(Linux)での反映のしかた
 
 conda用パッケージは、ダウンロードしたファイルを置くだけでは
 `conda install`から認識されない(パッケージインデックスが必要)。
-以下のように**ローカルchannel**として`conda index`を通してから使う:
+以下のように**ローカルchannel**として`conda index`を通してから使う。
+手元(このリポジトリの検証環境)で実際に動作確認済みの手順:
 
 ```bash
+# 1. ダウンロードしたファイルを、URLのパス構造通りに配置する
+#    (linux-64向けは linux-64/、noarchは noarch/ フォルダへ)
 mkdir -p local-channel/linux-64 local-channel/noarch
-# ダウンロードした.conda/.tar.bz2を、URLのパス通り linux-64/ と noarch/ に振り分けて配置
+# 例: ml-conda-urls-gpu.txt を1行ずつ読み、URLのpathに応じて振り分けて配置
 
-conda install -n base -y conda-index   # まだ無ければ
+# 2. ローカルchannelとしてインデックスを作る(conda-index が無ければ先に導入)
+conda install -n base -y conda-index
 conda index local-channel/
 
-conda create -n ml --offline --override-channels \
-  -c file://$(pwd)/local-channel -c conda-forge \
-  python=3.11 pandas numpy scikit-learn matplotlib tqdm rdkit jupyter pytorch
+# 3. そのローカルchannelだけを使って環境を作成
+#    重要: ここで --offline を付けてはいけない。
+#    (--offlineを付けるとconda-forgeの「パッチ済みrepodata」ではなく
+#     素の生成キャッシュを探しにいってしまい、後述の理由でパッケージが
+#     見つからず失敗する。file://ローカルchannelしか指定していなければ
+#     --offlineが無くてもネットワークには一切アクセスしない)
+export CONDA_OVERRIDE_CUDA=13.3   # GPUドライバが正しく入っていれば本来は自動検出されるが、
+                                   # 万一検出に失敗した場合の保険として付けておくと安全
+conda create -n ml -y --override-channels \
+  -c "file://$(pwd)/local-channel" \
+  python=3.11 pandas numpy scikit-learn matplotlib-base tqdm rdkit jupyter pytorch
+
+conda activate ml
+python -c "import pandas, numpy, sklearn, matplotlib, rdkit, torch; print(torch.cuda.is_available())"
 ```
 
 (RadonPy用の`doc/radonpy-windows-download.ps1` + `doc/radonpy-offline-install.sh`
 のペアのように、`--download-only`で集めた`pkgs/`ディレクトリを丸ごとコピーして
-`--offline`でconda createする方式でも同じ結果になる。むしろそちらの方が
-repodataキャッシュも一緒に付いてくるので簡単。URL一覧はダウンロード
-マネージャ等を使いたい場合の代替手段。)
+`--offline`でconda createする方式でも同じ結果になる。そちらは
+conda-forge側の「パッチ済みrepodata」もそのままキャッシュに含まれるため
+下記のハマりどころが起きにくく、むしろ簡単。URL一覧はダウンロード
+マネージャ等でまとめてURLを取得したい場合の代替手段。)
+
+### ハマりどころ: `matplotlib`(フル版)だと依存関係エラーで入らないことがある
+
+`matplotlib`(フル版)は既定でQt系GUIバックエンド(`pyside6`→`qt6-main`→
+`xcb-util-wm`→`libxcb`)を道連れにする。ここで問題が起きる:
+conda-forge本家は`repodata_patches`で依存関係の矛盾を後から補正しているが、
+手元でダウンロード済みファイルに対して`conda index`を実行すると、
+その補正が反映されない**素のパッケージ内メタデータ**を使ってしまうため、
+`nothing provides libxcb >=1.16,<1.17.0a0 needed by xcb-util-wm-...`
+のようなエラーで解決不能になることがある(実際に発生を確認済み)。
+
+対策として、GUI表示を必要としない(Jupyter上で`%matplotlib inline`等を
+使う)用途では`matplotlib`の代わりに`matplotlib-base`を使うことでQt系の
+依存を丸ごと回避できる。上記のURL一覧・生成コマンドは既にこの対策済み。
+どうしてもフル版`matplotlib`が必要な場合は、`--download-only`+`pkgs/`
+コピー方式(パッチ済みrepodataキャッシュごと持っていく)を使うこと。
 
 ## RadonPy (git) を使うのに必要なファイル (doc/radonpy-files.md)
 
