@@ -207,7 +207,7 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
     let seq = ControllerSeqState::new();
 
     let mut mqttoptions = MqttOptions::new(&name, host.clone(), port);
-    mqttoptions.set_keep_alive(Duration::from_secs(5));
+    mqttoptions.set_keep_alive(Duration::from_secs(30));
 
     // マイコン役と同様に、自分のstateトピックにLast Willを登録しておく。
     // パソコンが異常終了しても、ブローカーが自動で"offline"を配ってくれるので、

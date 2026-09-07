@@ -103,7 +103,7 @@ fn main() {
 
     // --- ② MQTT接続の設定を作る ---
     let mut mqttoptions = MqttOptions::new(&name, host.clone(), port);
-    mqttoptions.set_keep_alive(Duration::from_secs(5));
+    mqttoptions.set_keep_alive(Duration::from_secs(30));
 
     // 自分のNDEATHトピックにLast Will（異常切断時に代わりにブローカーがpublishしてくれる
     // 遺言メッセージ）を登録しておく。こうしておくと、電源断や通信断など「さようなら」を
