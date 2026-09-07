@@ -1,113 +1,75 @@
 
-## 機械学習系パッケージ (doc/ml-conda-urls-gpu.txt)
+## 機械学習系パッケージ (doc/ml-conda-windows-download.ps1)
 
 pandas, numpy, scikit-learn, pytorch(GPU/CUDA版), matplotlib, tqdm, rdkit,
-jupyter を Ubuntu 22.04 (jammy) にオフラインで入れるための、conda-forge
-パッケージ(依存関係含む)のダウンロードURL一覧です。286個、合計約2.9GB。
-**この手順は実際にダウンロード→ローカルchannel化→`conda create`→
-import・jupyter起動まで動作確認済みです。**
+jupyter を Ubuntu 22.04 (jammy) にオフラインで入れるための一式。
+**RadonPyと全く同じ「スクリプト2本で完結」方式**(`doc/radonpy-windows-download.ps1`
++ `doc/radonpy-offline-install.sh` と同じ考え方)を使う。実際に
+ダウンロード→転送→`--offline`でのconda create→import・jupyter起動まで
+動作確認済み。
 
-対象環境:
-- Ubuntu 22.04 (jammy) / glibc 2.35
-- GPU(CUDA)版。CUDAは13.3系(`doc/radonpy-cuda-toolkit-urls.txt`と同じ系統)
-  - pytorchはconda-forgeの `cuda130` ビルドが選ばれる
-  - CPU版が良い場合は下記生成コマンドから `"pytorch=*=*cuda*"` と
-    `"cuda-version=13.3"` の指定を外せばよい(その場合`__cuda`仮想パッケージの
-    上書きも不要)
-- Python 3.11 (RadonPy側と合わせた)
-- `matplotlib`ではなく`matplotlib-base`を使用(理由は下記「ハマりどころ」参照)
+- `doc/ml-conda-windows-download.ps1` … Windows側で実行し、必要な.conda
+  ファイル一式とMiniforgeインストーラを集める
+- `doc/ml-conda-offline-install.sh` … オフラインのLinux実機側で実行し、
+  そのファイル一式からconda環境を構築する
 
-### 生成方法
+### 手順
 
-Windows側でも実行できる(Miniforge/Minicondaがインストール済みで、
-ネットに繋がっている前提)。`pytorch>=1.11`はGPUドライバの有無を
-`__cuda`という仮想パッケージで判定する仕様のため、GPUが無い/Windows上で
-解決する場合は `CONDA_OVERRIDE_CUDA` で明示的に「CUDA 13.3が使える」と
-偽装してやる必要がある(`CONDA_OVERRIDE_GLIBC`/`CONDA_OVERRIDE_ARCHSPEC`と
-同じ考え方)。
+1. **Windows側**(Miniconda/Anacondaがインストール済みで、ネットに
+   繋がっている状態):
+   ```powershell
+   .\ml-conda-windows-download.ps1
+   ```
+   実行後、案内される `pkgs` フォルダ(パッケージ本体+repodataキャッシュ)と
+   `Miniforge3-Linux-x86_64.sh` をUSB等でLinux実機へコピーする。
 
-```powershell
-conda config --remove channels defaults 2>$null
-conda config --add channels conda-forge
-conda config --set channel_priority strict
+2. **Linux実機側**(オフラインでOK。`ml-conda-offline-install.sh` と、
+   ①でコピーした `pkgs/` フォルダ・`Miniforge3-Linux-x86_64.sh` を
+   同じディレクトリに置く):
+   ```bash
+   bash ml-conda-offline-install.sh
+   conda activate ml
+   ```
 
-$env:CONDA_SUBDIR = "linux-64"
-$env:CONDA_OVERRIDE_GLIBC = "2.35"
-$env:CONDA_OVERRIDE_ARCHSPEC = "0"
-$env:CONDA_OVERRIDE_CUDA = "13.3"     # GPU版が不要ならこの行とpytorch/cuda-versionの指定を外す
+これだけで完了する。`conda index`を自分で叩いたり、ダウンロードした
+ファイルをフォルダに手で仕分けたりする必要は無い(`--download-only`で
+集めた`pkgs/`には、パッケージ本体だけでなくconda-forge本家の
+「パッチ済みrepodataキャッシュ」も一緒に入っており、それを実機側の
+Miniforgeにそのまま取り込んで`--offline`で使うため、フルの`matplotlib`
+含めて依存関係エラーも起きない)。
 
-conda create -n ml_dl -y --override-channels -c conda-forge --download-only `
-  python=3.11 pandas numpy scikit-learn matplotlib-base tqdm rdkit jupyter `
-  "pytorch=*=*cuda*" "cuda-version=13.3"
-```
+対象環境・前提:
+- Ubuntu 22.04 (jammy) / glibc 2.35 / Python 3.11(RadonPy側と合わせた)
+- GPU(CUDA)版がデフォルト。CUDAは13.3系(`doc/radonpy-cuda-toolkit-urls.txt`
+  と同じ系統)。対象機にNVIDIAドライバ(CUDA 13.3以上対応)が必要
+  - CPU版で良い場合は `ml-conda-windows-download.ps1` 内の
+    `$env:CONDA_OVERRIDE_CUDA` の行と、`conda create`の
+    `"pytorch=*=*cuda*" "cuda-version=13.3"` 指定を外す
+    (`ml-conda-offline-install.sh` 側の `pytorch` 指定はそのままでよい。
+    ローカルキャッシュにCPU版しか無ければ自動的にそちらが選ばれる)
 
-このリポジトリの `doc/ml-conda-urls-gpu.txt` は、上記と同じ条件で
-`conda create --dry-run --json` を実行し、解決されたパッケージのURLを
-抽出したものです(`conda create --download-only` の代わりにURL一覧だけ
-欲しい場合はこちらを使う)。
+### 代替手段: doc/ml-conda-urls-gpu.txt (URLを直接扱いたい場合)
 
-### オフライン環境(Linux)での反映のしかた
+ダウンロードマネージャ等でURLを直接まとめて取得したい場合向けに、
+同じパッケージセットのURL一覧(286個、約2.9GB)も `doc/ml-conda-urls-gpu.txt`
+として置いてある。ただしこちらは**上記のスクリプト方式より手間が多い**:
 
-conda用パッケージは、ダウンロードしたファイルを置くだけでは
-`conda install`から認識されない(パッケージインデックスが必要)。
-以下のように**ローカルchannel**として`conda index`を通してから使う。
-手元(このリポジトリの検証環境)で実際に動作確認済みの手順:
+- URLの `linux-64`/`noarch` の区分どおりに手動でフォルダ分けする必要がある
+  (`doc/ml-conda-windows-download.ps1` の旧バージョンにあった、URLを見て
+  振り分けながらダウンロードするロジックを流用してもよい)
+- `conda index` でローカルchannelを自前で作る必要がある。この方法だと
+  conda-forge本家の`repodata_patches`(依存関係の矛盾を後から補正する仕組み)
+  が反映されないため、フル版`matplotlib`はQt系GUIバックエンド
+  (`pyside6`→`qt6-main`→`xcb-util-wm`→`libxcb`)がらみで
+  `nothing provides libxcb >=1.16,<1.17.0a0` のような依存関係エラーになる
+  ことがある(実際に発生を確認済み)。この方法を使う場合は`matplotlib`の
+  代わりに`matplotlib-base`を使うことでこの問題を回避できる
+- ローカルchannelに対して`conda create`する際は`--offline`を付けては
+  いけない(付けるとrepodataが読み込めず`PackagesNotFoundInChannelsError`
+  になる。`file://`のみを指定していれば`--offline`が無くてもネットワークは
+  使わない)
 
-Windows側のダウンロード時点で、URLの `linux-64`/`noarch` の区分どおりに
-自動でフォルダ分けしてくれる `doc/ml-conda-windows-download.ps1` を用意した
-(単純にURLを1個ずつ順にInvoke-WebRequestするだけだと、全ファイルが
-フラットな1フォルダに落ちてどれがlinux-64向け/noarch向けか分からなくなる
-ため)。`doc/ml-conda-urls-gpu.txt` と同じフォルダに置いて実行すると、
-`local-channel/linux-64/`・`local-channel/noarch/` に仕分けながら
-ダウンロードしてくれる。生成された `local-channel` フォルダを丸ごと
-Linux実機へコピーする。
-
-```bash
-# 1. (Windows側で ml-conda-windows-download.ps1 を実行済みなら、
-#     local-channel/ フォルダをそのままコピーしてきているのでこの手順は不要)
-
-# 2. ローカルchannelとしてインデックスを作る(conda-index が無ければ先に導入)
-conda install -n base -y conda-index
-conda index local-channel/
-
-# 3. そのローカルchannelだけを使って環境を作成
-#    重要: ここで --offline を付けてはいけない。
-#    (--offlineを付けるとconda-forgeの「パッチ済みrepodata」ではなく
-#     素の生成キャッシュを探しにいってしまい、後述の理由でパッケージが
-#     見つからず失敗する。file://ローカルchannelしか指定していなければ
-#     --offlineが無くてもネットワークには一切アクセスしない)
-export CONDA_OVERRIDE_CUDA=13.3   # GPUドライバが正しく入っていれば本来は自動検出されるが、
-                                   # 万一検出に失敗した場合の保険として付けておくと安全
-conda create -n ml -y --override-channels \
-  -c "file://$(pwd)/local-channel" \
-  python=3.11 pandas numpy scikit-learn matplotlib-base tqdm rdkit jupyter pytorch
-
-conda activate ml
-python -c "import pandas, numpy, sklearn, matplotlib, rdkit, torch; print(torch.cuda.is_available())"
-```
-
-(RadonPy用の`doc/radonpy-windows-download.ps1` + `doc/radonpy-offline-install.sh`
-のペアのように、`--download-only`で集めた`pkgs/`ディレクトリを丸ごとコピーして
-`--offline`でconda createする方式でも同じ結果になる。そちらは
-conda-forge側の「パッチ済みrepodata」もそのままキャッシュに含まれるため
-下記のハマりどころが起きにくく、むしろ簡単。URL一覧はダウンロード
-マネージャ等でまとめてURLを取得したい場合の代替手段。)
-
-### ハマりどころ: `matplotlib`(フル版)だと依存関係エラーで入らないことがある
-
-`matplotlib`(フル版)は既定でQt系GUIバックエンド(`pyside6`→`qt6-main`→
-`xcb-util-wm`→`libxcb`)を道連れにする。ここで問題が起きる:
-conda-forge本家は`repodata_patches`で依存関係の矛盾を後から補正しているが、
-手元でダウンロード済みファイルに対して`conda index`を実行すると、
-その補正が反映されない**素のパッケージ内メタデータ**を使ってしまうため、
-`nothing provides libxcb >=1.16,<1.17.0a0 needed by xcb-util-wm-...`
-のようなエラーで解決不能になることがある(実際に発生を確認済み)。
-
-対策として、GUI表示を必要としない(Jupyter上で`%matplotlib inline`等を
-使う)用途では`matplotlib`の代わりに`matplotlib-base`を使うことでQt系の
-依存を丸ごと回避できる。上記のURL一覧・生成コマンドは既にこの対策済み。
-どうしてもフル版`matplotlib`が必要な場合は、`--download-only`+`pkgs/`
-コピー方式(パッチ済みrepodataキャッシュごと持っていく)を使うこと。
+特に理由が無ければ、上記のスクリプト方式を使うことを推奨する。
 
 ## RadonPy (git) を使うのに必要なファイル (doc/radonpy-files.md)
 
