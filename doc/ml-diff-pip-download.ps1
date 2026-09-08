@@ -18,11 +18,28 @@
 #       (Miniconda/Anacondaのpythonでもよい)。
 #       実機のradonpy環境がpython=3.11で構築されている場合(古い
 #       doc/radonpy-offline-install.sh方式)は、下記の
-#       --python-version / --abi を 311 / cp311 に書き換えること。
+#       $PythonVersion / $Abi を 311 / cp311 に書き換えること。
 #       `conda activate radonpy && python --version` で確認できる。
 #
 # 実行後、生成される wheels フォルダをUSB等でオフラインのLinux実機へコピーする。
 # 実機側では doc/ml-diff-pip-install.sh を使ってオフライン導入する。
+#
+# 【差分(追加分)だけダウンロードしたい場合】
+#   このスクリプトは`.\wheels`フォルダを毎回消さずに使う。pipは同名の
+#   ファイルが既にあればダウンロードし直さず単純にスキップするため、
+#   普通に再実行するだけで「前回まだ無かった分だけ」が追加取得される
+#   (動作確認済み: 既にあるファイルは `File was already downloaded ...`
+#   と表示されてスキップされる)。
+#
+#   後から新しいパッケージを1つ2つ追加したいだけの場合は、素の
+#   `pip download` を直接使うのが手軽(このスクリプト内の
+#   `$platformArgs` をそのまま流用する):
+#     .\ml-diff-pip-download.ps1 -Package seaborn
+#     .\ml-diff-pip-download.ps1 -Package seaborn,plotly
+#   のように `-Package` にパッケージ名(カンマ区切りで複数可)を渡すと、
+#   ベースの torch/scikit-learn/tqdm/jupyter一式は一切ダウンロードせず
+#   (`.\wheels`に既にある前提)、指定したパッケージとその新規の依存分
+#   だけを同じ `.\wheels` フォルダに追記する。
 #
 # 注意点(ハマったポイント):
 # - torchのバージョンを明示指定しないと、pipが全バージョンを総当たりして
@@ -37,7 +54,8 @@
 #   タグしか受け付けない(自動的な下位互換の判定はクロス指定時は
 #   働かない)ため、--platformを glibc 2.12〜2.31 まで総当たりで
 #   列挙している。1つだけ指定すると解決できないパッケージが出てエラーに
-#   なることを確認済み。
+#   なることを確認済み。`-Package`で追加パッケージを取る場合も同じ
+#   platformArgsを使うので、この問題は起きない。
 # - このtorchはCUDA 13.0系。doc/Dockerfile.ml-gpu /
 #   doc/ml-conda-windows-download.ps1のconda版はCUDA 13.3系で、
 #   厳密には別のマイナーバージョンだが、同じCUDA 13系列なので
@@ -68,38 +86,59 @@
 #   nvidia-cufile==1.15.1.6`になることを確認した。これも
 #   `nvidia-cufile`自体を明示指定することで回避する。
 
+param(
+  # 追加で欲しいパッケージ名(カンマ区切りで複数可)。指定した場合、
+  # ベースのtorch一式はダウンロードせず、指定したパッケージのみを
+  # .\wheels に追記する(差分ダウンロードモード)。
+  [string[]]$Package = @()
+)
+
 $ErrorActionPreference = "Stop"
+
+$PythonVersion = "313"
+$Abi = "cp313"
 
 New-Item -ItemType Directory -Force -Path .\wheels | Out-Null
 
 # manylinuxのglibcバージョンタグをglibc 2.12〜2.31まで総当たりで列挙
 # (配列にして -Args 経由で渡すことで、引用符やエスケープの問題を避ける)
-$pipArgs = @(
-  "download", "--no-cache-dir", "--timeout", "300", "--retries", "8",
-  "--only-binary=:all:", "--python-version", "313",
-  "--implementation", "cp", "--abi", "cp313"
-)
+$platformArgs = @()
 foreach ($v in 12..31) {
-  $pipArgs += "--platform"
-  $pipArgs += "manylinux_2_${v}_x86_64"
+  $platformArgs += "--platform"
+  $platformArgs += "manylinux_2_${v}_x86_64"
 }
-$pipArgs += "--platform", "manylinux2014_x86_64"
-$pipArgs += "--platform", "manylinux2010_x86_64"
-$pipArgs += "--platform", "manylinux1_x86_64"
-$pipArgs += "-d", ".\wheels"
-$pipArgs += "torch==2.14.0", "scikit-learn", "tqdm", "jupyter"
-# torchのLinux限定・CUDA関連依存を明示指定(Windows上でのマーカー
-# フィルタ問題の回避。バージョンはtorch==2.14.0の要求値と一致させている)
-$pipArgs += "cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3"
-$pipArgs += "cuda-bindings==13.3.1"
-$pipArgs += "nvidia-cudnn-cu13==9.24.0.43"
-$pipArgs += "nvidia-cusparselt-cu13==0.8.1"
-$pipArgs += "nvidia-nccl-cu13==2.30.7"
-$pipArgs += "nvidia-nvshmem-cu13==3.4.5"
-$pipArgs += "triton==3.8.0"
-$pipArgs += "nvidia-cufile==1.15.1.6"
+$platformArgs += "--platform", "manylinux2014_x86_64"
+$platformArgs += "--platform", "manylinux2010_x86_64"
+$platformArgs += "--platform", "manylinux1_x86_64"
 
-python -m pip @pipArgs
+$commonArgs = @(
+  "download", "--no-cache-dir", "--timeout", "300", "--retries", "8",
+  "--only-binary=:all:", "--python-version", $PythonVersion,
+  "--implementation", "cp", "--abi", $Abi
+) + $platformArgs + @("-d", ".\wheels")
+
+if ($Package.Count -gt 0) {
+  # 差分ダウンロードモード: 指定パッケージだけを追記
+  Write-Host "=== 差分ダウンロードモード: $($Package -join ', ') ==="
+  python -m pip @commonArgs @Package
+} else {
+  # 通常モード: ベースのtorch一式一式(再実行しても既存ファイルは
+  # 自動的にスキップされるので、これも実質的に差分ダウンロードになる)
+  $pipArgs = $commonArgs + @(
+    "torch==2.14.0", "scikit-learn", "tqdm", "jupyter",
+    # torchのLinux限定・CUDA関連依存を明示指定(Windows上でのマーカー
+    # フィルタ問題の回避。バージョンはtorch==2.14.0の要求値と一致させている)
+    "cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3",
+    "cuda-bindings==13.3.1",
+    "nvidia-cudnn-cu13==9.24.0.43",
+    "nvidia-cusparselt-cu13==0.8.1",
+    "nvidia-nccl-cu13==2.30.7",
+    "nvidia-nvshmem-cu13==3.4.5",
+    "triton==3.8.0",
+    "nvidia-cufile==1.15.1.6"
+  )
+  python -m pip @pipArgs
+}
 
 Write-Host "=== 完了 ==="
 Write-Host ".\wheels フォルダをUSB等でLinux実機へコピーしてください"
