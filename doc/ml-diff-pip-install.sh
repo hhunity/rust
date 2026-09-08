@@ -16,8 +16,12 @@
 #   bash ml-diff-pip-install.sh
 #
 # pip経由でのインストールのため、condaが管理しているpsi4/lammps/mkl/numpy/
-# scipy等の既存パッケージには一切触れない(pipは対象環境で条件を満たす
-# パッケージが既にあればそれをそのまま使い、上書きしない)。
+# scipy等の既存パッケージには基本的に触れない。ただし jupyter が要求する
+# pyzmq / ipykernel はバージョン制約次第でpipが新しいものに引き上げて
+# しまうことがあり、その場合pipホイール版のpyzmq(libzmqを静的バンドル)が
+# conda-forge版を上書きし、Jupyterカーネルがcell実行時にZMQ通信で
+# ハングする不具合を引き起こすことが判明している(素のpythonは正常動作)。
+# そのため最後にpyzmq/ipykernelをconda版へ強制的に戻す。
 
 set -euxo pipefail
 
@@ -29,6 +33,10 @@ source "$HOME/miniforge3/etc/profile.d/conda.sh"
 echo "=== step: install diff packages via pip (--no-index, offline) ==="
 conda run -n radonpy pip install --no-index --find-links=./wheels \
   scikit-learn tqdm jupyter torch
+
+echo "=== step: restore conda-managed pyzmq/ipykernel if pip overwrote them ==="
+conda run -n radonpy pip uninstall -y pyzmq ipykernel
+conda install -n radonpy pyzmq ipykernel --offline --force-reinstall -y
 
 echo "=== DONE ==="
 echo "conda activate radonpy の中で import pandas, sklearn, torch 等が使えます"
