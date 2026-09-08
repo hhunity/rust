@@ -57,6 +57,16 @@
 #   要求する値と完全に一致させる必要がある(異なると依存関係エラーに
 #   なる)。torchのバージョンを変更する場合は、対応するこれらのバージョンも
 #   `pip download --no-deps torch==<version>` 等で事前に確認し直すこと。
+# - 【上記の亜種・実機で発生を確認】`cuda-toolkit[cufile]`のextra経由で
+#   入る`nvidia-cufile`は、cuda-toolkit自身のメタデータ内で
+#   `sys_platform == "linux"`という条件が付いており、**Windows版の
+#   ビルドがそもそも存在しない**(GPUDirect StorageはLinux専用機能の
+#   ため)。cuda-toolkit全体を明示指定してもextra内部のこの条件は
+#   別扱いで評価されるため、Windows上ではnvidia-cufileだけが同様に
+#   スキップされ、Linux実機側で
+#   `Could not find a version that satisfies the requirement
+#   nvidia-cufile==1.15.1.6`になることを確認した。これも
+#   `nvidia-cufile`自体を明示指定することで回避する。
 
 $ErrorActionPreference = "Stop"
 
@@ -87,6 +97,7 @@ $pipArgs += "nvidia-cusparselt-cu13==0.8.1"
 $pipArgs += "nvidia-nccl-cu13==2.30.7"
 $pipArgs += "nvidia-nvshmem-cu13==3.4.5"
 $pipArgs += "triton==3.8.0"
+$pipArgs += "nvidia-cufile==1.15.1.6"
 
 python -m pip @pipArgs
 
