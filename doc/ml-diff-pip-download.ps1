@@ -85,6 +85,20 @@
 #   `Could not find a version that satisfies the requirement
 #   nvidia-cufile==1.15.1.6`になることを確認した。これも
 #   `nvidia-cufile`自体を明示指定することで回避する。
+# - 【同上・実機で発生を確認】jupyter(ipython)が要求する`pexpect`にも
+#   `; sys_platform != "win32" and sys_platform != "emscripten"`という
+#   条件が付いており、同じ理由でWindows上ではスキップされる
+#   (`pexpect`はUnix端末操作用のライブラリでWindowsでは通常使わないため、
+#   ipython側がそう条件付けている)。`pexpect`が無いと、それ経由で入る
+#   はずの`ptyprocess`(terminadoも`; os_name != 'nt'`条件で個別に要求
+#   している)も連鎖して欠落する。これも`pexpect`自体を明示指定すること
+#   で回避する(pexpect自身のptyprocess依存には条件が付いていないため、
+#   pexpectさえ明示指定すればptyprocessは自動的に付いてくる)。
+#   なお、上記も含めてこのリストにある全パッケージの依存関係を実際に
+#   PyPIのメタデータで一括スキャンし、Linux専用条件(sys_platform/
+#   platform_system/os_name)を伴う依存で他に未対応のものが無いことを
+#   確認済み(2026-09-08時点)。将来torch等のバージョンを上げる場合は
+#   同様の確認をやり直すこと。
 
 param(
   # 追加で欲しいパッケージ名(カンマ区切りで複数可)。指定した場合、
@@ -135,7 +149,8 @@ if ($Package.Count -gt 0) {
     "nvidia-nccl-cu13==2.30.7",
     "nvidia-nvshmem-cu13==3.4.5",
     "triton==3.8.0",
-    "nvidia-cufile==1.15.1.6"
+    "nvidia-cufile==1.15.1.6",
+    "pexpect==4.9.0"
   )
   python -m pip @pipArgs
 }
