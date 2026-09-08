@@ -24,6 +24,29 @@
 # 実行後、生成される wheels フォルダをUSB等でオフラインのLinux実機へコピーする。
 # 実機側では doc/ml-diff-pip-install.sh を使ってオフライン導入する。
 #
+# 【設計: なぜ1個ずつ--no-depsでダウンロードするのか】
+#   以前は「torch scikit-learn tqdm jupyter ...」をまとめて1回の
+#   `pip download`に渡し、依存関係解決を丸ごとpipに任せていた。この方式
+#   だと、依存の中の1つでも解決できないもの(PEP 508環境マーカーの
+#   評価がWindowsとLinuxで食い違う問題。下記「ハマったポイント」参照)が
+#   あると、pipはそこでエラーを出して**それ以外の分も含めて何も
+#   ダウンロードせずに丸ごと止まってしまう**。1個ダメだと直して再実行、
+#   を何度も繰り返す羽目になっていた(実際に発生・報告あり)。
+#
+#   これを避けるため、$Packagesには「Linux実機向けに必要な
+#   全パッケージ名==バージョン」を事前に確定させたリストとして持たせ、
+#   1個ずつ`--no-deps`(依存解決なし、そのパッケージ自体のwheelだけを
+#   取得)でダウンロードするループに変更した。1個失敗しても
+#   ループは止めず、最後に成功/失敗を一覧表示する。これにより
+#   1回の実行で「今回何が足りないか」が全部まとめて分かる。
+#
+#   このリストは、実際にLinux上でtorch/scikit-learn/tqdm/jupyterの
+#   フル依存解決を行った結果(131パッケージ)をそのまま書き出したもの。
+#   pandas/numpy/rdkit/matplotlibのように既にRadonPy環境にあるものは
+#   pipが依存解決時に別途考慮するので、ここに無くても実機側の
+#   `pip install`(依存解決あり、doc/ml-diff-pip-install.sh参照)で
+#   正しく解決される。
+#
 # 【差分(追加分)だけダウンロードしたい場合】
 #   このスクリプトは`.\wheels`フォルダを毎回消さずに使う。pipは同名の
 #   ファイルが既にあればダウンロードし直さず単純にスキップするため、
@@ -31,15 +54,14 @@
 #   (動作確認済み: 既にあるファイルは `File was already downloaded ...`
 #   と表示されてスキップされる)。
 #
-#   後から新しいパッケージを1つ2つ追加したいだけの場合は、素の
-#   `pip download` を直接使うのが手軽(このスクリプト内の
-#   `$platformArgs` をそのまま流用する):
+#   後から新しいパッケージを1つ2つ追加したいだけの場合(上のベース
+#   リストに無いもの)は、`-Package`にパッケージ名(カンマ区切りで
+#   複数可)を渡す:
 #     .\ml-diff-pip-download.ps1 -Package seaborn
 #     .\ml-diff-pip-download.ps1 -Package seaborn,plotly
-#   のように `-Package` にパッケージ名(カンマ区切りで複数可)を渡すと、
-#   ベースの torch/scikit-learn/tqdm/jupyter一式は一切ダウンロードせず
-#   (`.\wheels`に既にある前提)、指定したパッケージとその新規の依存分
-#   だけを同じ `.\wheels` フォルダに追記する。
+#   ベースのtorch一式は一切ダウンロードせず、指定したパッケージ(通常の
+#   依存解決あり。新規パッケージなので--no-depsにはしない)とその新規の
+#   依存分だけを同じ `.\wheels` フォルダに追記する。
 #
 # 注意点(ハマったポイント):
 # - torchのバージョンを明示指定しないと、pipが全バージョンを総当たりして
@@ -54,60 +76,32 @@
 #   タグしか受け付けない(自動的な下位互換の判定はクロス指定時は
 #   働かない)ため、--platformを glibc 2.12〜2.31 まで総当たりで
 #   列挙している。1つだけ指定すると解決できないパッケージが出てエラーに
-#   なることを確認済み。`-Package`で追加パッケージを取る場合も同じ
-#   platformArgsを使うので、この問題は起きない。
+#   なることを確認済み。
+# - 【重要・Windows上で実行すると起きる問題】torch/ipython等が要求する
+#   一部の依存(nvidia-cudnn-cu13, nvidia-nccl-cu13, nvidia-cufile,
+#   pexpect 等)には、`; platform_system == "Linux"` や
+#   `; sys_platform != "win32"` のようなPEP 508環境マーカーが付いており、
+#   これは`--platform`(wheelのタグ照合用)では制御できず、**pipを実行
+#   している実際のOS**で評価される。そのため、このスクリプトをWindows
+#   上で実行すると該当パッケージが"該当なし"としてエラーも出さず静かに
+#   スキップされてしまう(実際に複数回発生を確認)。
+#   今回、$Packagesの元になった131パッケージ全ての依存関係をPyPIの
+#   メタデータで一括スキャンし、このマーカー問題を伴う依存が無いことを
+#   確認済み(2026-09-08時点)。--no-depsで1個ずつ明示的に指定している
+#   ため、このマーカー問題自体もう起こらない(依存経由でのみ発生する
+#   問題であり、トップレベルで明示指定した場合はマーカーは評価されない
+#   ため)。
 # - このtorchはCUDA 13.0系。doc/Dockerfile.ml-gpu /
 #   doc/ml-conda-windows-download.ps1のconda版はCUDA 13.3系で、
 #   厳密には別のマイナーバージョンだが、同じCUDA 13系列なので
 #   実機のドライバ(13.3対応)でそのまま動くはず。
-# - 【重要・Windows上で実行すると起きる問題】torchのCUDA関連依存
-#   (nvidia-cudnn-cu13, nvidia-nccl-cu13 等)には、torch側のメタデータで
-#   `; platform_system == "Linux"` という条件(PEP 508環境マーカー)が
-#   付いている。この条件は`--platform`(wheelのタグ照合用)では制御でき
-#   ず、**pipを実行している実際のOS**で評価される。そのため、この
-#   スクリプトをWindows上で実行すると`platform_system`が`"Windows"`と
-#   評価され、cudnn/nccl等のCUDAライブラリ一式が"該当なし"として
-#   静かに(エラーも出さずに)スキップされてしまう。実際に発生を確認済み
-#   (torch本体の.whl(約550MB)だけ落ちて、残りが落ちない)。
-#   対策として、これらのパッケージをtorchの依存経由ではなく
-#   **明示的に個別指定**することで回避する(明示指定した場合はマーカー
-#   条件によるフィルタが適用されないため)。バージョンはtorch==2.14.0が
-#   要求する値と完全に一致させる必要がある(異なると依存関係エラーに
-#   なる)。torchのバージョンを変更する場合は、対応するこれらのバージョンも
-#   `pip download --no-deps torch==<version>` 等で事前に確認し直すこと。
-# - 【上記の亜種・実機で発生を確認】`cuda-toolkit[cufile]`のextra経由で
-#   入る`nvidia-cufile`は、cuda-toolkit自身のメタデータ内で
-#   `sys_platform == "linux"`という条件が付いており、**Windows版の
-#   ビルドがそもそも存在しない**(GPUDirect StorageはLinux専用機能の
-#   ため)。cuda-toolkit全体を明示指定してもextra内部のこの条件は
-#   別扱いで評価されるため、Windows上ではnvidia-cufileだけが同様に
-#   スキップされ、Linux実機側で
-#   `Could not find a version that satisfies the requirement
-#   nvidia-cufile==1.15.1.6`になることを確認した。これも
-#   `nvidia-cufile`自体を明示指定することで回避する。
-# - 【同上・実機で発生を確認】jupyter(ipython)が要求する`pexpect`にも
-#   `; sys_platform != "win32" and sys_platform != "emscripten"`という
-#   条件が付いており、同じ理由でWindows上ではスキップされる
-#   (`pexpect`はUnix端末操作用のライブラリでWindowsでは通常使わないため、
-#   ipython側がそう条件付けている)。`pexpect`が無いと、それ経由で入る
-#   はずの`ptyprocess`(terminadoも`; os_name != 'nt'`条件で個別に要求
-#   している)も連鎖して欠落する。これも`pexpect`自体を明示指定すること
-#   で回避する(pexpect自身のptyprocess依存には条件が付いていないため、
-#   pexpectさえ明示指定すればptyprocessは自動的に付いてくる)。
-#   なお、上記も含めてこのリストにある全パッケージの依存関係を実際に
-#   PyPIのメタデータで一括スキャンし、Linux専用条件(sys_platform/
-#   platform_system/os_name)を伴う依存で他に未対応のものが無いことを
-#   確認済み(2026-09-08時点)。将来torch等のバージョンを上げる場合は
-#   同様の確認をやり直すこと。
 
 param(
   # 追加で欲しいパッケージ名(カンマ区切りで複数可)。指定した場合、
   # ベースのtorch一式はダウンロードせず、指定したパッケージのみを
-  # .\wheels に追記する(差分ダウンロードモード)。
+  # .\wheels に追記する(通常の依存解決あり)。
   [string[]]$Package = @()
 )
-
-$ErrorActionPreference = "Stop"
 
 $PythonVersion = "313"
 $Abi = "cp313"
@@ -132,28 +126,172 @@ $commonArgs = @(
 ) + $platformArgs + @("-d", ".\wheels")
 
 if ($Package.Count -gt 0) {
-  # 差分ダウンロードモード: 指定パッケージだけを追記
-  Write-Host "=== 差分ダウンロードモード: $($Package -join ', ') ==="
+  # 追加パッケージモード: 指定パッケージだけを通常の依存解決付きで追記
+  Write-Host "=== 追加パッケージモード: $($Package -join ', ') ==="
   python -m pip @commonArgs @Package
-} else {
-  # 通常モード: ベースのtorch一式一式(再実行しても既存ファイルは
-  # 自動的にスキップされるので、これも実質的に差分ダウンロードになる)
-  $pipArgs = $commonArgs + @(
-    "torch==2.14.0", "scikit-learn", "tqdm", "jupyter",
-    # torchのLinux限定・CUDA関連依存を明示指定(Windows上でのマーカー
-    # フィルタ問題の回避。バージョンはtorch==2.14.0の要求値と一致させている)
-    "cuda-toolkit[cublas,cudart,cufft,cufile,cupti,curand,cusolver,cusparse,nvjitlink,nvrtc,nvtx]==13.0.3",
-    "cuda-bindings==13.3.1",
-    "nvidia-cudnn-cu13==9.24.0.43",
-    "nvidia-cusparselt-cu13==0.8.1",
-    "nvidia-nccl-cu13==2.30.7",
-    "nvidia-nvshmem-cu13==3.4.5",
-    "triton==3.8.0",
-    "nvidia-cufile==1.15.1.6",
-    "pexpect==4.9.0"
-  )
-  python -m pip @pipArgs
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "=== 失敗しました(終了コード $LASTEXITCODE) ===" -ForegroundColor Red
+    exit $LASTEXITCODE
+  }
+  Write-Host "=== 完了 ==="
+  exit 0
 }
 
-Write-Host "=== 完了 ==="
-Write-Host ".\wheels フォルダをUSB等でLinux実機へコピーしてください"
+# 通常モード: Linux実機向けに必要な全パッケージ(torch/scikit-learn/
+# tqdm/jupyterのフル依存解決結果、131個)を1個ずつ--no-depsで取得する。
+# 失敗してもループを止めず、最後に一覧表示する。
+$Packages = @(
+  "torch==2.14.0",
+  "scikit-learn==1.9.0",
+  "tqdm==4.70.0",
+  "jupyter==1.1.1",
+  "anyio==4.15.1",
+  "argon2-cffi==25.1.0",
+  "argon2-cffi-bindings==26.1.0",
+  "arrow==1.4.0",
+  "asttokens==3.0.2",
+  "async-lru==2.3.0",
+  "attrs==26.1.0",
+  "babel==2.18.0",
+  "beautifulsoup4==4.15.0",
+  "bleach==6.4.0",
+  "certifi==2026.7.22",
+  "cffi==2.1.1",
+  "charset-normalizer==3.5.1",
+  "cloudpickle==3.1.2",
+  "comm==0.2.3",
+  "cuda-bindings==13.3.1",
+  "cuda-pathfinder==1.8.1",
+  "cuda-toolkit==13.0.3.0",
+  "debugpy==1.8.21",
+  "defusedxml==0.7.1",
+  "executing==2.2.1",
+  "fastjsonschema==2.22.2",
+  "filelock==3.32.5",
+  "fqdn==1.5.1",
+  "fsspec==2026.7.0",
+  "h11==0.16.0",
+  "httpcore==1.0.9",
+  "httpx==0.28.1",
+  "idna==3.19",
+  "ipykernel==7.3.0",
+  "ipython==9.17.1",
+  "ipython-pygments-lexers==1.1.1",
+  "ipywidgets==8.1.9",
+  "isoduration==20.11.0",
+  "jedi==0.20.0",
+  "jinja2==3.1.6",
+  "joblib==1.6.0",
+  "json5==0.15.0",
+  "jsonpointer==3.1.1",
+  "jsonschema==4.26.0",
+  "jsonschema-specifications==2025.9.1",
+  "jupyter-builder==1.2.3",
+  "jupyter-client==8.10.0",
+  "jupyter-console==6.6.3",
+  "jupyter-core==5.9.1",
+  "jupyter-events==0.12.1",
+  "jupyter-lsp==2.3.1",
+  "jupyter-server==2.21.0",
+  "jupyter-server-terminals==0.5.4",
+  "jupyterlab==4.6.3",
+  "jupyterlab-pygments==0.3.0",
+  "jupyterlab-server==2.28.0",
+  "jupyterlab-widgets==3.0.17",
+  "lark==1.3.1",
+  "markupsafe==3.0.3",
+  "matplotlib-inline==0.2.2",
+  "mistune==3.3.4",
+  "mpmath==1.3.0",
+  "narwhals==2.25.0",
+  "nbclient==0.11.0",
+  "nbconvert==7.17.1",
+  "nbformat==5.11.1",
+  "nest-asyncio2==1.7.2",
+  "networkx==3.6.1",
+  "notebook==7.6.2",
+  "notebook-shim==0.2.4",
+  "numpy==2.5.3",
+  "nvidia-cublas==13.1.1.3",
+  "nvidia-cuda-cupti==13.0.85",
+  "nvidia-cuda-nvrtc==13.0.88",
+  "nvidia-cuda-runtime==13.0.96",
+  "nvidia-cudnn-cu13==9.24.0.43",
+  "nvidia-cufft==12.0.0.61",
+  "nvidia-cufile==1.15.1.6",
+  "nvidia-curand==10.4.0.35",
+  "nvidia-cusolver==12.0.4.66",
+  "nvidia-cusparse==12.6.3.3",
+  "nvidia-cusparselt-cu13==0.8.1",
+  "nvidia-nccl-cu13==2.30.7",
+  "nvidia-nvjitlink==13.3.33",
+  "nvidia-nvshmem-cu13==3.4.5",
+  "nvidia-nvtx==13.0.85",
+  "overrides==7.7.0",
+  "packaging==26.3",
+  "pandocfilters==1.5.1",
+  "parso==0.8.7",
+  "pexpect==4.9.0",
+  "platformdirs==4.11.7",
+  "prometheus-client==0.26.0",
+  "prompt-toolkit==3.0.53",
+  "psutil==7.2.2",
+  "ptyprocess==0.7.0",
+  "pure-eval==0.2.3",
+  "pycparser==3.0",
+  "pygments==2.21.0",
+  "python-dateutil==2.9.0.post0",
+  "python-json-logger==4.2.0",
+  "pyyaml==6.0.3",
+  "pyzmq==27.2.0",
+  "referencing==0.37.0",
+  "requests==2.34.2",
+  "rfc3339-validator==0.1.4",
+  "rfc3986-validator==0.1.1",
+  "rfc3987-syntax==1.1.0",
+  "rpds-py==2026.6.3",
+  "scipy==1.18.1",
+  "send2trash==2.1.0",
+  "setuptools==84.0.0",
+  "six==1.17.0",
+  "soupsieve==2.9.2",
+  "stack-data==0.6.3",
+  "sympy==1.14.0",
+  "terminado==0.18.1",
+  "threadpoolctl==3.6.0",
+  "tinycss2==1.5.1",
+  "tornado==6.5.8",
+  "traitlets==5.16.1",
+  "triton==3.8.0",
+  "typing-extensions==4.16.0",
+  "tzdata==2026.3",
+  "uri-template==1.3.0",
+  "urllib3==2.7.0",
+  "wcwidth==0.8.3",
+  "webcolors==25.10.0",
+  "webencodings==0.6.1",
+  "websocket-client==1.9.2",
+  "widgetsnbextension==4.0.16"
+)
+
+$failures = @()
+$i = 0
+foreach ($pkg in $Packages) {
+  $i++
+  Write-Host "[$i/$($Packages.Count)] $pkg"
+  python -m pip @commonArgs --no-deps $pkg
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "  -> 失敗(終了コード $LASTEXITCODE)" -ForegroundColor Red
+    $failures += $pkg
+  }
+}
+
+Write-Host ""
+Write-Host "=== 完了: $($Packages.Count - $failures.Count)/$($Packages.Count) 成功 ==="
+if ($failures.Count -gt 0) {
+  Write-Host "以下が失敗しました:" -ForegroundColor Red
+  $failures | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
+  Write-Host "上記を貼って報告してください。" -ForegroundColor Red
+} else {
+  Write-Host ".\wheels フォルダをUSB等でLinux実機へコピーしてください"
+}
