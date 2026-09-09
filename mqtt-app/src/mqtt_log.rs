@@ -6,16 +6,20 @@
 //! `spdlog::set_level()`やログレベルをコマンドライン/環境変数で切り替える仕組みと
 //! 同じ発想です）。
 //!
-//! 使い方（実行時に環境変数を指定する）:
-//! ```sh
-//! RUST_LOG=mqtt_app=info cargo run --bin mqtt-server
-//! ```
-//! 何も指定しなければ、このプロジェクトのログは表示されません（デフォルトが
-//! `error`レベルだけを表示する設定になっているため）。
+//! ## デフォルトの挙動
 //!
+//! `RUST_LOG`を何も指定しなければ、自動的に`mqtt_app=info,rumqttd=off`が使われます。
+//! つまり**普段は環境変数なしで、自分のアプリのログだけが見える**ようになっています
+//! （rumqttdは動作ログをERRORレベルで大量に出す作りになっているため、デフォルトで
+//! 黙らせています）。
+//!
+//! 一時的にもっと詳しく見たい・rumqttd側も見たい、という時だけ環境変数で上書きします:
+//! ```sh
+//! RUST_LOG=mqtt_app=debug cargo run --bin mqtt-server
+//! RUST_LOG=mqtt_app=info,rumqttd=info cargo run --bin mqtt-server
+//! ```
 //! `RUST_LOG=info`のように**クレート名を付けずに**指定すると、依存クレートである
-//! `rumqttd`（ブローカー本体）の内部ログまで大量に表示されてしまうので注意してください。
-//! `mqtt_app=info`のように**自分のクレート名だけを指定する**のがおすすめです。
+//! `rumqttd`の内部ログまで大量に表示されてしまうので注意してください。
 //!
 //! ## ログをファイルへ書き出す
 //!
@@ -33,7 +37,11 @@
 /// 近いもので、`.target(...)`のような「メソッドチェーン」で設定を1つずつ足していき、
 /// 最後に`.init()`を呼んで確定させる、という使い方をします。
 pub fn init_logger(log_file: Option<&str>) {
-    let mut builder = env_logger::Builder::from_default_env();
+    // RUST_LOGが指定されていればそれを使い、未指定ならこのデフォルト値を使う。
+    // 「自分のアプリのログは見たいが、rumqttdの内部ログ（ERRORレベルで大量に出る）は
+    // 見たくない」という、このプロジェクトで一番よく使う組み合わせをデフォルトにしている。
+    let env = env_logger::Env::default().default_filter_or("mqtt_app=info,rumqttd=off");
+    let mut builder = env_logger::Builder::from_env(env);
     if let Some(path) = log_file {
         let file = std::fs::File::create(path)
             .unwrap_or_else(|e| panic!("ログファイル{path}の作成に失敗しました: {e}"));
