@@ -6,18 +6,18 @@
 //! ファイルの受信やジョブの実行はマイコン役（[`crate::device`]・[`crate::file_transfer`]）の
 //! 仕事なので、ここには一切出てきません。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 
-use crate::messages::{AckMsg, BirthDeathMsg, CmdMsg, DataMsg, DoneMsg, JobMsg, OfferMsg, PresenceMsg, ReceivedMsg};
+use crate::messages::{AckMsg, BirthDeathMsg, DataMsg, DoneMsg, PresenceMsg, ReceivedMsg};
 use crate::mqtt_log;
 use crate::seq::{check_seq, next_seq, ControllerSeqState};
 
@@ -27,10 +27,10 @@ use crate::seq::{check_seq, next_seq, ControllerSeqState};
 /// `std::shared_ptr<std::mutex_wrapped<std::unordered_map<std::string, std::filesystem::path>>>`
 /// のようなものです。複数のスレッド（標準入力を読むスレッドと、MQTT受信を処理する
 /// メインスレッド）から安全に読み書きするために、この形にしています。
-type PendingOffers = Arc<Mutex<HashMap<String, PathBuf>>>;
+pub(crate) type PendingOffers = Arc<Mutex<HashMap<String, PathBuf>>>;
 
 /// 「マイコンの名前 → 今オンラインかどうか」を覚えておく辞書（ジョブ配信先の名簿）。
-type Roster = Arc<Mutex<HashMap<String, bool>>>;
+pub(crate) type Roster = Arc<Mutex<HashMap<String, bool>>>;
 
 /// 今まさに配信中で、全員の完了報告を待っているジョブの情報。
 ///
@@ -39,38 +39,11 @@ type Roster = Arc<Mutex<HashMap<String, bool>>>;
 /// キュー＋条件変数（`std::condition_variable`）をセットにしたようなもの、と考えると
 /// イメージしやすいです。「別スレッドから`tx.send(値)`で投げ込み、こちら側は
 /// `rx.recv()`（またはタイムアウト付きの`rx.recv_timeout()`）で待ち受ける」という使い方をします。
-struct InFlightJob {
-    id: String,
-    tx: mpsc::Sender<String>,
+pub(crate) struct InFlightJob {
+    pub(crate) id: String,
+    pub(crate) tx: mpsc::Sender<String>,
 }
-type InFlightState = Arc<Mutex<Option<InFlightJob>>>;
-
-/// ジョブを送ってから、完了報告が来ないマイコンを「エラー」と判断するまでの待ち時間。
-/// `const`はC++の`constexpr`に近いコンパイル時定数です。
-const JOB_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// 入力行の先頭にある `/qos0 ` `/qos1 ` `/qos2 ` プレフィックスを読み取り、
-/// (QoS, プレフィックスを除いた本文) を返す。プレフィックスが無ければQoS1（AtLeastOnce）扱い。
-///
-/// 戻り値の`(QoS, &str)`はタプル型で、C++の`std::pair<QoS, std::string_view>`に近いものです。
-/// `&str`（文字列スライス）はC++の`std::string_view`と同様、文字列データそのものを
-/// コピーせず「どこからどこまでか」という参照だけを持つ軽量な型です。
-fn parse_qos_prefix(line: &str) -> (QoS, &str) {
-    for (prefix, qos) in [
-        ("/qos0 ", QoS::AtMostOnce),
-        ("/qos1 ", QoS::AtLeastOnce),
-        ("/qos2 ", QoS::ExactlyOnce),
-    ] {
-        // strip_prefixは「先頭がprefixと一致していれば、それを取り除いた残りを返す」関数で、
-        // 戻り値はOption<&str>（一致すればSome(残り)、しなければNone）。
-        // if let Some(rest) = ... は「Someだった場合だけ中身(rest)を取り出して処理する」という、
-        // C++で言えばif文の中でoptionalの値を取り出すのに近いパターンマッチです。
-        if let Some(rest) = line.strip_prefix(prefix) {
-            return (qos, rest);
-        }
-    }
-    (QoS::AtLeastOnce, line)
-}
+pub(crate) type InFlightState = Arc<Mutex<Option<InFlightJob>>>;
 
 /// 受信したpublishのトピックが `<topic>/<message_type>/<名前>` の形なら、その`<名前>`部分を
 /// 取り出す。`message_type`が一致しなければ`None`。
@@ -236,172 +209,20 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
     let roster: Roster = Arc::new(Mutex::new(HashMap::new()));
     let inflight: InFlightState = Arc::new(Mutex::new(None));
 
-    // 別スレッドを立てて「キーボード入力 → メッセージ送信」を担当させる。
-    // { } で囲んでいるのは、この中だけで使うclient・name等の複製（clone）を用意して、
-    // 元の変数は後半（メインループ）でも引き続き使えるようにするためのブロックスコープです
-    // （C++でいう、変数のライフタイムを絞るための`{ }`スコープと同じ使い方です）。
-    {
-        let client = client.clone();
-        let name = name.clone();
-        let topic = topic.clone();
-        let pending_offers = Arc::clone(&pending_offers);
-        let all_cmd_topic = all_cmd_topic.clone();
-        let roster = Arc::clone(&roster);
-        let inflight = Arc::clone(&inflight);
-        let seq = seq.clone();
-
-        thread::spawn(move || {
-            let stdin = io::stdin();
-            for line in stdin.lock().lines() {
-                let line = match line {
-                    Ok(l) => l,
-                    Err(_) => break,
-                };
-                if line.is_empty() {
-                    continue;
-                }
-
-                // "/job 内容": 今オンラインの全マイコンへ一斉配信し、全員完了するまで待つ
-                //
-                // `line.strip_prefix("/job ")`（末尾にスペース）だけで判定していると、
-                // 内容を付けずに"/job"とだけ打った場合にスペースが無く一致しなくなり、
-                // このifを素通りして下の「普通のチャットメッセージ」として送られてしまう、
-                // という紛らわしい挙動になっていました。`line == "/job"`も合わせて拾い、
-                // 内容が空なら使い方を案内するようにしています。
-                if line == "/job" || line.starts_with("/job ") {
-                    let content = line.strip_prefix("/job").unwrap().trim();
-                    if content.is_empty() {
-                        println!("[system] 使い方: /job <内容>");
-                        continue;
-                    }
-                    // ロックした瞬間の名簿を「今回のジョブの宛先」として写し取る
-                    // （HashSet<String>はC++のstd::unordered_set<std::string>に相当）
-                    let targets: HashSet<String> = roster
-                        .lock()
-                        .unwrap()
-                        .iter()
-                        .filter(|(_, &online)| online)
-                        .map(|(who, _)| who.clone())
-                        .collect();
-
-                    if targets.is_empty() {
-                        println!("[system] 今オンラインのマイコンがいないため、ジョブを送信できません");
-                        continue;
-                    }
-
-                    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-                    let id = format!("{name}-{nanos}");
-
-                    // 「完了報告が来たら教えて」という約束を、チャンネル(tx/rx)で表現する。
-                    // txはこの後publishした後にメインスレッド側のhandle_job_doneへ渡され、
-                    // 完了報告のたびにtx.send()される。rxはこの下のwhileループで受け取る側。
-                    let (tx, rx) = mpsc::channel::<String>();
-                    *inflight.lock().unwrap() = Some(InFlightJob { id: id.clone(), tx });
-
-                    let job = JobMsg {
-                        id: id.clone(),
-                        from: name.clone(),
-                        content: content.to_string(),
-                        seq: next_seq(&seq.job_counter),
-                    };
-                    let payload = serde_json::to_vec(&CmdMsg::Job(job)).unwrap();
-                    mqtt_log::log_publish(&all_cmd_topic, &payload);
-                    client.publish(&all_cmd_topic, QoS::AtLeastOnce, false, payload).unwrap();
-                    println!(
-                        "[system] ジョブ{id}を{}台のマイコン({targets:?})へ配信しました。完了を待っています…",
-                        targets.len()
-                    );
-
-                    // 全員分の完了報告が来るか、タイムアウトするまでここでブロックして待つ。
-                    // これはC++でいう
-                    //   while (!remaining.empty()) {
-                    //       if (cv.wait_until(lock, deadline) == cv_status::timeout) break;
-                    //       remaining.erase(received_name);
-                    //   }
-                    // に相当する待ち合わせ処理です。
-                    let mut remaining = targets;
-                    let deadline = Instant::now() + JOB_TIMEOUT;
-                    while !remaining.is_empty() {
-                        let now = Instant::now();
-                        if now >= deadline {
-                            break;
-                        }
-                        // recv_timeout: 「残り時間内に何か届けばそれを返す、届かなければタイムアウトを返す」
-                        match rx.recv_timeout(deadline - now) {
-                            Ok(who) => {
-                                remaining.remove(&who);
-                            }
-                            Err(_) => break, // タイムアウト（これ以上待っても来ない）
-                        }
-                    }
-                    *inflight.lock().unwrap() = None; // 待つのをやめたので、共有状態も片付ける
-
-                    if remaining.is_empty() {
-                        println!("[system] ジョブ{id}は全員完了しました");
-                    } else {
-                        println!("[system] エラー: ジョブ{id}は次のマイコンから応答がありませんでした: {remaining:?}");
-                    }
-                    continue;
-                }
-
-                // "/send 宛先の名前 ファイルパス": ファイル送信の申し出
-                //
-                // `/job`と同じ理由で、`line == "/send"`（引数無し）も合わせて拾う。
-                // 引数が足りない場合は、下の`split_once`が`None`を返すので、
-                // 既存の使い方案内にそのまま繋がる。
-                if line == "/send" || line.starts_with("/send ") {
-                    let rest = line.strip_prefix("/send").unwrap().trim();
-                    // split_once(' ') で「最初のスペースの前後」に文字列を2つに割る
-                    // （C++のstd::string::find(' ')＋substr()を1回で済ませたイメージ）
-                    let Some((to, path_str)) = rest.split_once(' ') else {
-                        println!("[system] 使い方: /send <宛先の名前> <ファイルパス>");
-                        continue;
-                    };
-                    let path = PathBuf::from(path_str);
-                    let metadata = match fs::metadata(&path) {
-                        Ok(m) => m,
-                        Err(e) => {
-                            println!("[system] ファイルが読めません: {path_str} ({e})");
-                            continue;
-                        }
-                    };
-                    let filename = path
-                        .file_name()
-                        .map(|f| f.to_string_lossy().to_string())
-                        .unwrap_or_else(|| path_str.to_string());
-
-                    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-                    let id = format!("{name}-{nanos}");
-
-                    pending_offers.lock().unwrap().insert(id.clone(), path);
-
-                    let offer = OfferMsg {
-                        id,
-                        from: name.clone(),
-                        filename: filename.clone(),
-                        size: metadata.len(),
-                        seq: next_seq(&seq.offer_counter),
-                    };
-                    // 宛先(to)は、ペイロードではなくトピック自体（`<topic>/NCMD/<to>`）で表す。
-                    let offer_topic = format!("{topic}/NCMD/{to}");
-                    let payload = serde_json::to_vec(&CmdMsg::FileOffer(offer)).unwrap();
-                    mqtt_log::log_publish(&offer_topic, &payload);
-                    client.publish(&offer_topic, QoS::AtLeastOnce, false, payload).unwrap();
-                    println!(
-                        "[system] {to}へ {filename} ({} bytes) の送信を申し出ました。相手の応答を待っています…",
-                        metadata.len()
-                    );
-                    continue;
-                }
-
-                // ここに来たら普通のチャットメッセージ
-                let (qos, text) = parse_qos_prefix(&line);
-                let message = format!("{name}: {text}");
-                mqtt_log::log_publish(&topic, message.as_bytes());
-                client.publish(&topic, qos, false, message.as_bytes()).unwrap();
-            }
-        });
-    }
+    // 標準入力（キーボード入力）を読み取り、チャット・`/send`・`/job`を処理する
+    // 専用スレッドを立てる。中身は[`crate::stdin_commands`]にまとめてあり、ここでは
+    // 必要な状態を渡すだけ。渡した後もこの関数（メインループ側）で引き続き使うものは
+    // .clone()で複製を渡している（所有権を渡してしまうと、後ろで使えなくなるため）。
+    crate::stdin_commands::spawn(
+        client.clone(),
+        name.clone(),
+        topic.clone(),
+        all_cmd_topic.clone(),
+        Arc::clone(&pending_offers),
+        Arc::clone(&roster),
+        Arc::clone(&inflight),
+        seq.clone(),
+    );
 
     println!("接続しました host={host} port={port} topic={topic} name={name}（パソコン役）");
     println!("メッセージを入力して Enter で送信します（Ctrl+D で終了）");

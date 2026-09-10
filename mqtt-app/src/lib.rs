@@ -102,3 +102,4 @@ pub mod file_transfer;
 pub mod messages;
 pub mod mqtt_log;
 pub mod seq;
+pub mod stdin_commands;
