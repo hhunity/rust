@@ -9,6 +9,44 @@
   2. **U-Boot/Linuxレベル**: SDM起動完了後の通常のU-Boot→kernel→rootfsのブートチェーン。Cyclone V/Arria10/Stratix10と共通の`u-boot-socfpga`ブランチを使うため、一般的なU-Boot env方式のA/B切替がそのまま使える。
 - まずは **Linux本体(kernel+rootfs)のA/B更新をSWUpdateで実現する** ことを目標にする。FPGA(ビットストリーム)の更新は将来フェーズとし、RSUクライアント経由のカスタムハンドラで対応する方針(下記「将来のFPGA更新について」参照)。
 
+## ボード到着前にPCで試せること
+
+Agilex 7実機が無くても、SWUpdate/Yocto周りは以下がPC(x86 Linux/QEMU)だけで練習・検証できる。優先度順。
+
+### A. 最優先: QEMUでSWUpdateのA/Bデモをまるごと動かす
+
+- poky + `meta-swupdate` をclone、`MACHINE = "qemux86-64"` でビルド(標準のA/Bデモ環境が用意されている)
+- `runqemu` でブート
+- ローカルWebUI(`http://localhost:8080` 等)から `.swu` を適用
+- 反対面への切替を確認
+- わざと壊れたイメージでbootcountロールバックを確認
+- A/B切替の考え方はボード非依存なので、ここで一通り体験しておけば実機到着後はBSP差分だけ乗せ替える形になる
+
+### B. sw-description / .swuパッケージ作成の練習
+
+ボード無関係。UbuntuにSWUpdateをネイティブビルド/インストールし、ダミーファイル(テキストファイルでも可)で以下を試す。
+
+- `sw-description` の書き方
+- `.swu` の作成(cpio化)
+- 署名(PKCS7/RSA鍵生成→署名→検証)
+
+### C. hawkBitサーバーをDockerでローカル起動
+
+配信管理サーバー側の操作感(デバイス登録、rollout作成、配信状況確認)を先に把握できる。QEMUイメージのSWUpdateを疑似デバイスとして接続すれば、フリート配信のE2Eも実機なしで試せる。
+
+### D. Yoctoビルド環境の準備・下ごしらえ
+
+- `poky`、`meta-intel-fpga`、`meta-swupdate` の取得とレイヤー構成確認
+- kernel/rootfsのビルド自体(FPGAビットストリームを除く部分)は`MACHINE=agilex`でも実機接続なしでビルドは通ることが多い(生成物の動作確認だけは実機かQEMUが必要)
+
+### E. U-BootのA/B切替ロジック単体の検証
+
+QEMU上のU-Boot(またはU-Bootのsandboxターゲット)で `bootcount`/`altbootcmd` の環境変数操作だけを先に試す。Agilexでも同じ`u-boot-socfpga`系の仕組みなので、ロジックの理解はそのまま転用できる。
+
+### 実機無しでは検証不可な範囲
+
+FPGA(RSU)側はSDMとのmailbox通信が必要なため、実機無しでの検証はほぼ不可能。ボード到着待ちでよい。
+
 ## Phase 1: BSP環境構築
 
 1. `meta-intel-fpga`(a.k.a `meta-intelfpga`)レイヤーを取得し、Yoctoにレイヤー追加。
