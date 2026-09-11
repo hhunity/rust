@@ -225,6 +225,16 @@ inherit cargo
 ```
 C/C++(CMake)なら`inherit cargo`の代わりに`inherit cmake`。gsrd-socfpga標準構成にはRust(cargo)サポートは入っていないため、Rustアプリの場合は`meta-rust-bin`等のレイヤーを別途追加する必要がある。
 
+**Rustアプリの場合は`cargo-bitbake`で.bbレシピを自動生成するのが実務上の標準**。上記のように手書きする必要は実質無く、`Cargo.lock`から依存crate一式(URL・バージョン・チェックサム含む)を解決した`.bb`ファイルを自動で吐いてくれる:
+
+```bash
+cargo install cargo-bitbake
+cd myapp/
+cargo bitbake
+```
+
+生成された`.bb`を`meta-myapp/recipes-myapp/myapp/`に配置すればそのまま使える。他社の実例でも、ソースからのビルドが主流でbin-onlyは「ソースが無い外部バイナリ」等の例外的なケースに限られる。
+
 **既にビルド済みのバイナリをそのまま持ち込む場合**(bin-onlyレシピ):
 
 ```bitbake
@@ -254,6 +264,15 @@ bitbake-layers add-layer ../meta-myapp
 echo 'IMAGE_INSTALL:append = " myapp"' >> conf/site.conf
 bitbake_image
 ```
+
+### ビルド成果物はどこに出るか
+
+Yoctoのビルドには2段階の成果物がある。
+
+1. **パッケージ単体**(`bitbake myapp`だけを実行した場合): `.ipk`/`.deb`(GSRDの設定次第。`PACKAGE_CLASSES`で決まる)として`tmp/deploy/deb/<arch>/myapp_1.0-r0_arm64.deb`のような場所に出る。実機に既にYoctoイメージが入っていれば、`opkg install`/`dpkg -i`でこのパッケージ単体だけを実機に追加インストールすることも可能(=イメージ全体を作り直さなくてよい、SWUpdateのA/B更新とは別系統の更新手段)。
+2. **イメージ全体**(`bitbake_image`を実行した場合): `myapp`は上記パッケージとしてビルドされた上で、**rootfsイメージの中に組み込まれる**。最終的な成果物は`tmp/deploy/images/$MACHINE/`配下にまとまり、GSRDでは`u-boot.itb`(kernel FITイメージ)、`*.dtb`、`ghrd.core.rbf`(FPGAビットストリーム)、rootfsイメージ(`.ext4`/`.tar.gz`/`.wic`等、`IMAGE_FSTYPES`次第)が生成される。`myapp`単体としての成果物はここには出てこず、rootfsイメージの中に「埋め込まれた1ファイル」として存在する形になる。
+
+SWUpdateのA/B更新で配る`.swu`は、基本的に②(イメージ全体、またはkernel/rootfsの差分)を対象にする。①(パッケージ単体でのopkg更新)はA/B切替の恩恵(自動ロールバック等)を受けられないため、本番運用では基本的に使わない。
 
 ## オフライン環境(ネット未接続のLinux/WSL)でのビルド
 
