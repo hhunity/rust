@@ -6,7 +6,11 @@
 # 含まれるもの:
 #   1. SWUpdate単体(apt) … sw-description/.swu作成の練習(README「Stage 0」)
 #   2. poky + meta-swupdate を qemux86-64 向けにビルド済み … A/B更新のQEMUデモ(「Stage A」)
-#   3. gsrd-socfpga(+meta-swupdateレイヤー) … Agilex 7向けソース一式をフェッチ済み(未ビルド)
+#   3. gsrd-socfpga(+meta-swupdate, meta-lts-mixins[rust]レイヤー) … Agilex 7向け
+#      ソース一式をフェッチ済み(未ビルド)
+#   4. rustup(cargo) + cargo-bitbake … 独自Rustアプリの開発・レシピ生成用
+#      (meta-lts-mixinsはbitbake側のRustクロスツールチェーン用で別物。詳細はREADME
+#      「GSRDに独自アプリケーションを含める」参照)
 #
 # 使い方(Windows Docker Desktop側。ネット接続あり。事前にDisk image sizeを
 # 十分広げておくこと。合計で数十GB規模になる):
@@ -25,7 +29,8 @@
 # コンテナ内での各練習の入り方:
 #   Stage 0 (SWUpdate単体):  README「Stage 0」の手順をそのまま実行(swupdateはインストール済み)
 #   Stage A (QEMU A/Bデモ):  cd /workspace/qemu-swupdate/build && source ../poky/oe-init-build-env . && runqemu qemux86-64 nographic
-#   Stage 1 (Agilex7本番):   cd /workspace/gsrd-socfpga && source ./agilex7_dk_si_agf014ea-gsrd-build.sh && build_setup && ../add-swupdate-layer.sh && bitbake_image
+#   Stage 1 (Agilex7本番):   cd /workspace/gsrd-socfpga && source ./agilex7_dk_si_agf014ea-gsrd-build.sh && build_setup && ../add-swupdate-layer.sh && ../add-rust-layer.sh && bitbake_image
+#   独自Rustアプリの開発:     cargo build(通常のRust開発)/ cargo bitbake(レシピ自動生成。README参照)
 #
 # NOTE: gsrd-socfpga部分はソースのフェッチのみ済ませてあり、実ビルド(bitbake_image)は
 # コンテナ起動後に手動で行う(フルビルドまでイメージに焼き込むとサイズ・ビルド時間が
@@ -61,11 +66,19 @@ COPY qemu-swupdate-build.sh /usr/local/bin/qemu-swupdate-build.sh
 RUN chmod +x /usr/local/bin/qemu-swupdate-build.sh \
     && /usr/local/bin/qemu-swupdate-build.sh
 
-# --- 4. gsrd-socfpga + meta-swupdateレイヤー(Agilex7本番。フェッチのみ) ---
+# --- 4. gsrd-socfpga + meta-swupdate/meta-lts-mixinsレイヤー(Agilex7本番。フェッチのみ) ---
 COPY yocto-agilex7-fetch.sh /usr/local/bin/yocto-agilex7-fetch.sh
 COPY add-swupdate-layer.sh /workspace/add-swupdate-layer.sh
-RUN chmod +x /usr/local/bin/yocto-agilex7-fetch.sh /workspace/add-swupdate-layer.sh \
+COPY add-rust-layer.sh /workspace/add-rust-layer.sh
+RUN chmod +x /usr/local/bin/yocto-agilex7-fetch.sh /workspace/add-swupdate-layer.sh /workspace/add-rust-layer.sh \
     && /usr/local/bin/yocto-agilex7-fetch.sh
+
+# --- 5. Rust(rustup)+ cargo-bitbake(独自アプリの開発・レシピ生成用。ホスト側ツール) ---
+ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:$PATH
+RUN wget -q https://sh.rustup.rs -O /tmp/rustup-init.sh \
+    && sh /tmp/rustup-init.sh -y --default-toolchain stable --profile minimal \
+    && rm /tmp/rustup-init.sh \
+    && cargo install cargo-bitbake
 
 WORKDIR /workspace
 CMD ["/bin/bash"]

@@ -223,7 +223,9 @@ SRCREV = "<commitハッシュ>"
 S = "${WORKDIR}/git"
 inherit cargo
 ```
-C/C++(CMake)なら`inherit cargo`の代わりに`inherit cmake`。gsrd-socfpga標準構成にはRust(cargo)サポートは入っていないため、Rustアプリの場合は`meta-rust-bin`等のレイヤーを別途追加する必要がある。
+C/C++(CMake)なら`inherit cargo`の代わりに`inherit cmake`。
+
+**`meta-rust`とは別物であることに注意**: `meta-myapp`(このセクションで作るレイヤー)はアプリ本体、`meta-rust`相当のレイヤーはRustのビルド基盤(クロスコンパイラ)を提供するだけの土台で、両者は別レイヤー。Rustサポート自体はoe-core(poky本体)に統合済みだが、**scarthgapに標準搭載のRustは1.59.0と古く**、最近のcrateのビルドには不足しがち。そこで公式の補完レイヤー**`meta-lts-mixins`(`scarthgap/rust`ブランチ)**で現行Rustにアップデートする(`swupdate/add-rust-layer.sh`参照。旧`meta-rust`/`meta-rust-bin`は非推奨)。
 
 **Rustアプリの場合は`cargo-bitbake`で.bbレシピを自動生成するのが実務上の標準**。上記のように手書きする必要は実質無く、`Cargo.lock`から依存crate一式(URL・バージョン・チェックサム含む)を解決した`.bb`ファイルを自動で吐いてくれる:
 
@@ -259,11 +261,14 @@ do_install() {
 ```bash
 . agilex7_dk_si_agf014ea-gsrd-build.sh
 build_setup
+../add-rust-layer.sh   # Rustアプリの場合のみ。meta-lts-mixins(現行Rust)を追加
 cd $WORKSPACE/$MACHINE-$IMAGE-rootfs
 bitbake-layers add-layer ../meta-myapp
 echo 'IMAGE_INSTALL:append = " myapp"' >> conf/site.conf
 bitbake_image
 ```
+
+`swupdate/add-rust-layer.sh`は`add-swupdate-layer.sh`と同じパターンのスクリプトで、`meta-lts-mixins`(`scarthgap/rust`)を追加するだけ。`build_setup`を再実行するたびにレイヤーがリセットされる点も同じなので、毎回セットで実行すること。`Dockerfile.agilex7-dev`には`rustup`(cargo)と`cargo-bitbake`もホスト側ツールとしてインストール済み。
 
 ### ビルド成果物はどこに出るか
 

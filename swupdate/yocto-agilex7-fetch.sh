@@ -23,4 +23,8 @@ cd "${WORKSPACE}/${MACHINE}-${IMAGE}-rootfs"
 bitbake-layers add-layer ../meta-swupdate
 echo 'IMAGE_INSTALL:append = " swupdate swupdate-www"' >> conf/site.conf
 
+# 現行Rustツールチェーン用のmeta-lts-mixinsレイヤーも追加(add-rust-layer.shと同じ内容)
+git clone -b scarthgap/rust https://git.yoctoproject.org/meta-lts-mixins "${WORKSPACE}/meta-lts-mixins"
+bitbake-layers add-layer ../meta-lts-mixins
+
 bitbake console-image-minimal gsrd-console-image --runall=fetch
