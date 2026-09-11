@@ -22,13 +22,60 @@ Agilex 7実機が無くても、SWUpdate/Yocto周りは以下がPC(x86 Linux/QEM
 - わざと壊れたイメージでbootcountロールバックを確認
 - A/B切替の考え方はボード非依存なので、ここで一通り体験しておけば実機到着後はBSP差分だけ乗せ替える形になる
 
-### B. sw-description / .swuパッケージ作成の練習
+### B. sw-description / .swuパッケージ作成の練習(Stage 0。Ubuntu 24.04で実機動作確認済み)
 
-ボード無関係。UbuntuにSWUpdateをネイティブビルド/インストールし、ダミーファイル(テキストファイルでも可)で以下を試す。
+ボード無関係。`apt install swupdate swupdate-www` でインストールし、ダミーファイルで以下を試す。以下はこのセッション上で実際に動作確認済みの、正しい手順。
 
-- `sw-description` の書き方
-- `.swu` の作成(cpio化)
-- 署名(PKCS7/RSA鍵生成→署名→検証)
+**ハマりどころ(実際に発生したエラーと原因)**:
+- Ubuntu配布の`swupdate`パッケージは**署名必須でビルドされている**(`-k`無しでは起動すらしない)
+- 署名は単純なRSA署名ではなく**PKCS7/CMS(X.509証明書ベース)**が必要(`openssl rsa`の公開鍵を`-k`に渡すと「Error loading certificate chain」で失敗する)
+- `sw-description`の各imageエントリに`sha256`ハッシュの指定が必須(無いと「Hash not set」で失敗)
+- `hardware-compatibility`と、`swupdate`実行時の`-H <board>:<rev>`(または`/etc/hwrevision`)が一致しないと「SW not compatible with hardware」で失敗
+- **`.swu`(cpio化)の作り方を誤りやすい**: `cpio -o`はファイルの**中身**ではなく**ファイル名の一覧**を標準入力から受け取る。`cat file1 file2 | cpio -o` は誤り(cpioがファイル内容を"ファイル名"と誤解して壊れたアーカイブになる)。さらに`-v`(verbose)と`2>&1 | tail`を併用すると、verboseのstderr出力がアーカイブ本体に混入して壊れる。**`-v`を付けるなら`>`より前に`2>&1`は置かない/そもそも付けない。**
+
+**手順**:
+```bash
+mkdir -p ~/swupdate-test && cd ~/swupdate-test
+echo "old firmware v1" > slot_b.img
+echo "new firmware v2" > payload.bin
+
+# CA証明書と署名用証明書を作成(自己署名。練習用)
+openssl req -x509 -newkey rsa:2048 -nodes -keyout ca-key.pem -out ca-cert.pem \
+  -days 365 -subj "/CN=SWUpdate Test CA"
+openssl req -newkey rsa:2048 -nodes -keyout signer-key.pem -out signer.csr \
+  -subj "/CN=SWUpdate Test Signer"
+openssl x509 -req -in signer.csr -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
+  -out signer-cert.pem -days 365 -extfile <(printf "extendedKeyUsage=emailProtection")
+
+# sw-description(sha256はpayload.binの実際のハッシュに置き換える)
+cat > sw-description <<EOF
+software =
+{
+    version = "0.1.0";
+    hardware-compatibility = [ "1.0" ];
+    images: (
+        {
+            filename = "payload.bin";
+            device = "$(pwd)/slot_b.img";
+            type = "raw";
+            sha256 = "$(sha256sum payload.bin | cut -d' ' -f1)";
+        }
+    );
+}
+EOF
+
+# PKCS7署名
+openssl cms -sign -in sw-description -out sw-description.sig \
+  -signer signer-cert.pem -inkey signer-key.pem -outform DER -nosmimecap -binary
+
+# .swu作成(ファイル名の一覧をcpioに渡す。-vは付けない)
+echo -e "sw-description\nsw-description.sig\npayload.bin" | cpio -o -H crc > update.swu
+
+# 適用(-Hはsw-descriptionのhardware-compatibilityと一致させる)
+swupdate -i update.swu -k ca-cert.pem -H board:1.0 -l 5
+
+cat slot_b.img   # "new firmware v2" になっていれば成功
+```
 
 ### C. hawkBitサーバーをDockerでローカル起動
 
