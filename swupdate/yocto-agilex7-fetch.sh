@@ -16,5 +16,11 @@ git submodule update --init -r
 
 source "./${BUILD_SCRIPT}"
 build_setup
+
+# meta-swupdateレイヤーも追加(add-swupdate-layer.shと同じ内容をここでも実行)
+git clone https://github.com/sbabic/meta-swupdate.git "${WORKSPACE}/meta-swupdate"
 cd "${WORKSPACE}/${MACHINE}-${IMAGE}-rootfs"
+bitbake-layers add-layer ../meta-swupdate
+echo 'IMAGE_INSTALL:append = " swupdate swupdate-www"' >> conf/site.conf
+
 bitbake console-image-minimal gsrd-console-image --runall=fetch

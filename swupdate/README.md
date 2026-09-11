@@ -124,6 +124,34 @@ part6: data(共通、永続領域)
 - FPGA更新フェーズに入ったら、SWUpdateから直接ビットストリームを焼くのではなく、**RSUクライアント(rsu_client等、SDMとのmailbox通信ツール)を呼び出すカスタムハンドラ**を書いて、RSUのマルチイメージ/フェイルオーバー機構に更新イメージを渡す方針とする。
 - Zynq系でよく使われる`fpga_manager`(`/sys/class/fpga_manager`)直叩きのアプローチとは異なる点に注意。
 
+## GSRDにSWUpdateを追加する
+
+`meta-swupdate`は通常のYoctoレイヤーなので、`gsrd-socfpga`のビルドにそのまま追加できる。
+
+```bash
+# gsrd-socfpgaのルートで、通常通りセットアップ
+. agilex7_dk_si_agf014ea-gsrd-build.sh
+build_setup
+
+# meta-swupdateレイヤーを追加(swupdate/add-swupdate-layer.sh)
+../add-swupdate-layer.sh   # gsrd-socfpga直下に配置した場合のパス例。実際の配置に合わせて調整
+
+bitbake_image
+```
+
+`swupdate/add-swupdate-layer.sh` がやること:
+- `meta-swupdate`(https://github.com/sbabic/meta-swupdate)をclone
+- `bitbake-layers add-layer` でレイヤー追加(`meta-openembedded/meta-oe`は`build_setup`で既に追加済みなので依存関係もOK)
+- `IMAGE_INSTALL:append = " swupdate swupdate-www"` を`conf/site.conf`に追記
+
+### 注意: `build_setup`を再実行するたびにレイヤー追加をやり直す必要がある
+
+`build.sh`の`build_setup()`は呼び出すたびに`$MACHINE-$IMAGE-rootfs/conf/`を削除して作り直す(`bblayers.conf`もリセットされる)。そのため、クリーンビルドし直すたびに`add-swupdate-layer.sh`を再実行してレイヤーを足し直す必要がある。恒久的に組み込みたい場合は、`build.sh`の`build_setup()`関数自体に`bitbake-layers add-layer ../meta-swupdate`の行を追記してしまう方が手間が少ない。
+
+### 次にやること(`sw-description`側)
+
+レイヤーを追加しただけではA/B更新は動かない。前述のPhase 3〜4(U-Boot bootcount設定、`sw-description`作成、署名設定)と組み合わせる必要がある。`meta-swupdate`単体は「SWUpdate本体をビルドに含める」ところまでで、A/Bパーティション定義やコピー先の指定は`sw-description`側の作業。
+
 ## オフライン環境(ネット未接続のLinux/WSL)でのビルド
 
 Yoctoのビルド(`bitbake`)には大きく3種類のものが必要で、どこまでWindows単体で完結するかが異なる。
@@ -165,6 +193,7 @@ docker run --rm -it yocto-agilex7-fetch:latest bash
 cd /workspace/gsrd-socfpga
 source ./agilex7_dk_si_agf014ea-gsrd-build.sh
 build_setup
+../add-swupdate-layer.sh   # meta-swupdateレイヤーを再度有効化(build_setupのたびに必要)
 bitbake_image
 ```
 
