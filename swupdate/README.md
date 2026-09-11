@@ -301,7 +301,9 @@ Yoctoのビルド(`bitbake`)には大きく3種類のものが必要で、どこ
 |---|---|---|
 | SWUpdate単体(`apt install swupdate swupdate-www`) | Stage 0(sw-description/.swu作成の練習) | インストール済み、すぐ使える |
 | poky + `meta-swupdate`(`qemux86-64`) | Stage A(QEMU A/Bデモ) | `bitbake`まで完了済み(軽量なため) |
-| `gsrd-socfpga` + `meta-swupdate`レイヤー | Stage 1(Agilex7本番) | ソースのフェッチのみ完了(実ビルドは未実施。サイズ・時間の都合) |
+| `gsrd-socfpga` + `meta-swupdate`/`meta-lts-mixins`レイヤー | Stage 1(Agilex7本番) | ソースのフェッチのみ完了(実ビルドは未実施。サイズ・時間の都合) |
+| `rustup`(cargo) + `cargo-bitbake` | 独自Rustアプリの開発 | インストール済み |
+| `vim`/`nano`/`openssh-client`/`rsync`/`gdb-multiarch`/`picocom`等 | 対話的な開発作業全般(編集、実機デプロイ、デバッグ、シリアルコンソール) | インストール済み |
 
 使用スクリプト: `swupdate/qemu-swupdate-build.sh`(Stage A用)、`swupdate/yocto-agilex7-fetch.sh` + `swupdate/add-swupdate-layer.sh`(Stage 1用)。
 
@@ -323,7 +325,13 @@ docker run --rm -it --cap-add=NET_ADMIN --device /dev/net/tun \
   --device /dev/kvm \
   agilex7-dev:latest bash
 # /dev/kvmが使えない環境では --device /dev/kvm の行を外せばそのまま動く(エミュレーションのみ、低速)
+
+# 実機のシリアルコンソール(UART)を使う場合はUSBシリアルデバイスも渡す
+docker run --rm -it --device /dev/ttyUSB0 agilex7-dev:latest bash
+# コンテナ内で: picocom -b 115200 /dev/ttyUSB0
 ```
+
+JTAG経由のFPGA書き込み/デバッグ(Apollo Agilex SOM搭載のUSB-Blaster II等)は本イメージの対象外。ドライバの都合上、通常はWindows側のQuartus Programmerを使う方が確実。
 
 コンテナ内での各練習の入り方:
 

@@ -26,6 +26,14 @@
 #     agilex7-dev:latest bash
 # (/dev/kvmが無い/使えない環境ではKVMアクセラレーションなしで動く。--deviceの行を外せばよい)
 #
+# 実機のシリアルコンソール(UART、picocom)を使う場合は、対象のUSBシリアルデバイスも渡す:
+#   docker run --rm -it --device /dev/ttyUSB0 agilex7-dev:latest bash
+#   (コンテナ内で: picocom -b 115200 /dev/ttyUSB0)
+#
+# NOTE: JTAG経由のFPGA書き込み/デバッグ(USB-Blaster II等)は本イメージの対象外。
+# 通常はWindows側のQuartus Programmerを使う方が確実(ドライバの都合上、コンテナ内での
+# USB-Blaster利用は別途検討が必要)。
+#
 # コンテナ内での各練習の入り方:
 #   Stage 0 (SWUpdate単体):  README「Stage 0」の手順をそのまま実行(swupdateはインストール済み)
 #   Stage A (QEMU A/Bデモ):  cd /workspace/qemu-swupdate/build && source ../poky/oe-init-build-env . && runqemu qemux86-64 nographic
@@ -50,6 +58,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       locales libacl1 ca-certificates \
       iproute2 \
     && locale-gen en_US.UTF-8 \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- 1.5. 対話的な開発作業用ツール(sw-description編集、実機デプロイ、デバッグ等) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      vim nano less curl \
+      openssh-client rsync \
+      gdb-multiarch \
+      picocom \
     && rm -rf /var/lib/apt/lists/*
 
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
