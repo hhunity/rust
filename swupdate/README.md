@@ -22,6 +22,8 @@ Agilex 7実機が無くても、SWUpdate/Yocto周りは以下がPC(x86 Linux/QEM
 - わざと壊れたイメージでbootcountロールバックを確認
 - A/B切替の考え方はボード非依存なので、ここで一通り体験しておけば実機到着後はBSP差分だけ乗せ替える形になる
 
+**注意: QEMUの起動にはkernel+rootfsだけでは不十分、ブートローダ経由での起動になっているか確認すること。** Linux(実機もQEMUも同じ)の起動には最低限「kernel」「rootfs」が要り、`runqemu`は場合によってはブートローダを経由せず**kernelを直接起動**することもできる(お手軽な動作確認用)。しかし**ブートローダを飛ばして直接kernelを起動すると、A/B切替のロジック(実機のU-Bootのbootcount/altbootcmdに相当するもの。qemux86-64ではgrubの環境変数で同様の仕組みを使う)自体が動いていない**ことになり、A/Bデモとして意味が無くなってしまう。`core-image-full-cmdline`の`IMAGE_FSTYPES`に`wic`(ブートローダ込みのディスクイメージ形式)が含まれているか、`runqemu`実行時に実際にgrubのメニュー/ログが表示されるかを確認すること。
+
 ### B. sw-description / .swuパッケージ作成の練習(Stage 0。Ubuntu 24.04で実機動作確認済み)
 
 ボード無関係。`apt install swupdate swupdate-www` でインストールし、ダミーファイルで以下を試す。以下はこのセッション上で実際に動作確認済みの、正しい手順。
