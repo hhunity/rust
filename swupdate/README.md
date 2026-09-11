@@ -11,7 +11,7 @@
 
 ## ボード到着前にPCで試せること
 
-Agilex 7実機が無くても、SWUpdate/Yocto周りは以下がPC(x86 Linux/QEMU)だけで練習・検証できる。優先度順。
+Agilex 7実機が無くても、SWUpdate/Yocto周りは以下がPC(x86 Linux/QEMU)だけで練習・検証できる。優先度順。A〜Cは`swupdate/Dockerfile.agilex7-dev`(後述の「オフライン環境でのビルド」参照)に全部まとめてある。
 
 ### A. 最優先: QEMUでSWUpdateのA/Bデモをまるごと動かす
 
@@ -164,32 +164,51 @@ Yoctoのビルド(`bitbake`)には大きく3種類のものが必要で、どこ
 
 ③は`bitbake`の`do_fetch`タスクがレシピの`SRC_URI`を実際に取得する処理そのもので、Windows上で手作業のダウンロードに置き換えるのは非推奨(特にgit系ソースは`DL_DIR`内で特殊な命名規則のbareリポジトリとして保存されるため、手動再現すると壊れやすい)。
 
-### WSLがネットワークポリシーで塞がれている場合: Dockerイメージごと転送する方式
+### WSLがネットワークポリシーで塞がれている場合: Dockerイメージごと転送する方式(採用)
 
-`doc/Dockerfile.ml-gpu`と同じ「Dockerイメージごと転送する」方式が使える。WSL自体のネットワーク設定には一切触れずに済む。
+`doc/Dockerfile.ml-gpu`と同じ「Dockerイメージごと転送する」方式を採用。WSL自体のネットワーク設定には一切触れずに済む。Ubuntu 22.04(jammy)ベースの統合開発イメージ1つに、練習用途を全部まとめている。
 
-- `swupdate/Dockerfile.yocto-agilex7-fetch` … ①②③を全部イメージに焼き込む(Windows Docker Desktop側で`docker build`する。ここでネットを使う)
-- `swupdate/yocto-agilex7-fetch.sh` … コンテナ内で`gsrd-socfpga`をclone→`build_setup`→`bitbake ... --runall=fetch`(フェッチのみ、コンパイルはしない)を行うスクリプト
+**`swupdate/Dockerfile.agilex7-dev`** … 以下を1イメージに焼き込む:
+
+| 内容 | 対応する練習段階 | ビルド状態 |
+|---|---|---|
+| SWUpdate単体(`apt install swupdate swupdate-www`) | Stage 0(sw-description/.swu作成の練習) | インストール済み、すぐ使える |
+| poky + `meta-swupdate`(`qemux86-64`) | Stage A(QEMU A/Bデモ) | `bitbake`まで完了済み(軽量なため) |
+| `gsrd-socfpga` + `meta-swupdate`レイヤー | Stage 1(Agilex7本番) | ソースのフェッチのみ完了(実ビルドは未実施。サイズ・時間の都合) |
+
+使用スクリプト: `swupdate/qemu-swupdate-build.sh`(Stage A用)、`swupdate/yocto-agilex7-fetch.sh` + `swupdate/add-swupdate-layer.sh`(Stage 1用)。
 
 ```powershell
 # Windows Docker Desktop側(ネット接続あり)
-docker build -f swupdate/Dockerfile.yocto-agilex7-fetch `
-  --build-arg POKY_VERSION=scarthgap `
-  --build-arg BUILD_SCRIPT=agilex7_dk_si_agf014ea-gsrd-build.sh `
-  -t yocto-agilex7-fetch:latest swupdate/
-docker save yocto-agilex7-fetch:latest | gzip > yocto-agilex7-fetch.tar.gz
+# 事前にDocker Desktopの Settings > Resources > Disk image size を
+# 十分広げておくこと(合計で数十GB規模になりうる)
+docker build -f swupdate/Dockerfile.agilex7-dev -t agilex7-dev:latest swupdate/
+docker save agilex7-dev:latest | gzip > agilex7-dev.tar.gz
 ```
 
 USB等でオフライン機(Docker環境)へ転送後:
 
 ```bash
-docker load < yocto-agilex7-fetch.tar.gz
-docker run --rm -it yocto-agilex7-fetch:latest bash
+docker load < agilex7-dev.tar.gz
+
+# QEMUデモ(Stage A)を動かす場合はネットワーク/KVM系の権限が要る
+docker run --rm -it --cap-add=NET_ADMIN --device /dev/net/tun \
+  --device /dev/kvm \
+  agilex7-dev:latest bash
+# /dev/kvmが使えない環境では --device /dev/kvm の行を外せばそのまま動く(エミュレーションのみ、低速)
 ```
 
-コンテナ内(ネット不要。`downloads/`はイメージに焼き込み済み):
+コンテナ内での各練習の入り方:
 
 ```bash
+# Stage 0: SWUpdate単体(READMEの「Stage 0」手順をそのまま実行。swupdateインストール済み)
+
+# Stage A: QEMU A/Bデモ(ビルド済みなのですぐ起動できる)
+cd /workspace/qemu-swupdate/build
+source ../poky/oe-init-build-env .
+runqemu qemux86-64 nographic
+
+# Stage 1: Agilex7本番(ソース取得済み。ここから実ビルド)
 cd /workspace/gsrd-socfpga
 source ./agilex7_dk_si_agf014ea-gsrd-build.sh
 build_setup
@@ -197,7 +216,7 @@ build_setup
 bitbake_image
 ```
 
-**注意**: このDockerfile/スクリプトは`gsrd-socfpga/build.sh`の実際の中身を読んで作成したもので、構造面は確認済みだが、`docker build`を最後まで実際に走らせての動作確認はまだ行っていない(フェッチ対象のソース総量が数GB〜十数GBになり、時間もかかるため)。初回はWindows側で`docker build`を実行し、エラーなく完走するか確認すること。
+**注意**: このDockerfile/スクリプト一式は`gsrd-socfpga/build.sh`の実際の中身を読んで作成したもので、構造面は確認済みだが、`docker build`を最後まで実際に走らせての動作確認はまだ行っていない(特にgsrd-socfpgaのフェッチ対象ソース総量が数GB〜十数GBになり、qemux86-64のビルドも合わせるとかなり時間がかかる)。初回はWindows側で`docker build`を実行し、エラーなく完走するか確認すること。
 
 ## 参考リンク
 
@@ -213,4 +232,4 @@ bitbake_image
 - 使用予定ボード: Terasic Apollo Agilex SOM。Terasic配布のBSP/Yoctoレイヤーの入手元・ビルド手順を確認する必要あり(Terasic Download Center、RocketBoards.org `TerasicApolloAgilexRSOM` ページ参照)
 - 正確な `MACHINE` 名(Terasic版BSPで定義されるもの)
 - ブートメディア構成(SDカードのみか、eMMC+QSPIか)
-- `swupdate/Dockerfile.yocto-agilex7-fetch` の実ビルド動作確認(Windows Docker Desktop側で未実施)
+- `swupdate/Dockerfile.agilex7-dev` の実ビルド動作確認(Windows Docker Desktop側で未実施)

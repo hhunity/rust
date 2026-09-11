@@ -1,0 +1,71 @@
+# Agilex 7 + SWUpdate 検討用の統合開発イメージ(Ubuntu 22.04ベース)。
+# doc/Dockerfile.ml-gpuと同じ「Dockerイメージごと転送する」方式。
+# ネット接続のあるWindows Docker Desktop側でbuildし、docker save/loadでオフライン機へ
+# 転送する想定。
+#
+# 含まれるもの:
+#   1. SWUpdate単体(apt) … sw-description/.swu作成の練習(README「Stage 0」)
+#   2. poky + meta-swupdate を qemux86-64 向けにビルド済み … A/B更新のQEMUデモ(「Stage A」)
+#   3. gsrd-socfpga(+meta-swupdateレイヤー) … Agilex 7向けソース一式をフェッチ済み(未ビルド)
+#
+# 使い方(Windows Docker Desktop側。ネット接続あり。事前にDisk image sizeを
+# 十分広げておくこと。合計で数十GB規模になる):
+#   docker build -f swupdate/Dockerfile.agilex7-dev -t agilex7-dev:latest swupdate/
+#   docker save agilex7-dev:latest | gzip > agilex7-dev.tar.gz
+#
+# (USB等でオフライン機へ転送後)
+#   docker load < agilex7-dev.tar.gz
+#
+# QEMUデモを動かす場合はネットワーク・KVM系の権限が要るため、実行時に以下を付与する:
+#   docker run --rm -it --cap-add=NET_ADMIN --device /dev/net/tun \
+#     --device /dev/kvm \
+#     agilex7-dev:latest bash
+# (/dev/kvmが無い/使えない環境ではKVMアクセラレーションなしで動く。--deviceの行を外せばよい)
+#
+# コンテナ内での各練習の入り方:
+#   Stage 0 (SWUpdate単体):  README「Stage 0」の手順をそのまま実行(swupdateはインストール済み)
+#   Stage A (QEMU A/Bデモ):  cd /workspace/qemu-swupdate/build && source ../poky/oe-init-build-env . && runqemu qemux86-64 nographic
+#   Stage 1 (Agilex7本番):   cd /workspace/gsrd-socfpga && source ./agilex7_dk_si_agf014ea-gsrd-build.sh && build_setup && ../add-swupdate-layer.sh && bitbake_image
+#
+# NOTE: gsrd-socfpga部分はソースのフェッチのみ済ませてあり、実ビルド(bitbake_image)は
+# コンテナ起動後に手動で行う(フルビルドまでイメージに焼き込むとサイズ・ビルド時間が
+# 非現実的になるため)。QEMU部分(Stage A)は比較的軽量なのでビルドまで完了させている。
+# このDockerfile全体はまだ docker build を最後まで走らせての動作確認をしていない。
+# 初回はWindows側で実行し、エラーが出ないか確認すること。
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- 1. ビルドホスト用パッケージ(doc/yocto-urls-jammy.txtと同じ一式) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      gawk wget git diffstat unzip texinfo build-essential chrpath socat cpio \
+      python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping \
+      python3-git python3-jinja2 python3-subunit zstd liblz4-tool lz4 file \
+      locales libacl1 ca-certificates \
+      iproute2 \
+    && locale-gen en_US.UTF-8 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
+
+# --- 2. SWUpdate単体(Stage 0練習用) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      swupdate swupdate-www \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# --- 3. poky + meta-swupdate を qemux86-64 向けにビルド(Stage A練習用) ---
+COPY qemu-swupdate-build.sh /usr/local/bin/qemu-swupdate-build.sh
+RUN chmod +x /usr/local/bin/qemu-swupdate-build.sh \
+    && /usr/local/bin/qemu-swupdate-build.sh
+
+# --- 4. gsrd-socfpga + meta-swupdateレイヤー(Agilex7本番。フェッチのみ) ---
+COPY yocto-agilex7-fetch.sh /usr/local/bin/yocto-agilex7-fetch.sh
+COPY add-swupdate-layer.sh /workspace/add-swupdate-layer.sh
+RUN chmod +x /usr/local/bin/yocto-agilex7-fetch.sh /workspace/add-swupdate-layer.sh \
+    && /usr/local/bin/yocto-agilex7-fetch.sh
+
+WORKDIR /workspace
+CMD ["/bin/bash"]
