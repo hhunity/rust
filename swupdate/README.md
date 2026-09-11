@@ -199,6 +199,62 @@ bitbake_image
 
 レイヤーを追加しただけではA/B更新は動かない。前述のPhase 3〜4(U-Boot bootcount設定、`sw-description`作成、署名設定)と組み合わせる必要がある。`meta-swupdate`単体は「SWUpdate本体をビルドに含める」ところまでで、A/Bパーティション定義やコピー先の指定は`sw-description`側の作業。
 
+## GSRDに独自アプリケーションを含める
+
+既存の`meta-intel-fpga`等のレイヤーは直接いじらず、**自分専用のレイヤー**を作るのが正攻法(`meta-swupdate`レイヤーを追加したのと同じ考え方)。
+
+### 1. レイヤーの雛形を作成
+
+```bash
+cd gsrd-socfpga
+bitbake-layers create-layer meta-myapp
+```
+
+### 2. レシピ(.bb)を書く
+
+**ソースからYoctoにビルドさせる場合**(推奨。ABI不一致の心配が無い):
+
+```bitbake
+# meta-myapp/recipes-myapp/myapp/myapp_1.0.bb  (Rust/cargoの例)
+SUMMARY = "My custom application"
+LICENSE = "CLOSED"
+SRC_URI = "git://github.com/yourorg/myapp.git;protocol=https;branch=main"
+SRCREV = "<commitハッシュ>"
+S = "${WORKDIR}/git"
+inherit cargo
+```
+C/C++(CMake)なら`inherit cargo`の代わりに`inherit cmake`。gsrd-socfpga標準構成にはRust(cargo)サポートは入っていないため、Rustアプリの場合は`meta-rust-bin`等のレイヤーを別途追加する必要がある。
+
+**既にビルド済みのバイナリをそのまま持ち込む場合**(bin-onlyレシピ):
+
+```bitbake
+SRC_URI = "file://myapp"
+S = "${WORKDIR}"
+do_compile[noexec] = "1"
+do_install() {
+    install -d ${D}${bindir}
+    install -m 0755 ${S}/myapp ${D}${bindir}/myapp
+}
+```
+`myapp`本体は`meta-myapp/recipes-myapp/myapp/files/myapp`に配置する。
+
+**注意(bin-onlyレシピの落とし穴)**: 持ち込むバイナリがGSRDと**同じツールチェーン/glibcバージョン**でビルドされていないと、実機で動かないことがある(シンボルバージョン不一致等)。安全策は2つ:
+- 前述の**eSDK**のクロスツールチェーンでビルドする(GSRDのターゲットと完全ABI互換)
+- Rustなら`--target aarch64-unknown-linux-musl`で静的リンクし、glibc依存を無くす
+
+### 3. レイヤーを登録し、イメージに含める
+
+`meta-swupdate`のときと全く同じ流れ(`build_setup`のたびにレイヤー追加をやり直す必要がある点も同じ)。
+
+```bash
+. agilex7_dk_si_agf014ea-gsrd-build.sh
+build_setup
+cd $WORKSPACE/$MACHINE-$IMAGE-rootfs
+bitbake-layers add-layer ../meta-myapp
+echo 'IMAGE_INSTALL:append = " myapp"' >> conf/site.conf
+bitbake_image
+```
+
 ## オフライン環境(ネット未接続のLinux/WSL)でのビルド
 
 Yoctoのビルド(`bitbake`)には大きく3種類のものが必要で、どこまでWindows単体で完結するかが異なる。
