@@ -311,6 +311,8 @@ Yoctoのビルド(`bitbake`)には大きく3種類のものが必要で、どこ
 
 使用スクリプト: `swupdate/qemu-swupdate-build.sh`(Stage A用)、`swupdate/yocto-agilex7-fetch.sh` + `swupdate/add-swupdate-layer.sh`(Stage 1用)。
 
+**注意: bitbakeはrootでの実行を拒否する**ため、イメージ内は`apt install`等が終わった後、非rootユーザー`builder`(パスワード無しで`sudo`可能)に切り替えて動く。`docker run`で入った直後から`builder`ユーザーになっており、root権限が要る操作は`sudo`を付ければよい。
+
 ```powershell
 # Windows Docker Desktop側(ネット接続あり)
 # 事前にDocker Desktopの Settings > Resources > Disk image size を
