@@ -23,6 +23,8 @@
 //! - [`controller`] — 「パソコン役」の指示出しロジック（チャット・`/send`・`/job`）。`mqtt-server`だけが使う
 //! - [`file_transfer`] — 「マイコン役」の、生TCPでのファイル受信ロジック。`mqtt-client`だけが使う
 //! - [`device`] — 「マイコン役」の、OFFER/JOB受信時の処理。`mqtt-client`だけが使う
+//! - `job_queue` — 印刷ジョブの永続化キュー（データ構造とファイル読み書きのみ）。`mqtt-server`だけが使う
+//! - `job_worker` — `job_queue`を順番に処理し、MQTTで配信するバックグラウンドスレッド。`mqtt-server`だけが使う
 //!
 //! ## Rustが初めての方（C++経験者向け）の予備知識
 //!
@@ -99,6 +101,8 @@ pub mod broker;
 pub mod controller;
 pub mod device;
 pub mod file_transfer;
+mod job_queue;
+mod job_worker;
 pub mod messages;
 pub mod mqtt_log;
 pub mod seq;

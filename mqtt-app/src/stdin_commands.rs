@@ -1,26 +1,25 @@
-//! # 標準入力からのコマンド受け付け（チャット・`/send`・`/job`）
+//! # 標準入力からのコマンド受け付け（チャット・`/send`・`/job`・`/queue`・`/cancel`）
 //!
 //! [`crate::controller::run`]から呼ばれる、キーボード入力を読み取る専用スレッドの
 //! 中身をまとめたモジュール。MQTT受信を処理するメインスレッドとは完全に別スレッドで
-//! 動くので、必要な状態（`client`・`roster`など）は[`spawn`]の引数として受け取る。
+//! 動くので、必要な状態（`client`・`pending_offers`など）は[`spawn`]の引数として受け取る。
+//!
+//! `/job`は実際の配信は行わず、[`crate::job_queue::JobQueue`]へ積むだけ。積まれたジョブを
+//! 順番に配信して完了を待つのは、別スレッドの[`crate::job_worker`]の仕事。
 
-use std::collections::HashSet;
 use std::fs;
 use std::io::{self, BufRead};
 use std::path::PathBuf;
-use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rumqttc::{Client, QoS};
 
-use crate::controller::{InFlightJob, InFlightState, PendingOffers, Roster};
-use crate::messages::{CmdMsg, JobMsg, OfferMsg};
+use crate::controller::PendingOffers;
+use crate::job_queue::JobQueue;
+use crate::messages::{CmdMsg, OfferMsg};
 use crate::mqtt_log;
 use crate::seq::{next_seq, ControllerSeqState};
-
-/// ジョブを送ってから、完了報告が来ないマイコンを「エラー」と判断するまでの待ち時間。
-const JOB_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 入力行の先頭にある `/qos0 ` `/qos1 ` `/qos2 ` プレフィックスを読み取り、
 /// (QoS, プレフィックスを除いた本文) を返す。プレフィックスが無ければQoS1（AtLeastOnce）扱い。
@@ -40,16 +39,13 @@ fn parse_qos_prefix(line: &str) -> (QoS, &str) {
 /// 標準入力を読み取り、チャット・`/send`・`/job`を処理し続ける専用スレッドを立てる。
 /// この関数自体はスレッドを立てたらすぐ返り、スレッドの終了は待たない
 /// （呼び出し元の`controller::run`が、これまで通りメインループを続けられるようにするため）。
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn(
     client: Client,
     name: String,
     topic: String,
-    all_cmd_topic: String,
     pending_offers: PendingOffers,
-    roster: Roster,
-    inflight: InFlightState,
     seq: ControllerSeqState,
+    queue: JobQueue,
 ) {
     thread::spawn(move || {
         let stdin = io::stdin();
@@ -62,66 +58,43 @@ pub(crate) fn spawn(
                 continue;
             }
 
-            // "/job 内容": 今オンラインの全マイコンへ一斉配信し、全員完了するまで待つ
+            // "/job 内容": 印刷ジョブキューに積むだけ。実際の配信・完了待ちは
+            // バックグラウンドの[`crate::job_worker`]が順番に行う。
             if line == "/job" || line.starts_with("/job ") {
                 let content = line.strip_prefix("/job").unwrap().trim();
                 if content.is_empty() {
                     println!("[system] 使い方: /job <内容>");
                     continue;
                 }
-                let targets: HashSet<String> = roster
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .filter(|(_, &online)| online)
-                    .map(|(who, _)| who.clone())
-                    .collect();
+                let id = queue.enqueue(content.to_string());
+                println!("[system] ジョブ{id}をキューに追加しました（バックグラウンドで順番に配信されます。/queueで確認できます）");
+                continue;
+            }
 
-                if targets.is_empty() {
-                    println!("[system] 今オンラインのマイコンがいないため、ジョブを送信できません");
+            // "/queue": キューにある全ジョブと状態の一覧を表示する
+            if line == "/queue" {
+                let jobs = queue.list();
+                if jobs.is_empty() {
+                    println!("[system] キューは空です");
+                } else {
+                    for job in &jobs {
+                        println!("[system] {} [{:?}] {}", job.id, job.status, job.content);
+                    }
+                }
+                continue;
+            }
+
+            // "/cancel ジョブID": まだ配信されていないジョブをキューから取り消す
+            if line == "/cancel" || line.starts_with("/cancel ") {
+                let id = line.strip_prefix("/cancel").unwrap().trim();
+                if id.is_empty() {
+                    println!("[system] 使い方: /cancel <ジョブID>（/queueでIDを確認できます）");
                     continue;
                 }
-
-                let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-                let id = format!("{name}-{nanos}");
-
-                let (tx, rx) = mpsc::channel::<String>();
-                *inflight.lock().unwrap() = Some(InFlightJob { id: id.clone(), tx });
-
-                let job = JobMsg {
-                    id: id.clone(),
-                    from: name.clone(),
-                    content: content.to_string(),
-                    seq: next_seq(&seq.job_counter),
-                };
-                let payload = serde_json::to_vec(&CmdMsg::Job(job)).unwrap();
-                mqtt_log::log_publish(&all_cmd_topic, &payload);
-                client.publish(&all_cmd_topic, QoS::AtLeastOnce, false, payload).unwrap();
-                println!(
-                    "[system] ジョブ{id}を{}台のマイコン({targets:?})へ配信しました。完了を待っています…",
-                    targets.len()
-                );
-
-                let mut remaining = targets;
-                let deadline = Instant::now() + JOB_TIMEOUT;
-                while !remaining.is_empty() {
-                    let now = Instant::now();
-                    if now >= deadline {
-                        break;
-                    }
-                    match rx.recv_timeout(deadline - now) {
-                        Ok(who) => {
-                            remaining.remove(&who);
-                        }
-                        Err(_) => break, // タイムアウト（これ以上待っても来ない）
-                    }
-                }
-                *inflight.lock().unwrap() = None; // 待つのをやめたので、共有状態も片付ける
-
-                if remaining.is_empty() {
-                    println!("[system] ジョブ{id}は全員完了しました");
+                if queue.cancel(id) {
+                    println!("[system] ジョブ{id}を取り消しました");
                 } else {
-                    println!("[system] エラー: ジョブ{id}は次のマイコンから応答がありませんでした: {remaining:?}");
+                    println!("[system] ジョブ{id}は取り消せません（存在しないか、既に配信中/完了済みです）");
                 }
                 continue;
             }

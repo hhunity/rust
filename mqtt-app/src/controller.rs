@@ -17,6 +17,8 @@ use std::time::Duration;
 
 use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 
+use crate::job_queue::JobQueue;
+use crate::job_worker;
 use crate::messages::{AckMsg, BirthDeathMsg, DataMsg, DoneMsg, PresenceMsg, ReceivedMsg};
 use crate::mqtt_log;
 use crate::seq::{check_seq, next_seq, ControllerSeqState};
@@ -167,7 +169,7 @@ fn handle_job_done(who: &str, done: DoneMsg, inflight: &InFlightState) {
 /// パソコン役としてブローカーへ接続し、チャット・`/send`・`/job`を受け付け続ける。
 /// この関数はプログラムが終わるまでブロックし続ける
 /// （C++でいう、`main()`の中の`while (true) { ... }`メインループに相当する部分です）。
-pub fn run(name: String, host: String, port: u16, topic: String) {
+pub fn run(name: String, host: String, port: u16, topic: String, queue_file: String) {
     // 全マイコンへの一斉配信(JOB)専用の、特別な名前"all"を宛先としたNCMDトピック。
     let all_cmd_topic = format!("{topic}/NCMD/all");
     // 各マイコンの接続・切断・継続報告は、ワイルドカードでまとめて購読する。
@@ -209,19 +211,36 @@ pub fn run(name: String, host: String, port: u16, topic: String) {
     let roster: Roster = Arc::new(Mutex::new(HashMap::new()));
     let inflight: InFlightState = Arc::new(Mutex::new(None));
 
-    // 標準入力（キーボード入力）を読み取り、チャット・`/send`・`/job`を処理する
-    // 専用スレッドを立てる。中身は[`crate::stdin_commands`]にまとめてあり、ここでは
+    // 印刷ジョブの永続化キュー。ファイルに前回までの未処理ジョブが残っていれば、
+    // ここで読み込んだ時点でそれらを引き継ぐ（load_or_create内でDispatched→Pendingに戻す）。
+    let queue = JobQueue::load_or_create(PathBuf::from(&queue_file));
+    let pending_count = queue.list().len();
+    if pending_count > 0 {
+        println!("[system] ジョブキュー({queue_file})から{pending_count}件のジョブを引き継ぎました");
+    }
+
+    // キューを1件ずつ取り出してMQTTで配信し、完了を待つ専用スレッド（詳しくは[`crate::job_worker`]）。
+    job_worker::spawn(
+        client.clone(),
+        name.clone(),
+        all_cmd_topic.clone(),
+        Arc::clone(&roster),
+        Arc::clone(&inflight),
+        seq.clone(),
+        queue.clone(),
+    );
+
+    // 標準入力（キーボード入力）を読み取り、チャット・`/send`・`/job`・`/queue`・`/cancel`を
+    // 処理する専用スレッドを立てる。中身は[`crate::stdin_commands`]にまとめてあり、ここでは
     // 必要な状態を渡すだけ。渡した後もこの関数（メインループ側）で引き続き使うものは
     // .clone()で複製を渡している（所有権を渡してしまうと、後ろで使えなくなるため）。
     crate::stdin_commands::spawn(
         client.clone(),
         name.clone(),
         topic.clone(),
-        all_cmd_topic.clone(),
         Arc::clone(&pending_offers),
-        Arc::clone(&roster),
-        Arc::clone(&inflight),
         seq.clone(),
+        queue,
     );
 
     println!("接続しました host={host} port={port} topic={topic} name={name}（パソコン役）");

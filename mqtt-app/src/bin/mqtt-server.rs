@@ -52,6 +52,10 @@ struct Args {
     /// ログの出力先ファイル（省略時は標準エラー出力）
     #[arg(short, long)]
     log_file: Option<String>,
+
+    /// 印刷ジョブキューの永続化先ファイル（無ければ新規作成し、あれば前回の続きから再開する）
+    #[arg(short, long, default_value = "job_queue.json")]
+    queue_file: String,
 }
 
 /// Rustのプログラムは main関数 から実行が始まります（C++と同じです）。
@@ -87,5 +91,5 @@ fn main() {
     // （host="127.0.0.1"は、同じプロセス内で起動したブローカー自身を指す）。
     // controller::run はプログラムが終わるまでブロックし続けるので、
     // main関数はこの行で「制御を明け渡す」形になります。
-    controller::run(args.name, "127.0.0.1".to_string(), args.port, args.topic);
+    controller::run(args.name, "127.0.0.1".to_string(), args.port, args.topic, args.queue_file);
 }
