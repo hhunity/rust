@@ -8,12 +8,20 @@
 //! 以前は`/job`コマンドの入力スレッド（`stdin_commands.rs`）がこの配信・待ち受けを
 //! その場で行っていたが、ここに切り出すことで「`/job`はキューに積むだけ」
 //! 「積まれたキューを順番に捌くのはこのワーカー」と役割を分離した。
+//!
+//! 状況報告は素の`println!`ではなく[`ExternalPrinter`]経由で出す。`repl_commands`が
+//! 使っている`reedline`は自分（同じスレッド）が端末に書き込むこと前提でプロンプトの
+//! カーソル位置を管理しているので、よそのスレッドが直接`println!`すると入力中の行が
+//! 壊れて見える。`ExternalPrinter`はただのチャネルで、送るだけなら他スレッドから
+//! 呼んでも安全（実際に端末へ「消す→出す→プロンプトを描き直す」をやるのは`reedline`
+//! 自身のスレッド）。
 
 use std::collections::HashSet;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use reedline_repl_rs::reedline::ExternalPrinter;
 use rumqttc::{Client, QoS};
 
 use crate::controller::{InFlightJob, InFlightState, Roster};
@@ -38,6 +46,7 @@ pub(crate) fn spawn(
     inflight: InFlightState,
     seq: ControllerSeqState,
     queue: JobQueue,
+    printer: ExternalPrinter<String>,
 ) {
     thread::spawn(move || loop {
         let job = queue.wait_for_next_pending();
@@ -61,7 +70,10 @@ pub(crate) fn spawn(
         queue.mark_dispatched(&job.id);
 
         let (tx, rx) = mpsc::channel::<String>();
-        *inflight.lock().unwrap() = Some(InFlightJob { id: job.id.clone(), tx });
+        *inflight.lock().unwrap() = Some(InFlightJob {
+            id: job.id.clone(),
+            tx,
+        });
 
         let msg = JobMsg {
             id: job.id.clone(),
@@ -71,12 +83,14 @@ pub(crate) fn spawn(
         };
         let payload = serde_json::to_vec(&CmdMsg::Job(msg)).unwrap();
         mqtt_log::log_publish(&all_cmd_topic, &payload);
-        client.publish(&all_cmd_topic, QoS::AtLeastOnce, false, payload).unwrap();
-        println!(
+        client
+            .publish(&all_cmd_topic, QoS::AtLeastOnce, false, payload)
+            .unwrap();
+        let _ = printer.print(format!(
             "[system] ジョブ{}を{}台のマイコン({targets:?})へ配信しました。完了を待っています…",
             job.id,
             targets.len()
-        );
+        ));
 
         let mut remaining = targets;
         let deadline = Instant::now() + JOB_TIMEOUT;
@@ -95,13 +109,13 @@ pub(crate) fn spawn(
         *inflight.lock().unwrap() = None; // 待つのをやめたので、共有状態も片付ける
 
         if remaining.is_empty() {
-            println!("[system] ジョブ{}は全員完了しました", job.id);
+            let _ = printer.print(format!("[system] ジョブ{}は全員完了しました", job.id));
             queue.mark_done(&job.id);
         } else {
-            println!(
+            let _ = printer.print(format!(
                 "[system] エラー: ジョブ{}は次のマイコンから応答がありませんでした: {remaining:?}",
                 job.id
-            );
+            ));
             queue.mark_failed(&job.id);
         }
     });

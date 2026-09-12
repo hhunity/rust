@@ -81,20 +81,23 @@ cargo run --bin mqtt-client
 
 自分のPCでターミナルを開いて直接操作する分には問題ありません。もしパイプ/リダイレクト経由の
 運用が必要になった場合は、元の自作パーサ（`src/stdin_commands.rs`、削除せずそのまま残してある）
-に戻せます。`src/controller.rs`内の
+に戻せます。`src/controller.rs`内で`crate::repl_commands::spawn(...)`を呼んでいる箇所を
+`crate::stdin_commands::spawn(...)`に差し替えれば戻ります（`stdin_commands::spawn`は
+`ExternalPrinter`を返さないので、`job_worker::spawn`へ渡す最後の引数も外す必要があります）。
+ただしコマンドの書き方も元の`/job <内容>`（先頭に`/`、チャットはプレフィックス無し）の形に
+戻る点に注意してください。
 
-```rust
-crate::repl_commands::spawn(client.clone(), name.clone(), topic.clone(), Arc::clone(&pending_offers), seq.clone(), queue);
-```
-
-を
-
-```rust
-crate::stdin_commands::spawn(client.clone(), name.clone(), topic.clone(), Arc::clone(&pending_offers), seq.clone(), queue);
-```
-
-に差し替えるだけで元通りです（引数の形は同じ）。ただしコマンドの書き方も元の`/job <内容>`
-（先頭に`/`、チャットはプレフィックス無し）の形に戻る点に注意してください。
+**バックグラウンドスレッドからの出力**: `job_worker`（ジョブの配信・完了報告）や
+`controller`のメインループ（マイコンの接続/切断通知など）は、素の`println!`ではなく
+`repl.external_printer()`で取れる`ExternalPrinter`（`src/controller.rs`の`say`ヘルパー経由）
+を使って出力しています。`reedline`はプロンプトの描画を自分のスレッドだけが行う前提で
+カーソル位置を管理しているため、よそのスレッドが直接`println!`すると入力中の行が
+壊れて見えることがあります。`ExternalPrinter`はただのチャネルで、送るだけなら他スレッドから
+呼んでも安全です（実際に端末へ「消す→出す→プロンプトを描き直す」をやるのは`reedline`
+自身のスレッドなので、正しい位置に差し込まれます）。ただし`mqtt_log`が出す`log::info!`
+（MQTT通信ログ）は今回この仕組みに乗せておらず、`--log-file`を指定しない場合は
+素の標準エラー出力のままです。対話的に使うときはログを画面に出したいことは少ないと
+考え、`--log-file`でファイルへ逃がす運用を前提にしています。
 
 ### パソコン役の起動
 

@@ -15,6 +15,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use reedline_repl_rs::reedline::ExternalPrinter;
 use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 
 use crate::job_queue::JobQueue;
@@ -22,6 +23,15 @@ use crate::job_worker;
 use crate::messages::{AckMsg, BirthDeathMsg, DataMsg, DoneMsg, PresenceMsg, ReceivedMsg};
 use crate::mqtt_log;
 use crate::seq::{check_seq, next_seq, ControllerSeqState};
+
+/// `println!`の代わりにこれで状況を報告する。`reedline-repl-rs`のプロンプトは自分の
+/// スレッドだけが端末に書き込む前提でカーソル位置を管理しているため、よそのスレッドから
+/// 素の`println!`を呼ぶと入力中の行が壊れて見える。`ExternalPrinter`はただのチャネルで、
+/// 実際に端末へ「消す→出す→プロンプトを描き直す」をするのは`reedline`自身のスレッドなので、
+/// これ経由なら安全に差し込める（詳しくは[`crate::job_worker`]冒頭のコメントも参照）。
+fn say(printer: &ExternalPrinter<String>, message: impl Into<String>) {
+    let _ = printer.print(message.into());
+}
 
 /// 送信申し出(id)ごとに「これから送るファイルのパス」を覚えておく辞書。
 ///
@@ -52,7 +62,11 @@ pub(crate) type InFlightState = Arc<Mutex<Option<InFlightJob>>>;
 ///
 /// `Option<&str>`を返しているのは、余計な文字列コピーをせず、元の`publish_topic`の一部を
 /// そのまま指す「借用」で済ませるためです（C++の`std::string_view`を返す関数に近い発想）。
-fn parse_named_topic<'a>(publish_topic: &'a str, topic: &str, message_type: &str) -> Option<&'a str> {
+fn parse_named_topic<'a>(
+    publish_topic: &'a str,
+    topic: &str,
+    message_type: &str,
+) -> Option<&'a str> {
     publish_topic
         .strip_prefix(topic)?
         .strip_prefix('/')?
@@ -105,53 +119,65 @@ fn send_file_to(host: &str, port: u16, id: &str, path: &Path) -> io::Result<()> 
 /// `AckMsg`（`DataMsg::FileAck`の中身）を受け取ったときの処理。
 /// 自分が送った申し出(id)に対する返事だった場合、そのidに対応するファイルを
 /// 教えてもらったhost:portへ実際に送信する。
-fn handle_ack(ack: AckMsg, pending_offers: &PendingOffers) {
+fn handle_ack(ack: AckMsg, pending_offers: &PendingOffers, printer: &ExternalPrinter<String>) {
     // remove() は「辞書から取り出して削除する」。C++のstd::unordered_map::extract()に近い。
     // 自分が送った申し出でなければNoneが返り何もしない。
     let Some(path) = pending_offers.lock().unwrap().remove(&ack.id) else {
         return;
     };
 
-    println!("[system] {}:{} へ接続してファイルを送信します…", ack.host, ack.port);
+    say(
+        printer,
+        format!("[system] {}:{} へ接続してファイルを送信します…", ack.host, ack.port),
+    );
 
     // thread::spawn(move || { ... }) は、C++のstd::thread(lambda)に相当します。
     // moveを付けることで、この中で使うack・pathの所有権を新しいスレッドに完全に渡します
     // （渡した後、外側のスレッドではack・pathはもう使えません。C++のstd::moveと違い、
     // 「渡した後に誤って使ってしまう」バグはコンパイルエラーとして検出されます）。
-    thread::spawn(move || match send_file_to(&ack.host, ack.port, &ack.id, &path) {
-        Ok(()) => println!("[system] 送信完了: {}", path.display()),
-        Err(e) => eprintln!("[system] ファイル送信エラー: {e}"),
-    });
+    let printer = printer.clone();
+    thread::spawn(
+        move || match send_file_to(&ack.host, ack.port, &ack.id, &path) {
+            Ok(()) => say(&printer, format!("[system] 送信完了: {}", path.display())),
+            Err(e) => say(&printer, format!("[system] ファイル送信エラー: {e}")),
+        },
+    );
 }
 
 /// `ReceivedMsg`（`DataMsg::FileReceived`の中身）を受け取ったときの処理。
 /// `who`は、これを送ってきたマイコンの名前（トピックの`<名前>`部分から渡される）。
-fn handle_file_received(who: &str, received: ReceivedMsg) {
+fn handle_file_received(who: &str, received: ReceivedMsg, printer: &ExternalPrinter<String>) {
     if received.status == "ok" {
-        println!(
-            "[system] ジョブ{}: {who} が受信完了しました（{} bytes）",
-            received.id, received.size
+        say(
+            printer,
+            format!(
+                "[system] ジョブ{}: {who} が受信完了しました（{} bytes）",
+                received.id, received.size
+            ),
         );
     } else {
-        println!("[system] ジョブ{}: {who} での受信に失敗しました", received.id);
+        say(
+            printer,
+            format!("[system] ジョブ{}: {who} での受信に失敗しました", received.id),
+        );
     }
 }
 
 /// `NBIRTH`（マイコンが接続した）を受け取ったときの処理。
-fn handle_birth(who: &str, roster: &Roster) {
+fn handle_birth(who: &str, roster: &Roster, printer: &ExternalPrinter<String>) {
     // insert()の戻り値は「上書きする前にそこにあった古い値」（無ければNone）。
     // C++のstd::mapならoperator[]で代入した後、以前の値は捨てられてしまいますが、
     // Rustのinsert()は古い値を捨てずにOption<V>として返してくれるので、
     // 「新規追加だったか、既存の更新だったか」をこの1行で判定できます。
     if roster.lock().unwrap().insert(who.to_string(), true) != Some(true) {
-        println!("[system] {who} がオンラインになりました");
+        say(printer, format!("[system] {who} がオンラインになりました"));
     }
 }
 
 /// `NDEATH`（マイコンが切断した）を受け取ったときの処理。
-fn handle_death(who: &str, roster: &Roster) {
+fn handle_death(who: &str, roster: &Roster, printer: &ExternalPrinter<String>) {
     if roster.lock().unwrap().remove(who).is_some() {
-        println!("[system] {who} がオフラインになりました");
+        say(printer, format!("[system] {who} がオフラインになりました"));
     }
 }
 
@@ -187,7 +213,11 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
     // マイコン役と同様に、自分のstateトピックにLast Willを登録しておく。
     // パソコンが異常終了しても、ブローカーが自動で"offline"を配ってくれるので、
     // マイコン側は「今指示を出す人がいるかどうか」を知ることができる。
-    let offline = serde_json::to_vec(&PresenceMsg { status: "offline".to_string(), seq: 0 }).unwrap();
+    let offline = serde_json::to_vec(&PresenceMsg {
+        status: "offline".to_string(),
+        seq: 0,
+    })
+    .unwrap();
     mqttoptions.set_last_will(LastWill::new(&state_topic, offline, QoS::AtLeastOnce, true));
 
     let (client, mut connection) = Client::new(mqttoptions, 10);
@@ -205,7 +235,9 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
     })
     .unwrap();
     mqtt_log::log_publish(&state_topic, &online);
-    client.publish(&state_topic, QoS::AtLeastOnce, true, online).unwrap();
+    client
+        .publish(&state_topic, QoS::AtLeastOnce, true, online)
+        .unwrap();
 
     let pending_offers: PendingOffers = Arc::new(Mutex::new(HashMap::new()));
     let roster: Roster = Arc::new(Mutex::new(HashMap::new()));
@@ -215,8 +247,30 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
     // ここで読み込んだ時点でそれらを引き継ぐ（load_or_create内でDispatched→Pendingに戻す）。
     let queue = JobQueue::load_or_create(PathBuf::from(&queue_file));
     let pending_count = queue.list().len();
+
+    // 標準入力（キーボード入力）を読み取り、チャット・send・job・queueなどのコマンドを
+    // 処理する専用スレッドを立てる。現在は`reedline-repl-rs`版（[`crate::repl_commands`]）を
+    // 使っている。元の自作パーサ版に戻したい場合は、下の呼び出しを
+    // `crate::stdin_commands::spawn(...)`に差し替えるだけでよい（引数の形は同じ）。
+    //
+    // `repl_commands::spawn`はプロンプトを描画する`Repl`をこの場で組み立てて、内部の
+    // `ExternalPrinter`（プロンプトと衝突せずに端末へ差し込める仕組み）を返してくれる。
+    // これを`job_worker`とこの関数自身の`println!`代わりに使い回す（詳しくは[`say`]と
+    // [`crate::job_worker`]冒頭のコメント参照）。
+    let printer = crate::repl_commands::spawn(
+        client.clone(),
+        name.clone(),
+        topic.clone(),
+        Arc::clone(&pending_offers),
+        seq.clone(),
+        queue.clone(),
+    );
+
     if pending_count > 0 {
-        println!("[system] ジョブキュー({queue_file})から{pending_count}件のジョブを引き継ぎました");
+        say(
+            &printer,
+            format!("[system] ジョブキュー({queue_file})から{pending_count}件のジョブを引き継ぎました"),
+        );
     }
 
     // キューを1件ずつ取り出してMQTTで配信し、完了を待つ専用スレッド（詳しくは[`crate::job_worker`]）。
@@ -227,27 +281,18 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
         Arc::clone(&roster),
         Arc::clone(&inflight),
         seq.clone(),
-        queue.clone(),
-    );
-
-    // 標準入力（キーボード入力）を読み取り、チャット・send・job・queueなどのコマンドを
-    // 処理する専用スレッドを立てる。現在は`reedline-repl-rs`版（[`crate::repl_commands`]）を
-    // 使っている。元の自作パーサ版に戻したい場合は、下の呼び出しを
-    // `crate::stdin_commands::spawn(...)`に差し替えるだけでよい（引数の形は同じ）。
-    crate::repl_commands::spawn(
-        client.clone(),
-        name.clone(),
-        topic.clone(),
-        Arc::clone(&pending_offers),
-        seq.clone(),
         queue,
+        printer.clone(),
     );
 
-    println!("接続しました host={host} port={port} topic={topic} name={name}（パソコン役）");
-    println!("メッセージを入力して Enter で送信します（Ctrl+D で終了）");
-    println!("先頭に /qos0 /qos1 /qos2 を付けるとそのメッセージだけQoSを変更できます（省略時はQoS1）");
-    println!("/send <宛先の名前> <ファイルパス> でファイルを送れます（例: /send device1 ./photo.png）");
-    println!("/job <内容> で、今オンラインの全マイコンへ一斉配信し、全員完了するまで待ちます（例: /job print A4x3）");
+    say(
+        &printer,
+        format!("接続しました host={host} port={port} topic={topic} name={name}（パソコン役）"),
+    );
+    say(&printer, "chat <文章> でメッセージを送れます（例: chat こんにちは）");
+    say(&printer, "send <宛先の名前> <ファイルパス> でファイルを送れます（例: send device1 ./photo.png）");
+    say(&printer, "job <内容> で印刷ジョブをキューに追加します（例: job print A4x3）。queue/status/cancel/retry/clearで管理できます");
+    say(&printer, "help で使えるコマンドの一覧を表示します");
 
     // connection.iter() は「ブローカーから届いたイベントを1つずつ返してくれる、
     // 終わりのないイテレータ」です。C++でいう、受信用のイベントループ
@@ -265,13 +310,13 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
                     // NBIRTHは接続のたびにseqが0から数え直される（再起動すればカウンタは
                     // リセットされる）のが正常な動きなので、is_birth=trueで警告を抑える。
                     check_seq(who, msg.seq, &seq.presence_tracker, true);
-                    handle_birth(who, &roster);
+                    handle_birth(who, &roster, &printer);
                 } else if let Some(who) = parse_named_topic(&publish.topic, &topic, "NDEATH") {
                     let Ok(msg) = serde_json::from_str::<BirthDeathMsg>(&text) else {
                         continue;
                     };
                     check_seq(who, msg.seq, &seq.presence_tracker, false);
-                    handle_death(who, &roster);
+                    handle_death(who, &roster, &printer);
                 } else if let Some(who) = parse_named_topic(&publish.topic, &topic, "NDATA") {
                     let Ok(data) = serde_json::from_str::<DataMsg>(&text) else {
                         continue;
@@ -286,17 +331,17 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
                     check_seq(who, seq_num, &seq.data_tracker, false);
 
                     match data {
-                        DataMsg::FileAck(a) => handle_ack(a, &pending_offers),
-                        DataMsg::FileReceived(r) => handle_file_received(who, r),
+                        DataMsg::FileAck(a) => handle_ack(a, &pending_offers, &printer),
+                        DataMsg::FileReceived(r) => handle_file_received(who, r, &printer),
                         DataMsg::JobDone(d) => handle_job_done(who, d, &inflight),
                     }
                 } else if publish.topic == topic {
-                    println!("{text}");
+                    say(&printer, text.into_owned());
                 }
             }
             Ok(_) => {}
             Err(e) => {
-                eprintln!("接続エラー: {e:?}");
+                say(&printer, format!("接続エラー: {e:?}"));
                 break;
             }
         }

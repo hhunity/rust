@@ -23,6 +23,7 @@ use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use reedline_repl_rs::clap::{Arg, ArgMatches, Command};
+use reedline_repl_rs::reedline::ExternalPrinter;
 use reedline_repl_rs::{Repl, Result as ReplResult};
 use rumqttc::{Client, QoS};
 
@@ -44,7 +45,11 @@ struct Context {
 
 /// `content`引数（複数トークンに分かれうる）を、スペース区切りの1本の文字列へ戻す。
 fn joined_arg(args: &ArgMatches, name: &str) -> String {
-    args.get_many::<String>(name).unwrap().cloned().collect::<Vec<_>>().join(" ")
+    args.get_many::<String>(name)
+        .unwrap()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn cmd_job(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
@@ -57,16 +62,26 @@ fn cmd_queue(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> 
         None => None,
         Some(s) => match JobStatus::parse(s) {
             Some(status) => Some(status),
-            None => return Ok(Some("使い方: queue [pending|dispatched|done|failed]".to_string())),
+            None => {
+                return Ok(Some(
+                    "使い方: queue [pending|dispatched|done|failed]".to_string(),
+                ))
+            }
         },
     };
-    let jobs: Vec<_> =
-        ctx.queue.list().into_iter().filter(|j| status_filter.is_none_or(|s| j.status == s)).collect();
+    let jobs: Vec<_> = ctx
+        .queue
+        .list()
+        .into_iter()
+        .filter(|j| status_filter.is_none_or(|s| j.status == s))
+        .collect();
     if jobs.is_empty() {
         return Ok(Some("該当するジョブはありません".to_string()));
     }
-    let lines: Vec<String> =
-        jobs.iter().map(|j| format!("{} [{:?}] {}", j.id, j.status, j.content)).collect();
+    let lines: Vec<String> = jobs
+        .iter()
+        .map(|j| format!("{} [{:?}] {}", j.id, j.status, j.content))
+        .collect();
     Ok(Some(lines.join("\n")))
 }
 
@@ -98,7 +113,9 @@ fn cmd_retry(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> 
 
 fn cmd_clear(_args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
     let removed = ctx.queue.clear_finished();
-    Ok(Some(format!("完了/失敗済みのジョブを{removed}件削除しました")))
+    Ok(Some(format!(
+        "完了/失敗済みのジョブを{removed}件削除しました"
+    )))
 }
 
 fn cmd_send(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
@@ -109,10 +126,15 @@ fn cmd_send(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
         Ok(m) => m,
         Err(e) => return Ok(Some(format!("ファイルが読めません: {path_str} ({e})"))),
     };
-    let filename =
-        path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_else(|| path_str.clone());
+    let filename = path
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_else(|| path_str.clone());
 
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let id = format!("{}-{nanos}", ctx.name);
     ctx.pending_offers.lock().unwrap().insert(id.clone(), path);
 
@@ -126,7 +148,9 @@ fn cmd_send(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
     let offer_topic = format!("{}/NCMD/{to}", ctx.topic);
     let payload = serde_json::to_vec(&CmdMsg::FileOffer(offer)).unwrap();
     mqtt_log::log_publish(&offer_topic, &payload);
-    ctx.client.publish(&offer_topic, QoS::AtLeastOnce, false, payload).unwrap();
+    ctx.client
+        .publish(&offer_topic, QoS::AtLeastOnce, false, payload)
+        .unwrap();
     Ok(Some(format!(
         "{to}へ {filename} ({} bytes) の送信を申し出ました。相手の応答を待っています…",
         metadata.len()
@@ -141,12 +165,18 @@ fn cmd_chat(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
     };
     let message = format!("{}: {}", ctx.name, joined_arg(&args, "text"));
     mqtt_log::log_publish(&ctx.topic, message.as_bytes());
-    ctx.client.publish(&ctx.topic, qos, false, message.as_bytes()).unwrap();
+    ctx.client
+        .publish(&ctx.topic, qos, false, message.as_bytes())
+        .unwrap();
     Ok(None)
 }
 
 /// 標準入力を`reedline-repl-rs`のREPLとして受け付ける専用スレッドを立てる。
-/// この関数自体はスレッドを立てたらすぐ返る。
+/// この関数自体はスレッドを立てたらすぐ返るが、`Repl`（と、その内部の
+/// `ExternalPrinter`）はこの関数の中で先に組み立てる。呼び出し側は、戻り値の
+/// `ExternalPrinter`を[`crate::job_worker`]など他のバックグラウンドスレッドにも
+/// 渡すことで、それらの状況報告もプロンプトと衝突せずに表示できる
+/// （詳しくは[`crate::job_worker`]冒頭のコメント参照）。
 pub(crate) fn spawn(
     client: Client,
     name: String,
@@ -154,63 +184,72 @@ pub(crate) fn spawn(
     pending_offers: PendingOffers,
     seq: ControllerSeqState,
     queue: JobQueue,
-) {
-    thread::spawn(move || {
-        let context = Context { client, name, topic, pending_offers, seq, queue };
-        let mut repl = Repl::new(context)
-            .with_name("mqtt-server")
-            .with_description("チャット・ファイル送信・印刷ジョブキューの操作")
-            .with_command(
-                Command::new("job")
-                    .about("印刷ジョブをキューに追加する（内容はスペースを含んでよい）")
-                    .arg(Arg::new("content").required(true).num_args(1..)),
-                cmd_job,
-            )
-            .with_command(
-                Command::new("queue")
-                    .about("キューの一覧を表示する（状態を付けると絞り込める）")
-                    .arg(Arg::new("status").required(false)),
-                cmd_queue,
-            )
-            .with_command(
-                Command::new("status")
-                    .about("指定した1件のジョブの状態を表示する")
-                    .arg(Arg::new("id").required(true)),
-                cmd_status,
-            )
-            .with_command(
-                Command::new("cancel")
-                    .about("まだ配信していないジョブをキューから取り消す")
-                    .arg(Arg::new("id").required(true)),
-                cmd_cancel,
-            )
-            .with_command(
-                Command::new("retry")
-                    .about("失敗したジョブをもう一度Pendingへ戻す")
-                    .arg(Arg::new("id").required(true)),
-                cmd_retry,
-            )
-            .with_command(
-                Command::new("clear").about("完了/失敗済みのジョブをキューから削除する"),
-                cmd_clear,
-            )
-            .with_command(
-                Command::new("send")
-                    .about("宛先のマイコンへファイル送信を申し出る")
-                    .arg(Arg::new("to").required(true))
-                    .arg(Arg::new("path").required(true)),
-                cmd_send,
-            )
-            .with_command(
-                Command::new("chat")
-                    .about("チャットメッセージを送る")
-                    .arg(Arg::new("qos").long("qos").help("0/1/2（省略時は1）"))
-                    .arg(Arg::new("text").required(true).num_args(1..)),
-                cmd_chat,
-            );
+) -> ExternalPrinter<String> {
+    let context = Context {
+        client,
+        name,
+        topic,
+        pending_offers,
+        seq,
+        queue,
+    };
+    let mut repl = Repl::new(context)
+        .with_name("mqtt-server")
+        .with_description("チャット・ファイル送信・印刷ジョブキューの操作")
+        .with_command(
+            Command::new("job")
+                .about("印刷ジョブをキューに追加する（内容はスペースを含んでよい）")
+                .arg(Arg::new("content").required(true).num_args(1..)),
+            cmd_job,
+        )
+        .with_command(
+            Command::new("queue")
+                .about("キューの一覧を表示する（状態を付けると絞り込める）")
+                .arg(Arg::new("status").required(false)),
+            cmd_queue,
+        )
+        .with_command(
+            Command::new("status")
+                .about("指定した1件のジョブの状態を表示する")
+                .arg(Arg::new("id").required(true)),
+            cmd_status,
+        )
+        .with_command(
+            Command::new("cancel")
+                .about("まだ配信していないジョブをキューから取り消す")
+                .arg(Arg::new("id").required(true)),
+            cmd_cancel,
+        )
+        .with_command(
+            Command::new("retry")
+                .about("失敗したジョブをもう一度Pendingへ戻す")
+                .arg(Arg::new("id").required(true)),
+            cmd_retry,
+        )
+        .with_command(
+            Command::new("clear").about("完了/失敗済みのジョブをキューから削除する"),
+            cmd_clear,
+        )
+        .with_command(
+            Command::new("send")
+                .about("宛先のマイコンへファイル送信を申し出る")
+                .arg(Arg::new("to").required(true))
+                .arg(Arg::new("path").required(true)),
+            cmd_send,
+        )
+        .with_command(
+            Command::new("chat")
+                .about("チャットメッセージを送る")
+                .arg(Arg::new("qos").long("qos").help("0/1/2（省略時は1）"))
+                .arg(Arg::new("text").required(true).num_args(1..)),
+            cmd_chat,
+        );
 
+    let printer = repl.external_printer();
+    thread::spawn(move || {
         if let Err(e) = repl.run() {
             eprintln!("[system] コマンド入力ループが終了しました: {e}");
         }
     });
+    printer
 }
