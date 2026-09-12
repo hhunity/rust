@@ -71,8 +71,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
 
 # --- 2. SWUpdate単体(Stage 0練習用) ---
+# swupdate-wwwはjammy(22.04)には存在しない(noble/24.04以降のみ提供)ため、
+# swupdateのみインストールする。Web UIが必要な場合はソースからビルドすること。
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      swupdate swupdate-www \
+      swupdate \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

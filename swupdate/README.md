@@ -26,7 +26,7 @@ Agilex 7実機が無くても、SWUpdate/Yocto周りは以下がPC(x86 Linux/QEM
 
 ### B. sw-description / .swuパッケージ作成の練習(Stage 0。Ubuntu 24.04で実機動作確認済み)
 
-ボード無関係。`apt install swupdate swupdate-www` でインストールし、ダミーファイルで以下を試す。以下はこのセッション上で実際に動作確認済みの、正しい手順。
+ボード無関係。`apt install swupdate`(+ `swupdate-www`。**ただしjammy/22.04には`swupdate-www`パッケージが存在しない**。noble/24.04以降のみ提供。jammyでWeb UIが必要な場合はソースからビルドすること)でインストールし、ダミーファイルで以下を試す。以下はこのセッション上(Ubuntu 24.04)で実際に動作確認済みの、正しい手順。
 
 **ハマりどころ(実際に発生したエラーと原因)**:
 - Ubuntu配布の`swupdate`パッケージは**署名必須でビルドされている**(`-k`無しでは起動すらしない)
@@ -301,7 +301,7 @@ Yoctoのビルド(`bitbake`)には大きく3種類のものが必要で、どこ
 
 | 内容 | 対応する練習段階 | ビルド状態 |
 |---|---|---|
-| SWUpdate単体(`apt install swupdate swupdate-www`) | Stage 0(sw-description/.swu作成の練習) | インストール済み、すぐ使える |
+| SWUpdate単体(`apt install swupdate`。jammyには`swupdate-www`が無いため含めていない) | Stage 0(sw-description/.swu作成の練習) | インストール済み、すぐ使える |
 | poky + `meta-swupdate`(`qemux86-64`) | Stage A(QEMU A/Bデモ) | `bitbake`まで完了済み(軽量なため) |
 | `gsrd-socfpga` + `meta-swupdate`/`meta-lts-mixins`レイヤー | Stage 1(Agilex7本番) | ソースのフェッチのみ完了(実ビルドは未実施。サイズ・時間の都合) |
 | `rustup`(cargo) + `cargo-bitbake` | 独自Rustアプリの開発 | インストール済み |
