@@ -9,7 +9,6 @@
 //!   - ファイル送信の申し出(OFFER)やジョブ配信(JOB)に反応する（[`mqtt_app::device`]）
 //! ことです。
 
-use std::io::{self, BufRead};
 use std::net::TcpListener;
 use std::thread;
 use std::time::Duration;
@@ -137,29 +136,6 @@ fn main() {
         let data_topic = data_topic.clone();
         let received_counter = seq.data_counter.clone();
         thread::spawn(move || run_file_listener(listener, client, data_topic, received_counter));
-    }
-
-    // 別スレッドを立てて「キーボード入力 → チャット送信」を担当させる（デバッグ用の簡易機能）
-    {
-        let client = client.clone();
-        let name = name.clone();
-        let topic = topic.clone();
-
-        thread::spawn(move || {
-            let stdin = io::stdin();
-            for line in stdin.lock().lines() {
-                let line = match line {
-                    Ok(l) => l,
-                    Err(_) => break,
-                };
-                if line.is_empty() {
-                    continue;
-                }
-                let message = format!("{name}: {line}");
-                mqtt_app::mqtt_log::log_publish(&topic, message.as_bytes());
-                client.publish(&topic, QoS::AtLeastOnce, false, message.as_bytes()).unwrap();
-            }
-        });
     }
 
     println!("接続しました host={host} port={port} topic={topic} name={name}（マイコン役）");
