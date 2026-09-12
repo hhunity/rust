@@ -5,7 +5,7 @@
 #
 # ネット接続がある環境(Windows Docker Desktop等)で `docker build` する際にのみ
 # 実行され、生成された downloads/ 一式はイメージのレイヤーに焼き込まれる。
-set -eux
+set -ex
 
 POKY_VERSION="${POKY_VERSION:-scarthgap}"
 BUILD_SCRIPT="${BUILD_SCRIPT:-agilex7_dk_si_agf014ea-gsrd-build.sh}"

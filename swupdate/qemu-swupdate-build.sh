@@ -2,7 +2,7 @@
 # poky + meta-swupdate を qemux86-64 向けにビルドし、A/B更新デモをすぐ試せる状態にする。
 # doc/Dockerfile.agilex7-dev のイメージビルド時にコンテナ内で実行される。
 # (gsrd-socfpgaとは別の、軽量なQEMU練習用のpoky環境。ビルドまで完了させる。)
-set -eux
+set -ex
 
 POKY_BRANCH="${POKY_BRANCH:-scarthgap}"
 
