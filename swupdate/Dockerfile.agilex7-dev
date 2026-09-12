@@ -34,6 +34,10 @@
 # 通常はWindows側のQuartus Programmerを使う方が確実(ドライバの都合上、コンテナ内での
 # USB-Blaster利用は別途検討が必要)。
 #
+# NOTE: bitbakeはroot権限での実行を拒否するため、本イメージは非rootユーザー`builder`
+# (パスワード無しでsudo可能)で動く。コンテナに入ると最初から`builder`になっている。
+# apt install等rootが要る操作は`sudo`で行うこと。
+#
 # コンテナ内での各練習の入り方:
 #   Stage 0 (SWUpdate単体):  README「Stage 0」の手順をそのまま実行(swupdateはインストール済み)
 #   Stage A (QEMU A/Bデモ):  cd /workspace/qemu-swupdate/build && source ../poky/oe-init-build-env . && runqemu qemux86-64 nographic
@@ -50,13 +54,13 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# --- 1. ビルドホスト用パッケージ(doc/yocto-urls-jammy.txtと同じ一式) ---
+# --- 1. ビルドホスト用パッケージ(doc/yocto-urls-jammy.txtと同じ一式 + sudo) ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
       gawk wget git diffstat unzip texinfo build-essential chrpath socat cpio \
       python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping \
       python3-git python3-jinja2 python3-subunit zstd liblz4-tool lz4 file \
       locales libacl1 ca-certificates \
-      iproute2 \
+      iproute2 sudo \
     && locale-gen en_US.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -77,22 +81,32 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       swupdate \
     && rm -rf /var/lib/apt/lists/*
 
+# --- bitbakeはrootでの実行を拒否するため、以降は非rootユーザー(builder)で作業する ---
+RUN useradd -m -s /bin/bash builder \
+    && usermod -aG dialout builder \
+    && echo "builder ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/builder \
+    && chmod 0440 /etc/sudoers.d/builder \
+    && mkdir -p /workspace /opt/rustup /opt/cargo \
+    && chown -R builder:builder /workspace /opt/rustup /opt/cargo
+
+USER builder
+ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:$PATH
 WORKDIR /workspace
 
 # --- 3. poky + meta-swupdate を qemux86-64 向けにビルド(Stage A練習用) ---
 COPY qemu-swupdate-build.sh /usr/local/bin/qemu-swupdate-build.sh
-RUN chmod +x /usr/local/bin/qemu-swupdate-build.sh \
+RUN sudo chmod +x /usr/local/bin/qemu-swupdate-build.sh \
     && /usr/local/bin/qemu-swupdate-build.sh
 
 # --- 4. gsrd-socfpga + meta-swupdate/meta-lts-mixinsレイヤー(Agilex7本番。フェッチのみ) ---
 COPY yocto-agilex7-fetch.sh /usr/local/bin/yocto-agilex7-fetch.sh
-COPY add-swupdate-layer.sh /workspace/add-swupdate-layer.sh
-COPY add-rust-layer.sh /workspace/add-rust-layer.sh
-RUN chmod +x /usr/local/bin/yocto-agilex7-fetch.sh /workspace/add-swupdate-layer.sh /workspace/add-rust-layer.sh \
+COPY --chown=builder:builder add-swupdate-layer.sh /workspace/add-swupdate-layer.sh
+COPY --chown=builder:builder add-rust-layer.sh /workspace/add-rust-layer.sh
+RUN sudo chmod +x /usr/local/bin/yocto-agilex7-fetch.sh \
+    && chmod +x /workspace/add-swupdate-layer.sh /workspace/add-rust-layer.sh \
     && /usr/local/bin/yocto-agilex7-fetch.sh
 
 # --- 5. Rust(rustup)+ cargo-bitbake(独自アプリの開発・レシピ生成用。ホスト側ツール) ---
-ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:$PATH
 RUN wget -q https://sh.rustup.rs -O /tmp/rustup-init.sh \
     && sh /tmp/rustup-init.sh -y --default-toolchain stable --profile minimal \
     && rm /tmp/rustup-init.sh \
