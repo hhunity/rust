@@ -16,6 +16,9 @@
 //!   「プレフィックス無しの行はそのままチャットとして送る」という挙動は無い。そのため
 //!   チャットも`chat <本文>`という明示コマンドに変え、`/qos0`〜`/qos2`プレフィックスは
 //!   `--qos <0|1|2>`オプションに置き換えている。
+//! - `job`はキューに積むだけで、自動では配信されない。`run`コマンドを打つたびに、
+//!   キューの先頭にあるPendingジョブが1件だけ処理される（起動時に残っていた未処理
+//!   ジョブも同様で、勝手に配信されることはない。詳しくは[`crate::job_dispatch`]参照）。
 
 use std::fs;
 use std::path::PathBuf;
@@ -27,7 +30,8 @@ use reedline_repl_rs::reedline::ExternalPrinter;
 use reedline_repl_rs::{Repl, Result as ReplResult};
 use rumqttc::{Client, QoS};
 
-use crate::controller::PendingOffers;
+use crate::controller::{InFlightState, PendingOffers, Roster};
+use crate::job_dispatch;
 use crate::job_queue::{JobQueue, JobStatus};
 use crate::messages::{CmdMsg, OfferMsg};
 use crate::mqtt_log;
@@ -39,6 +43,8 @@ struct Context {
     name: String,
     topic: String,
     pending_offers: PendingOffers,
+    roster: Roster,
+    inflight: InFlightState,
     seq: ControllerSeqState,
     queue: JobQueue,
 }
@@ -54,7 +60,22 @@ fn joined_arg(args: &ArgMatches, name: &str) -> String {
 
 fn cmd_job(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
     let id = ctx.queue.enqueue(joined_arg(&args, "content"));
-    Ok(Some(format!("ジョブ{id}をキューに追加しました（バックグラウンドで順番に配信されます。queueで確認できます）")))
+    Ok(Some(format!(
+        "ジョブ{id}をキューに追加しました（自動では配信されません。runで配信してください）"
+    )))
+}
+
+fn cmd_run(_args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
+    let all_cmd_topic = format!("{}/NCMD/all", ctx.topic);
+    Ok(Some(job_dispatch::run_one(
+        &ctx.client,
+        &ctx.name,
+        &all_cmd_topic,
+        &ctx.roster,
+        &ctx.inflight,
+        &ctx.seq,
+        &ctx.queue,
+    )))
 }
 
 fn cmd_queue(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
@@ -174,14 +195,17 @@ fn cmd_chat(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
 /// 標準入力を`reedline-repl-rs`のREPLとして受け付ける専用スレッドを立てる。
 /// この関数自体はスレッドを立てたらすぐ返るが、`Repl`（と、その内部の
 /// `ExternalPrinter`）はこの関数の中で先に組み立てる。呼び出し側は、戻り値の
-/// `ExternalPrinter`を[`crate::job_worker`]など他のバックグラウンドスレッドにも
-/// 渡すことで、それらの状況報告もプロンプトと衝突せずに表示できる
-/// （詳しくは[`crate::job_worker`]冒頭のコメント参照）。
+/// `ExternalPrinter`を`controller`のメインループなど他のスレッドにも渡すことで、
+/// それらの状況報告もプロンプトと衝突せずに表示できる（詳しくは
+/// `controller.rs`の`say`ヘルパーのコメントも参照）。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn(
     client: Client,
     name: String,
     topic: String,
     pending_offers: PendingOffers,
+    roster: Roster,
+    inflight: InFlightState,
     seq: ControllerSeqState,
     queue: JobQueue,
 ) -> ExternalPrinter<String> {
@@ -190,6 +214,8 @@ pub(crate) fn spawn(
         name,
         topic,
         pending_offers,
+        roster,
+        inflight,
         seq,
         queue,
     };
@@ -201,6 +227,10 @@ pub(crate) fn spawn(
                 .about("印刷ジョブをキューに追加する（内容はスペースを含んでよい）")
                 .arg(Arg::new("content").required(true).num_args(1..)),
             cmd_job,
+        )
+        .with_command(
+            Command::new("run").about("キューの先頭にあるPendingジョブを1件だけ配信する"),
+            cmd_run,
         )
         .with_command(
             Command::new("queue")

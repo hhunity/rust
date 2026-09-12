@@ -24,7 +24,8 @@
 //! - [`file_transfer`] — 「マイコン役」の、生TCPでのファイル受信ロジック。`mqtt-client`だけが使う
 //! - [`device`] — 「マイコン役」の、OFFER/JOB受信時の処理。`mqtt-client`だけが使う
 //! - `job_queue` — 印刷ジョブの永続化キュー（データ構造とファイル読み書きのみ）。`mqtt-server`だけが使う
-//! - `job_worker` — `job_queue`を順番に処理し、MQTTで配信するバックグラウンドスレッド。`mqtt-server`だけが使う
+//! - `job_dispatch` — `run`コマンドが呼ばれたときに、`job_queue`の先頭にあるジョブを1件
+//!   MQTTで配信して完了を待つ処理。`mqtt-server`だけが使う（自動ループは無く、常に呼び出し元次第）
 //!
 //! ## Rustが初めての方（C++経験者向け）の予備知識
 //!
@@ -101,8 +102,8 @@ pub mod broker;
 pub mod controller;
 pub mod device;
 pub mod file_transfer;
+mod job_dispatch;
 mod job_queue;
-mod job_worker;
 pub mod messages;
 pub mod mqtt_log;
 mod repl_commands;

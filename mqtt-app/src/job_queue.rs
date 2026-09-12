@@ -6,13 +6,16 @@
 //! `serde_json`でリスト全体を1つのJSONファイルへ書き出すだけで永続化できる
 //! （キューは小規模である前提で、この単純さを優先している）。
 //!
-//! 実際にキューを進める（MQTTで配信して完了を待つ）処理は[`crate::job_worker`]が担当し、
+//! 実際にキューを進める（MQTTで配信して完了を待つ）処理は[`crate::job_dispatch`]が担当し、
 //! このモジュールは「今どんなジョブがあるか」を持つデータ構造と、その読み書きだけに専念する。
+//!
+//! ジョブは起動時や投入時に自動で配信されることはなく、`run`コマンド（[`crate::job_dispatch::run_one`]）
+//! が呼ばれたときだけ、その時点でキューの先頭にあるPendingジョブが1件処理される。
 
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -60,8 +63,6 @@ struct QueueState {
 #[derive(Clone)]
 pub struct JobQueue {
     state: Arc<Mutex<QueueState>>,
-    /// `enqueue`されたら起こす合図。[`Self::wait_for_next_pending`]がここでブロックする。
-    ready: Arc<Condvar>,
     path: Arc<PathBuf>,
 }
 
@@ -83,7 +84,6 @@ impl JobQueue {
         }
         let queue = JobQueue {
             state: Arc::new(Mutex::new(QueueState { jobs })),
-            ready: Arc::new(Condvar::new()),
             path: Arc::new(path),
         };
         if changed {
@@ -100,7 +100,6 @@ impl JobQueue {
         let mut guard = self.state.lock().unwrap();
         guard.jobs.push_back(QueuedJob { id: id.clone(), content, status: JobStatus::Pending });
         self.save_locked(&guard.jobs);
-        self.ready.notify_one();
         id
     }
 
@@ -127,19 +126,13 @@ impl JobQueue {
         removed
     }
 
-    /// 次に処理すべきPendingジョブが現れるまでブロックし、そのジョブを返す
-    /// （キューからの取り出しはしない。呼び出し側は続けて[`Self::mark_dispatched`]を呼ぶこと）。
+    /// 次に処理すべきPendingジョブがあれば返す（無ければ`None`）。ブロックはしない
+    /// （キューからの取り出しもしない。呼び出し側は続けて[`Self::mark_dispatched`]を呼ぶこと）。
     ///
     /// ジョブは常に投入した順番どおりに処理される前提なので、「先頭から見て最初に
     /// 見つかったPending」を返せば十分（それより手前は必ずDone/Failed済みのはず）。
-    pub fn wait_for_next_pending(&self) -> QueuedJob {
-        let mut guard = self.state.lock().unwrap();
-        loop {
-            if let Some(job) = guard.jobs.iter().find(|j| j.status == JobStatus::Pending) {
-                return job.clone();
-            }
-            guard = self.ready.wait(guard).unwrap();
-        }
+    pub fn peek_next_pending(&self) -> Option<QueuedJob> {
+        self.state.lock().unwrap().jobs.iter().find(|j| j.status == JobStatus::Pending).cloned()
     }
 
     pub fn mark_dispatched(&self, id: &str) {
@@ -167,7 +160,6 @@ impl JobQueue {
         }
         job.status = JobStatus::Pending;
         self.save_locked(&guard.jobs);
-        self.ready.notify_one();
         true
     }
 

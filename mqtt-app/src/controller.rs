@@ -19,7 +19,6 @@ use reedline_repl_rs::reedline::ExternalPrinter;
 use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 
 use crate::job_queue::JobQueue;
-use crate::job_worker;
 use crate::messages::{AckMsg, BirthDeathMsg, DataMsg, DoneMsg, PresenceMsg, ReceivedMsg};
 use crate::mqtt_log;
 use crate::seq::{check_seq, next_seq, ControllerSeqState};
@@ -28,7 +27,7 @@ use crate::seq::{check_seq, next_seq, ControllerSeqState};
 /// スレッドだけが端末に書き込む前提でカーソル位置を管理しているため、よそのスレッドから
 /// 素の`println!`を呼ぶと入力中の行が壊れて見える。`ExternalPrinter`はただのチャネルで、
 /// 実際に端末へ「消す→出す→プロンプトを描き直す」をするのは`reedline`自身のスレッドなので、
-/// これ経由なら安全に差し込める（詳しくは[`crate::job_worker`]冒頭のコメントも参照）。
+/// これ経由なら安全に差し込める。
 fn say(printer: &ExternalPrinter<String>, message: impl Into<String>) {
     let _ = printer.print(message.into());
 }
@@ -196,8 +195,6 @@ fn handle_job_done(who: &str, done: DoneMsg, inflight: &InFlightState) {
 /// この関数はプログラムが終わるまでブロックし続ける
 /// （C++でいう、`main()`の中の`while (true) { ... }`メインループに相当する部分です）。
 pub fn run(name: String, host: String, port: u16, topic: String, queue_file: String) {
-    // 全マイコンへの一斉配信(JOB)専用の、特別な名前"all"を宛先としたNCMDトピック。
-    let all_cmd_topic = format!("{topic}/NCMD/all");
     // 各マイコンの接続・切断・継続報告は、ワイルドカードでまとめて購読する。
     let birth_wildcard = format!("{topic}/NBIRTH/+");
     let death_wildcard = format!("{topic}/NDEATH/+");
@@ -245,45 +242,40 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
 
     // 印刷ジョブの永続化キュー。ファイルに前回までの未処理ジョブが残っていれば、
     // ここで読み込んだ時点でそれらを引き継ぐ（load_or_create内でDispatched→Pendingに戻す）。
+    // 引き継いだジョブも含めて、配信はrunコマンドが呼ばれるまで一切行わない
+    // （詳しくは[`crate::job_dispatch`]参照。起動時に勝手に配信されると困る、という
+    // 要望から、常駐の配信スレッドは廃止した）。
     let queue = JobQueue::load_or_create(PathBuf::from(&queue_file));
     let pending_count = queue.list().len();
 
-    // 標準入力（キーボード入力）を読み取り、チャット・send・job・queueなどのコマンドを
-    // 処理する専用スレッドを立てる。現在は`reedline-repl-rs`版（[`crate::repl_commands`]）を
-    // 使っている。元の自作パーサ版に戻したい場合は、下の呼び出しを
-    // `crate::stdin_commands::spawn(...)`に差し替えるだけでよい（引数の形は同じ）。
+    // 標準入力（キーボード入力）を読み取り、チャット・send・job・run・queueなどの
+    // コマンドを処理する専用スレッドを立てる。現在は`reedline-repl-rs`版
+    // （[`crate::repl_commands`]）を使っている。元の自作パーサ版に戻したい場合は、
+    // 下の呼び出しを`crate::stdin_commands::spawn(...)`に差し替えるだけでよい
+    // （ただし`stdin_commands`は`run`コマンドに未対応）。
     //
     // `repl_commands::spawn`はプロンプトを描画する`Repl`をこの場で組み立てて、内部の
     // `ExternalPrinter`（プロンプトと衝突せずに端末へ差し込める仕組み）を返してくれる。
-    // これを`job_worker`とこの関数自身の`println!`代わりに使い回す（詳しくは[`say`]と
-    // [`crate::job_worker`]冒頭のコメント参照）。
+    // これをこの関数自身の`println!`代わりに使い回す（詳しくは[`say`]参照）。
     let printer = crate::repl_commands::spawn(
         client.clone(),
         name.clone(),
         topic.clone(),
         Arc::clone(&pending_offers),
+        Arc::clone(&roster),
+        Arc::clone(&inflight),
         seq.clone(),
-        queue.clone(),
+        queue,
     );
 
     if pending_count > 0 {
         say(
             &printer,
-            format!("[system] ジョブキュー({queue_file})から{pending_count}件のジョブを引き継ぎました"),
+            format!(
+                "[system] ジョブキュー({queue_file})から{pending_count}件の未処理ジョブを引き継ぎました（runで配信してください）"
+            ),
         );
     }
-
-    // キューを1件ずつ取り出してMQTTで配信し、完了を待つ専用スレッド（詳しくは[`crate::job_worker`]）。
-    job_worker::spawn(
-        client.clone(),
-        name.clone(),
-        all_cmd_topic.clone(),
-        Arc::clone(&roster),
-        Arc::clone(&inflight),
-        seq.clone(),
-        queue,
-        printer.clone(),
-    );
 
     say(
         &printer,
@@ -291,7 +283,8 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
     );
     say(&printer, "chat <文章> でメッセージを送れます（例: chat こんにちは）");
     say(&printer, "send <宛先の名前> <ファイルパス> でファイルを送れます（例: send device1 ./photo.png）");
-    say(&printer, "job <内容> で印刷ジョブをキューに追加します（例: job print A4x3）。queue/status/cancel/retry/clearで管理できます");
+    say(&printer, "job <内容> で印刷ジョブをキューに追加します（例: job print A4x3）。自動では配信されません");
+    say(&printer, "run でキューの先頭にあるジョブを1件だけ配信します。queue/status/cancel/retry/clearで管理できます");
     say(&printer, "help で使えるコマンドの一覧を表示します");
 
     // connection.iter() は「ブローカーから届いたイベントを1つずつ返してくれる、
