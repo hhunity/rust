@@ -16,9 +16,11 @@
 //!   「プレフィックス無しの行はそのままチャットとして送る」という挙動は無い。そのため
 //!   チャットも`chat <本文>`という明示コマンドに変え、`/qos0`〜`/qos2`プレフィックスは
 //!   `--qos <0|1|2>`オプションに置き換えている。
-//! - `job`はキューに積むだけで、自動では配信されない。`run`コマンドを打つたびに、
-//!   キューの先頭にあるPendingジョブが1件だけ処理される（起動時に残っていた未処理
-//!   ジョブも同様で、勝手に配信されることはない。詳しくは[`crate::job_dispatch`]参照）。
+//! - `job`はキューに積んだうえで、その場で配信を試みる。ただし起動時にファイルから
+//!   引き継いだ未処理ジョブは、自動では配信されない（勝手に印刷が始まると困るため）。
+//!   宛先が誰もオンラインでない等の理由で配信できなかったジョブはPendingのまま
+//!   「止まった」状態になり、`run`コマンドを打つたびに、キューの先頭で止まっている
+//!   ジョブが1件だけ再開される（詳しくは[`crate::job_dispatch`]参照）。
 
 use std::fs;
 use std::path::PathBuf;
@@ -58,16 +60,10 @@ fn joined_arg(args: &ArgMatches, name: &str) -> String {
         .join(" ")
 }
 
-fn cmd_job(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
-    let id = ctx.queue.enqueue(joined_arg(&args, "content"));
-    Ok(Some(format!(
-        "ジョブ{id}をキューに追加しました（自動では配信されません。runで配信してください）"
-    )))
-}
-
-fn cmd_run(_args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
+/// キューの先頭にあるPendingジョブを1件処理する（`job`・`run`の両方から呼ばれる共通処理）。
+fn dispatch_next(ctx: &Context) -> String {
     let all_cmd_topic = format!("{}/NCMD/all", ctx.topic);
-    Ok(Some(job_dispatch::run_one(
+    job_dispatch::run_one(
         &ctx.client,
         &ctx.name,
         &all_cmd_topic,
@@ -75,7 +71,21 @@ fn cmd_run(_args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
         &ctx.inflight,
         &ctx.seq,
         &ctx.queue,
-    )))
+    )
+}
+
+/// キューに積んだうえで、その場で配信を試みる。宛先が誰もオンラインでない等の理由で
+/// 配信できなければ、ジョブはPendingのまま「止まった」状態になる（それを後から
+/// 再開させるのが[`cmd_run`]の役目）。
+fn cmd_job(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
+    let id = ctx.queue.enqueue(joined_arg(&args, "content"));
+    let result = dispatch_next(ctx);
+    Ok(Some(format!("ジョブ{id}をキューに追加しました。{result}")))
+}
+
+/// キューの先頭で止まっている（配信できずPendingのままの）ジョブを1件だけ再開する。
+fn cmd_run(_args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
+    Ok(Some(dispatch_next(ctx)))
 }
 
 fn cmd_queue(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
@@ -224,12 +234,12 @@ pub(crate) fn spawn(
         .with_description("チャット・ファイル送信・印刷ジョブキューの操作")
         .with_command(
             Command::new("job")
-                .about("印刷ジョブをキューに追加する（内容はスペースを含んでよい）")
+                .about("印刷ジョブをキューに追加し、その場で配信を試みる（内容はスペースを含んでよい）")
                 .arg(Arg::new("content").required(true).num_args(1..)),
             cmd_job,
         )
         .with_command(
-            Command::new("run").about("キューの先頭にあるPendingジョブを1件だけ配信する"),
+            Command::new("run").about("止まっている(Pendingの)先頭ジョブを1件だけ再開する"),
             cmd_run,
         )
         .with_command(

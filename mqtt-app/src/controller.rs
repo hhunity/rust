@@ -283,8 +283,8 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
     );
     say(&printer, "chat <文章> でメッセージを送れます（例: chat こんにちは）");
     say(&printer, "send <宛先の名前> <ファイルパス> でファイルを送れます（例: send device1 ./photo.png）");
-    say(&printer, "job <内容> で印刷ジョブをキューに追加します（例: job print A4x3）。自動では配信されません");
-    say(&printer, "run でキューの先頭にあるジョブを1件だけ配信します。queue/status/cancel/retry/clearで管理できます");
+    say(&printer, "job <内容> で印刷ジョブを追加し、その場で配信します（例: job print A4x3）");
+    say(&printer, "run で止まっている(配信できなかった)先頭のジョブを1件だけ再開します。queue/status/cancel/retry/clearで管理できます");
     say(&printer, "help で使えるコマンドの一覧を表示します");
 
     // connection.iter() は「ブローカーから届いたイベントを1つずつ返してくれる、
