@@ -230,11 +230,11 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
         queue.clone(),
     );
 
-    // 標準入力（キーボード入力）を読み取り、チャット・`/send`・`/job`・`/queue`・`/cancel`を
-    // 処理する専用スレッドを立てる。中身は[`crate::stdin_commands`]にまとめてあり、ここでは
-    // 必要な状態を渡すだけ。渡した後もこの関数（メインループ側）で引き続き使うものは
-    // .clone()で複製を渡している（所有権を渡してしまうと、後ろで使えなくなるため）。
-    crate::stdin_commands::spawn(
+    // 標準入力（キーボード入力）を読み取り、チャット・send・job・queueなどのコマンドを
+    // 処理する専用スレッドを立てる。現在は`reedline-repl-rs`版（[`crate::repl_commands`]）を
+    // 使っている。元の自作パーサ版に戻したい場合は、下の呼び出しを
+    // `crate::stdin_commands::spawn(...)`に差し替えるだけでよい（引数の形は同じ）。
+    crate::repl_commands::spawn(
         client.clone(),
         name.clone(),
         topic.clone(),

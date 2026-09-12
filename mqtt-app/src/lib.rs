@@ -105,5 +105,7 @@ mod job_queue;
 mod job_worker;
 pub mod messages;
 pub mod mqtt_log;
+mod repl_commands;
 pub mod seq;
+#[allow(dead_code)] // reedline-repl-rs版(repl_commands)に切り替え済み。元へ戻す用に残してある
 mod stdin_commands;
