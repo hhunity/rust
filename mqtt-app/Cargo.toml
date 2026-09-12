@@ -1,0 +1,42 @@
+[package]
+name = "mqtt-app"
+version = "0.1.0"
+edition = "2021"
+
+# C++でいうと、この[package]セクションはプロジェクト名やバージョンを書く場所で、
+# 下の[[bin]]は「このプロジェクトから実行ファイルを何本作るか」の設定です。
+# CMakeでいう add_executable(mqtt-server src/bin/mqtt-server.rs) を
+# 2回書いているようなものだと思ってください。
+#
+# Cargo（Rustのビルドツール）は、src/bin/ の下に置いた .rs ファイルを
+# 自動的に「同名の実行ファイル」として認識するので、実は下の[[bin]]は
+# 省略しても同じ結果になります（分かりやすさのために明示しています）。
+
+[[bin]]
+name = "mqtt-server"
+path = "src/bin/mqtt-server.rs"
+
+[[bin]]
+name = "mqtt-client"
+path = "src/bin/mqtt-client.rs"
+
+[dependencies]
+# rumqttd: MQTTブローカー（サーバー）本体。mqtt-serverだけが使う
+rumqttd = "0.20"
+# rumqttc: MQTTクライアント。mqtt-server（パソコン役）・mqtt-client（マイコン役）の両方が使う
+rumqttc = "0.25"
+# serde/serde_json: C++でいうところの、構造体をJSON文字列に変換するnlohmann::jsonのような
+# ライブラリ。#[derive(Serialize, Deserialize)] を構造体に付けるだけで、変換コードを
+# 自動生成してくれる（C++でいうリフレクションが無い代わりに、マクロでコード生成する）
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# log/env_logger: C++でいう spdlog のようなログ出力の仕組み。`log`はログ出力用の
+# 共通インターフェース（マクロ）だけを提供する薄いクレートで、実際に画面へ出力する
+# 処理は`env_logger`が担当する（環境変数`RUST_LOG`でログの詳しさを制御できる）。
+log = "0.4"
+env_logger = "0.11"
+# clap: コマンドライン引数を解析するクレート。C++でいう`CLI11`や`boost::program_options`、
+# `getopt_long`に相当します。`--port 1883`のような「名前付き引数」を、構造体1つに
+# `#[derive(Parser)]`を付けるだけで解析できるようにしてくれます（順番を気にせず、
+# 好きな引数だけを指定できる）。
+clap = { version = "4", features = ["derive"] }
