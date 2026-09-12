@@ -7,8 +7,8 @@ set -ex
 POKY_BRANCH="${POKY_BRANCH:-scarthgap}"
 
 git clone -b "${POKY_BRANCH}" https://git.yoctoproject.org/poky /workspace/qemu-swupdate/poky
-git clone https://github.com/openembedded/meta-openembedded /workspace/qemu-swupdate/meta-openembedded
-git clone https://github.com/sbabic/meta-swupdate /workspace/qemu-swupdate/meta-swupdate
+git clone -b "${POKY_BRANCH}" https://github.com/openembedded/meta-openembedded /workspace/qemu-swupdate/meta-openembedded
+git clone -b "${POKY_BRANCH}" https://github.com/sbabic/meta-swupdate /workspace/qemu-swupdate/meta-swupdate
 
 cd /workspace/qemu-swupdate
 source poky/oe-init-build-env build

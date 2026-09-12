@@ -15,9 +15,13 @@ set -eux
 : "${MACHINE:?}"
 : "${IMAGE:?}"
 
+POKY_VERSION="${POKY_VERSION:-scarthgap}"
+
 cd "$WORKSPACE"
 if [ ! -d meta-swupdate ]; then
-	git clone https://github.com/sbabic/meta-swupdate.git
+	# pokyのブランチ(LAYERSERIES_COMPAT)と合わせないと
+	# 「not compatible with the core layer」で失敗するため、必ず-bを指定する
+	git clone -b "${POKY_VERSION}" https://github.com/sbabic/meta-swupdate.git
 fi
 
 cd "$WORKSPACE/$MACHINE-$IMAGE-rootfs"
