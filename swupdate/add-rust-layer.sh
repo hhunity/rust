@@ -17,6 +17,12 @@
 #
 # 注意: build_setupを再実行するたびにレイヤーがリセットされるため、
 # 毎回このスクリプトも再実行が必要(add-swupdate-layer.shと同じ)。
+#
+# オフライン環境での動作について: add-swupdate-layer.shと同じ理由で、
+# ${WORKSPACE}/meta-lts-mixins はDockerfile.agilex7-dev経由なら
+# docker build時(ネットあり)にyocto-agilex7-fetch.shが既にcloneして
+# イメージに焼き込み済みのため、ここでのgit cloneは実際にはスキップされ、
+# オフラインで問題なく動く。
 set -eux
 
 : "${WORKSPACE:?build_setup前提のWORKSPACE変数が未設定。先に <machine>-<image>-build.sh をsourceしてください}"

@@ -189,9 +189,11 @@ bitbake_image
 ```
 
 `swupdate/add-swupdate-layer.sh` がやること:
-- `meta-swupdate`(https://github.com/sbabic/meta-swupdate)をclone
+- `meta-swupdate`(https://github.com/sbabic/meta-swupdate)を、無ければclone(**後述の通りDockerイメージ経由なら既に存在するのでネット不要**)
 - `bitbake-layers add-layer` でレイヤー追加(`meta-openembedded/meta-oe`は`build_setup`で既に追加済みなので依存関係もOK)
 - `IMAGE_INSTALL:append = " swupdate swupdate-www"` を`conf/site.conf`に追記
+
+**オフラインでも動く理由**: このスクリプトのgit cloneは「`${WORKSPACE}/meta-swupdate`が無ければ」実行される。`Dockerfile.agilex7-dev`経由で使う場合、そのディレクトリは`docker build`時(ネットあり)に`yocto-agilex7-fetch.sh`が既にcloneしてイメージに焼き込み済みのため、オフラインの実機/コンテナ内で`add-swupdate-layer.sh`を実行してもgit cloneは実際には走らずスキップされる。`add-rust-layer.sh`も同じ仕組み。
 
 ### 注意: `build_setup`を再実行するたびにレイヤー追加をやり直す必要がある
 
