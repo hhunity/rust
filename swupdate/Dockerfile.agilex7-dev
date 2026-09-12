@@ -1,0 +1,100 @@
+# Agilex 7 + SWUpdate 検討用の統合開発イメージ(Ubuntu 22.04ベース)。
+# doc/Dockerfile.ml-gpuと同じ「Dockerイメージごと転送する」方式。
+# ネット接続のあるWindows Docker Desktop側でbuildし、docker save/loadでオフライン機へ
+# 転送する想定。
+#
+# 含まれるもの:
+#   1. SWUpdate単体(apt) … sw-description/.swu作成の練習(README「Stage 0」)
+#   2. poky + meta-swupdate を qemux86-64 向けにビルド済み … A/B更新のQEMUデモ(「Stage A」)
+#   3. gsrd-socfpga(+meta-swupdate, meta-lts-mixins[rust]レイヤー) … Agilex 7向け
+#      ソース一式をフェッチ済み(未ビルド)
+#   4. rustup(cargo) + cargo-bitbake … 独自Rustアプリの開発・レシピ生成用
+#      (meta-lts-mixinsはbitbake側のRustクロスツールチェーン用で別物。詳細はREADME
+#      「GSRDに独自アプリケーションを含める」参照)
+#
+# 使い方(Windows Docker Desktop側。ネット接続あり。事前にDisk image sizeを
+# 十分広げておくこと。合計で数十GB規模になる):
+#   docker build -f swupdate/Dockerfile.agilex7-dev -t agilex7-dev:latest swupdate/
+#   docker save agilex7-dev:latest | gzip > agilex7-dev.tar.gz
+#
+# (USB等でオフライン機へ転送後)
+#   docker load < agilex7-dev.tar.gz
+#
+# QEMUデモを動かす場合はネットワーク・KVM系の権限が要るため、実行時に以下を付与する:
+#   docker run --rm -it --cap-add=NET_ADMIN --device /dev/net/tun \
+#     --device /dev/kvm \
+#     agilex7-dev:latest bash
+# (/dev/kvmが無い/使えない環境ではKVMアクセラレーションなしで動く。--deviceの行を外せばよい)
+#
+# 実機のシリアルコンソール(UART、picocom)を使う場合は、対象のUSBシリアルデバイスも渡す:
+#   docker run --rm -it --device /dev/ttyUSB0 agilex7-dev:latest bash
+#   (コンテナ内で: picocom -b 115200 /dev/ttyUSB0)
+#
+# NOTE: JTAG経由のFPGA書き込み/デバッグ(USB-Blaster II等)は本イメージの対象外。
+# 通常はWindows側のQuartus Programmerを使う方が確実(ドライバの都合上、コンテナ内での
+# USB-Blaster利用は別途検討が必要)。
+#
+# コンテナ内での各練習の入り方:
+#   Stage 0 (SWUpdate単体):  README「Stage 0」の手順をそのまま実行(swupdateはインストール済み)
+#   Stage A (QEMU A/Bデモ):  cd /workspace/qemu-swupdate/build && source ../poky/oe-init-build-env . && runqemu qemux86-64 nographic
+#   Stage 1 (Agilex7本番):   cd /workspace/gsrd-socfpga && source ./agilex7_dk_si_agf014ea-gsrd-build.sh && build_setup && ../add-swupdate-layer.sh && ../add-rust-layer.sh && bitbake_image
+#   独自Rustアプリの開発:     cargo build(通常のRust開発)/ cargo bitbake(レシピ自動生成。README参照)
+#
+# NOTE: gsrd-socfpga部分はソースのフェッチのみ済ませてあり、実ビルド(bitbake_image)は
+# コンテナ起動後に手動で行う(フルビルドまでイメージに焼き込むとサイズ・ビルド時間が
+# 非現実的になるため)。QEMU部分(Stage A)は比較的軽量なのでビルドまで完了させている。
+# このDockerfile全体はまだ docker build を最後まで走らせての動作確認をしていない。
+# 初回はWindows側で実行し、エラーが出ないか確認すること。
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- 1. ビルドホスト用パッケージ(doc/yocto-urls-jammy.txtと同じ一式) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      gawk wget git diffstat unzip texinfo build-essential chrpath socat cpio \
+      python3 python3-pip python3-pexpect xz-utils debianutils iputils-ping \
+      python3-git python3-jinja2 python3-subunit zstd liblz4-tool lz4 file \
+      locales libacl1 ca-certificates \
+      iproute2 \
+    && locale-gen en_US.UTF-8 \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- 1.5. 対話的な開発作業用ツール(sw-description編集、実機デプロイ、デバッグ等) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      vim nano less curl \
+      openssh-client rsync \
+      gdb-multiarch \
+      picocom \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
+
+# --- 2. SWUpdate単体(Stage 0練習用) ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      swupdate swupdate-www \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# --- 3. poky + meta-swupdate を qemux86-64 向けにビルド(Stage A練習用) ---
+COPY qemu-swupdate-build.sh /usr/local/bin/qemu-swupdate-build.sh
+RUN chmod +x /usr/local/bin/qemu-swupdate-build.sh \
+    && /usr/local/bin/qemu-swupdate-build.sh
+
+# --- 4. gsrd-socfpga + meta-swupdate/meta-lts-mixinsレイヤー(Agilex7本番。フェッチのみ) ---
+COPY yocto-agilex7-fetch.sh /usr/local/bin/yocto-agilex7-fetch.sh
+COPY add-swupdate-layer.sh /workspace/add-swupdate-layer.sh
+COPY add-rust-layer.sh /workspace/add-rust-layer.sh
+RUN chmod +x /usr/local/bin/yocto-agilex7-fetch.sh /workspace/add-swupdate-layer.sh /workspace/add-rust-layer.sh \
+    && /usr/local/bin/yocto-agilex7-fetch.sh
+
+# --- 5. Rust(rustup)+ cargo-bitbake(独自アプリの開発・レシピ生成用。ホスト側ツール) ---
+ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo PATH=/opt/cargo/bin:$PATH
+RUN wget -q https://sh.rustup.rs -O /tmp/rustup-init.sh \
+    && sh /tmp/rustup-init.sh -y --default-toolchain stable --profile minimal \
+    && rm /tmp/rustup-init.sh \
+    && cargo install cargo-bitbake
+
+WORKDIR /workspace
+CMD ["/bin/bash"]
