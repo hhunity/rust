@@ -30,6 +30,20 @@ pub enum JobStatus {
     Failed,
 }
 
+impl JobStatus {
+    /// `/queue`の絞り込み・`/status`表示用に、コマンドライン文字列からの変換をここに集約する。
+    /// 大文字小文字は問わない（`Pending`でも`pending`でもよい）。
+    pub fn parse(s: &str) -> Option<JobStatus> {
+        match s.to_ascii_lowercase().as_str() {
+            "pending" => Some(JobStatus::Pending),
+            "dispatched" => Some(JobStatus::Dispatched),
+            "done" => Some(JobStatus::Done),
+            "failed" => Some(JobStatus::Failed),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct QueuedJob {
     pub id: String,
@@ -95,6 +109,11 @@ impl JobQueue {
         self.state.lock().unwrap().jobs.iter().cloned().collect()
     }
 
+    /// IDを指定して1件だけ取得する（`/status`用）。無ければ`None`。
+    pub fn get(&self, id: &str) -> Option<QueuedJob> {
+        self.state.lock().unwrap().jobs.iter().find(|j| j.id == id).cloned()
+    }
+
     /// Pending状態のジョブだけをキューから取り消せる。既に配信中/完了/失敗のジョブは
     /// 今さら止める手段が無いので取り消せない（`false`を返す）。
     pub fn cancel(&self, id: &str) -> bool {
@@ -133,6 +152,36 @@ impl JobQueue {
 
     pub fn mark_failed(&self, id: &str) {
         self.update_status(id, JobStatus::Failed);
+    }
+
+    /// Failed状態のジョブをPendingへ戻し、キューの中の元の位置（＝投入した順番）から
+    /// もう一度処理させる。Failed以外（Pending/Dispatched/Done）は対象外で`false`を返す
+    /// （Pendingは既に順番待ち中、Dispatched/Doneを今さら差し戻す意味が無いため）。
+    pub fn retry(&self, id: &str) -> bool {
+        let mut guard = self.state.lock().unwrap();
+        let Some(job) = guard.jobs.iter_mut().find(|j| j.id == id) else {
+            return false;
+        };
+        if job.status != JobStatus::Failed {
+            return false;
+        }
+        job.status = JobStatus::Pending;
+        self.save_locked(&guard.jobs);
+        self.ready.notify_one();
+        true
+    }
+
+    /// Done/Failedになったジョブ（＝もう動かない履歴）をキューから取り除く。
+    /// 削除した件数を返す。実行中(Pending/Dispatched)のジョブには触れない。
+    pub fn clear_finished(&self) -> usize {
+        let mut guard = self.state.lock().unwrap();
+        let before = guard.jobs.len();
+        guard.jobs.retain(|j| matches!(j.status, JobStatus::Pending | JobStatus::Dispatched));
+        let removed = before - guard.jobs.len();
+        if removed > 0 {
+            self.save_locked(&guard.jobs);
+        }
+        removed
     }
 
     fn update_status(&self, id: &str, status: JobStatus) {

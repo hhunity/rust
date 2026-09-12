@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rumqttc::{Client, QoS};
 
 use crate::controller::PendingOffers;
-use crate::job_queue::JobQueue;
+use crate::job_queue::{JobQueue, JobStatus};
 use crate::messages::{CmdMsg, OfferMsg};
 use crate::mqtt_log;
 use crate::seq::{next_seq, ControllerSeqState};
@@ -71,15 +71,48 @@ pub(crate) fn spawn(
                 continue;
             }
 
-            // "/queue": キューにある全ジョブと状態の一覧を表示する
-            if line == "/queue" {
-                let jobs = queue.list();
+            // "/queue [状態]": キューにある全ジョブの一覧を表示する。状態
+            // （pending/dispatched/done/failed、大文字小文字問わず）を付けるとその状態だけに絞れる。
+            if line == "/queue" || line.starts_with("/queue ") {
+                let filter = line.strip_prefix("/queue").unwrap().trim();
+                let status_filter = if filter.is_empty() {
+                    None
+                } else {
+                    match JobStatus::parse(filter) {
+                        Some(s) => Some(s),
+                        None => {
+                            println!(
+                                "[system] 使い方: /queue [pending|dispatched|done|failed]（状態を省略すると全件表示）"
+                            );
+                            continue;
+                        }
+                    }
+                };
+                let jobs: Vec<_> = queue
+                    .list()
+                    .into_iter()
+                    .filter(|j| status_filter.is_none_or(|s| j.status == s))
+                    .collect();
                 if jobs.is_empty() {
-                    println!("[system] キューは空です");
+                    println!("[system] 該当するジョブはありません");
                 } else {
                     for job in &jobs {
                         println!("[system] {} [{:?}] {}", job.id, job.status, job.content);
                     }
+                }
+                continue;
+            }
+
+            // "/status ジョブID": 指定した1件だけの状態を表示する
+            if line == "/status" || line.starts_with("/status ") {
+                let id = line.strip_prefix("/status").unwrap().trim();
+                if id.is_empty() {
+                    println!("[system] 使い方: /status <ジョブID>");
+                    continue;
+                }
+                match queue.get(id) {
+                    Some(job) => println!("[system] {} [{:?}] {}", job.id, job.status, job.content),
+                    None => println!("[system] ジョブ{id}は見つかりません"),
                 }
                 continue;
             }
@@ -96,6 +129,28 @@ pub(crate) fn spawn(
                 } else {
                     println!("[system] ジョブ{id}は取り消せません（存在しないか、既に配信中/完了済みです）");
                 }
+                continue;
+            }
+
+            // "/retry ジョブID": 失敗(Failed)したジョブをもう一度Pendingへ戻す
+            if line == "/retry" || line.starts_with("/retry ") {
+                let id = line.strip_prefix("/retry").unwrap().trim();
+                if id.is_empty() {
+                    println!("[system] 使い方: /retry <ジョブID>");
+                    continue;
+                }
+                if queue.retry(id) {
+                    println!("[system] ジョブ{id}をPendingへ戻しました。再度配信されます");
+                } else {
+                    println!("[system] ジョブ{id}は再実行できません（存在しないか、Failed状態ではありません）");
+                }
+                continue;
+            }
+
+            // "/clear": 完了(Done)・失敗(Failed)のジョブをキューから削除し、履歴を片付ける
+            if line == "/clear" {
+                let removed = queue.clear_finished();
+                println!("[system] 完了/失敗済みのジョブを{removed}件削除しました");
                 continue;
             }
 
