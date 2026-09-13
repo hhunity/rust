@@ -60,8 +60,9 @@ fn joined_arg(args: &ArgMatches, name: &str) -> String {
         .join(" ")
 }
 
-/// キューの先頭にあるPendingジョブを1件処理する（`job`・`run`の両方から呼ばれる共通処理）。
-fn dispatch_next(ctx: &Context) -> String {
+/// ジョブを1件処理する（`job`・`run`の両方から呼ばれる共通処理）。`id`が`Some`なら
+/// そのジョブを名指しで、`None`ならキューの先頭にあるPendingジョブを処理する。
+fn dispatch(ctx: &Context, id: Option<&str>) -> String {
     let all_cmd_topic = format!("{}/NCMD/all", ctx.topic);
     job_dispatch::run_one(
         &ctx.client,
@@ -71,6 +72,7 @@ fn dispatch_next(ctx: &Context) -> String {
         &ctx.inflight,
         &ctx.seq,
         &ctx.queue,
+        id,
     )
 }
 
@@ -79,13 +81,18 @@ fn dispatch_next(ctx: &Context) -> String {
 /// 再開させるのが[`cmd_run`]の役目）。
 fn cmd_job(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
     let id = ctx.queue.enqueue(joined_arg(&args, "content"));
-    let result = dispatch_next(ctx);
+    // ここは名指し(Some(&id))ではなくNone(先頭のPendingを処理)のまま。キューは厳密に
+    // 投入順で処理する設計なので、自分より前に止まっているジョブがあればそちらが
+    // 優先されるべきで、今追加した自分を横入りさせるべきではないため。
+    let result = dispatch(ctx, None);
     Ok(Some(format!("ジョブ{id}をキューに追加しました。{result}")))
 }
 
-/// キューの先頭で止まっている（配信できずPendingのままの）ジョブを1件だけ再開する。
-fn cmd_run(_args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
-    Ok(Some(dispatch_next(ctx)))
+/// 止まっている（配信できずPendingのままの）ジョブを再開する。IDを指定すればそのジョブを
+/// 名指しで、省略すればキューの先頭にあるPendingジョブを1件だけ処理する。
+fn cmd_run(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
+    let id = args.get_one::<String>("id").map(String::as_str);
+    Ok(Some(dispatch(ctx, id)))
 }
 
 fn cmd_queue(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
@@ -239,7 +246,9 @@ pub(crate) fn spawn(
             cmd_job,
         )
         .with_command(
-            Command::new("run").about("止まっている(Pendingの)先頭ジョブを1件だけ再開する"),
+            Command::new("run")
+                .about("止まっている(Pendingの)ジョブを再開する（IDを省略すると先頭の1件）")
+                .arg(Arg::new("id").required(false)),
             cmd_run,
         )
         .with_command(

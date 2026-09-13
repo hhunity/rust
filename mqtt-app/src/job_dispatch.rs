@@ -8,8 +8,9 @@
 //! - `job`コマンド（[`crate::repl_commands::cmd_job`]）: キューに積んだ直後、その場で
 //!   1回だけ配信を試みる。宛先が誰もオンラインでない等の理由で配信できなければ、
 //!   ジョブはPendingのまま「止まった」状態になる。
-//! - `run`コマンド（[`crate::repl_commands::cmd_run`]）: キューの先頭で止まっている
-//!   （＝配信できずPendingのままの）ジョブを、後から手動で再開する。
+//! - `run`コマンド（[`crate::repl_commands::cmd_run`]）: 止まっている（＝配信できず
+//!   Pendingのままの）ジョブを、後から手動で再開する。IDを指定すればそのジョブを
+//!   名指しで、省略すればキューの先頭にあるPendingジョブを処理する。
 //!
 //! 起動時にファイルから引き継いだ未処理ジョブは、誰かが`job`か`run`を打つまで
 //! 配信されない（勝手に印刷が始まると困る、という要望に合わせている）。
@@ -25,7 +26,7 @@ use std::time::{Duration, Instant};
 use rumqttc::{Client, QoS};
 
 use crate::controller::{InFlightJob, InFlightState, Roster};
-use crate::job_queue::JobQueue;
+use crate::job_queue::{JobQueue, JobStatus};
 use crate::messages::{CmdMsg, JobMsg};
 use crate::mqtt_log;
 use crate::seq::{next_seq, ControllerSeqState};
@@ -33,10 +34,14 @@ use crate::seq::{next_seq, ControllerSeqState};
 /// ジョブを送ってから、完了報告が来ないマイコンを「失敗」と判断するまでの待ち時間。
 const JOB_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// キューの先頭にあるPendingジョブを1件処理する。結果を人間向けの1メッセージとして返す
+/// ジョブを1件処理する。結果を人間向けの1メッセージとして返す
 /// （呼び出し元の`job`・`run`コマンドがそのままREPLの応答として表示する）。
 ///
-/// - キューにPendingジョブが無ければ、何もせずその旨を返す。
+/// `id`が`Some`なら、そのIDのジョブを名指しで処理する（Pending以外の状態なら開始できない
+/// 旨を返す）。`None`ならキューの先頭にあるPendingジョブを処理する（`run`を引数無しで
+/// 呼んだときの、これまで通りの挙動）。
+///
+/// - 対象のPendingジョブが無ければ、何もせずその旨を返す。
 /// - 宛先にできるマイコンが1台もオンラインでなければ、配信はせずその旨を返す
 ///   （以前のように「誰か来るまで待つ」ことはしない。呼び出し元をブロックしない設計にしている）。
 #[allow(clippy::too_many_arguments)]
@@ -48,9 +53,25 @@ pub(crate) fn run_one(
     inflight: &InFlightState,
     seq: &ControllerSeqState,
     queue: &JobQueue,
+    id: Option<&str>,
 ) -> String {
-    let Some(job) = queue.peek_next_pending() else {
-        return "キューに未処理のジョブはありません".to_string();
+    let job = match id {
+        Some(id) => match queue.get(id) {
+            Some(job) if job.status == JobStatus::Pending => job,
+            Some(job) => {
+                return format!(
+                    "ジョブ{id}は現在{:?}状態のため開始できません（Pendingのジョブのみ開始できます）",
+                    job.status
+                )
+            }
+            None => return format!("ジョブ{id}は見つかりません"),
+        },
+        None => {
+            let Some(job) = queue.peek_next_pending() else {
+                return "キューに未処理のジョブはありません".to_string();
+            };
+            job
+        }
     };
 
     let targets: HashSet<String> = roster
