@@ -379,9 +379,13 @@ clear             # 完了・失敗済みのジョブをキューから削除し
 - 配信後、一定時間（デフォルト10秒）応答が無いマイコンがいた場合は`failed`にして結果を返す
   （自動リトライはしない。やり直したければ`retry`してから`run`する）
 
-マイコン役は、ジョブを受け取ると（このサンプルでは実際の印刷は行わず）1秒待ってから完了報告を
-返す、という簡易的な処理をします。実機では、この「1秒待つ」部分を実際の印刷やモーター制御など
-の処理に置き換えることになります。
+マイコン役は、ジョブを受け取ると（このサンプルでは実際の印刷は行わず）処理を5段階に分けて
+1秒かけて進め、1段階終わるたびに途中経過（`job_progress`、進捗率20%刻み）を、全段階終わったら
+完了報告（`job_done`）を返す、という簡易的な処理をします（`src/device.rs`の`handle_job`関数）。
+パソコン役はこの途中経過を受け取ると`[system] ジョブ<ID>: <マイコン名>が<N>%完了`と表示します
+（`src/controller.rs`の`handle_job_progress`関数。ジョブの完了判定自体には影響しない、単なる
+表示用の報告）。実機では、この「1秒かけて5段階」の部分を、実際の印刷やモーター制御の進捗に
+置き換えることになります。
 
 ## ログ出力（MQTTのpublish/受信を確認する）
 
@@ -457,8 +461,8 @@ cargo doc --no-deps --document-private-items --open
 ```
 
 生成されたドキュメントのトップページから`messages`モジュールへ進むと、`OfferMsg`・`AckMsg`・
-`ReceivedMsg`・`BirthDeathMsg`・`PresenceMsg`・`JobMsg`・`DoneMsg`という、MQTT上でやり取りする全メッセージの
-一覧（各フィールドの説明コメント込み）が見られます。
+`ReceivedMsg`・`ProgressMsg`・`BirthDeathMsg`・`PresenceMsg`・`JobMsg`・`DoneMsg`という、
+MQTT上でやり取りする全メッセージの一覧（各フィールドの説明コメント込み）が見られます。
 
 ## トピック構造とseq番号（Sparkplug Bを参考にした設計）
 
@@ -541,6 +545,7 @@ publishする必要があるため、`all`という実在の名前を約束事�
 | `<topic>/NDEATH/<名前>` | （包まず`BirthDeathMsg`そのまま） | マイコン → 見ている全員 | `{"seq"}` |
 | `<topic>/NDATA/<名前>` | `"file_ack"` | マイコン → 見ている全員 | `{"type":"file_ack","id","host","port","seq"}` |
 | `<topic>/NDATA/<名前>` | `"file_received"` | マイコン → 見ている全員 | `{"type":"file_received","id","status","size","seq"}`（`status`は`"ok"`か`"failed"`） |
+| `<topic>/NDATA/<名前>` | `"job_progress"` | マイコン → 見ている全員 | `{"type":"job_progress","id","percent","seq"}`（`percent`は0〜100。完了ではなく途中経過） |
 | `<topic>/NDATA/<名前>` | `"job_done"` | マイコン → 見ている全員 | `{"type":"job_done","id","seq"}` |
 | `<topic>/STATE/<名前>` | （包まず`PresenceMsg`そのまま） | パソコン → 見ている全員 | `{"status","seq"}`（`status`は`"online"`か`"offline"`） |
 
@@ -578,7 +583,7 @@ MQTT接続そのものの切断エラーとして気付きました）。`"onlin
 **重要な注意点**: seqカウンタは**トピックごとに別々**に用意しています（`ControllerSeqState`・
 `DeviceSeqState`構造体）。理由は、あるトピックを購読している人には、そこに流れるメッセージが
 （中身の種類が違っても）必ず全部見えるはずだからです。例えば`<topic>/NDATA/<名前>`には
-ACK・RECEIVED・DONEの3種類が乗りますが、同じトピックである以上、観測者からは必ず全部見えるので、
+ACK・RECEIVED・PROGRESS・DONEの4種類が乗りますが、同じトピックである以上、観測者からは必ず全部見えるので、
 1本のカウンタ（`data_counter`/`data_tracker`）でまとめて欠落検知できます（これはSparkplug B
 本家が「ノード1つにつきseqは1系列」としている設計にも合わせた形です）。逆に、別のトピックへ
 流れるメッセージ（例えば他のマイコン宛ての`<topic>/NCMD/他の名前`）は見えないので、それを
@@ -589,7 +594,7 @@ ACK・RECEIVED・DONEの3種類が乗りますが、同じトピックである�
 具体的には5系統のトピックに対応する5系統のカウンタ/トラッカーを用意しています。
 `<topic>/NCMD/<名前>`（OFFER。宛先ごとに別トピック）、`<topic>/NCMD/all`（JOB。全マイコン
 共通の1トピック）、`<topic>/NBIRTH/<名前>`＋`<topic>/NDEATH/<名前>`（接続・切断。合わせて1本の
-カウンタ/トラッカーで管理）、`<topic>/NDATA/<名前>`（ACK・RECEIVED・DONEをまとめた1トピック）、
+カウンタ/トラッカーで管理）、`<topic>/NDATA/<名前>`（ACK・RECEIVED・PROGRESS・DONEをまとめた1トピック）、
 `<topic>/STATE/<名前>`（パソコンの生死。パソコンごとに別トピック）の5つです。パソコン役は
 「OFFER・JOBを送る側」「各マイコンのNBIRTH/NDEATH/NDATAを受け取る側」「自分のSTATEを送る側」、
 マイコン役はちょうど逆の組み合わせ（＋各パソコンのSTATEを受け取る側）なので、

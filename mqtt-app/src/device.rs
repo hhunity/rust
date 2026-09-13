@@ -12,9 +12,12 @@ use std::time::Duration;
 
 use rumqttc::{Client, QoS};
 
-use crate::messages::{AckMsg, DataMsg, DoneMsg, JobMsg, OfferMsg};
+use crate::messages::{AckMsg, DataMsg, DoneMsg, JobMsg, OfferMsg, ProgressMsg};
 use crate::mqtt_log;
 use crate::seq::{check_seq, next_seq, DeviceSeqState};
+
+/// ジョブ処理を何段階に分けて進捗報告するか（ダミー処理を均等に分割しているだけ）。
+const PROGRESS_STEPS: u32 = 5;
 
 /// `OfferMsg`（`CmdMsg::FileOffer`の中身）を受け取ったときの処理。
 ///
@@ -57,7 +60,9 @@ pub fn handle_offer(
 
 /// `JobMsg`（`CmdMsg::Job`の中身）を受け取ったときの処理。
 /// 実際の機器では「内容」に応じて印刷やモーター制御などをするところだが、このサンプルでは
-/// 少し待つ(sleep)ことで「処理に時間がかかる」ことだけを再現し、終わったら完了報告を返す。
+/// 少し待つ(sleep)ことで「処理に時間がかかる」ことだけを再現する。処理を[`PROGRESS_STEPS`]
+/// 段階に分け、1段階終わるたびに`JobProgress`（進捗報告）をpublishし、全段階終わったら
+/// 完了報告(`JobDone`)を返す。
 pub fn handle_job(job: JobMsg, client: &Client, data_topic: &str, seq: &DeviceSeqState) {
     check_seq(&job.from, job.seq, &seq.job_tracker, false);
 
@@ -70,7 +75,17 @@ pub fn handle_job(job: JobMsg, client: &Client, data_topic: &str, seq: &DeviceSe
     // 処理は時間がかかりうるので別スレッドに任せ、その間もMQTTの受信ループは止めない
     // （C++でいう、重い処理をstd::threadに逃がしてメインのイベントループを止めない、という定石です）
     thread::spawn(move || {
-        thread::sleep(Duration::from_secs(1)); // ここが実際の印刷・処理にあたる部分（今はダミー）
+        for step in 1..=PROGRESS_STEPS {
+            thread::sleep(Duration::from_millis(1000 / PROGRESS_STEPS as u64)); // ここが実際の印刷・処理にあたる部分（今はダミー）
+            let percent = (step * 100 / PROGRESS_STEPS) as u8;
+            println!("[system] ジョブ{}: {percent}% 完了", job.id);
+            let progress =
+                ProgressMsg { id: job.id.clone(), percent, seq: next_seq(&data_counter) };
+            let payload = serde_json::to_vec(&DataMsg::JobProgress(progress)).unwrap();
+            mqtt_log::log_publish(&data_topic, &payload);
+            client.publish(&data_topic, QoS::AtLeastOnce, false, payload).unwrap();
+        }
+
         println!("[system] ジョブ{}の処理が完了しました", job.id);
         let done = DoneMsg { id: job.id, seq: next_seq(&data_counter) };
         let payload = serde_json::to_vec(&DataMsg::JobDone(done)).unwrap();

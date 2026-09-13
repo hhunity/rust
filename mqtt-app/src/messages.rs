@@ -67,6 +67,7 @@ pub enum CmdMsg {
 pub enum DataMsg {
     FileAck(AckMsg),
     FileReceived(ReceivedMsg),
+    JobProgress(ProgressMsg),
     JobDone(DoneMsg),
 }
 
@@ -134,6 +135,16 @@ pub struct ReceivedMsg {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DoneMsg {
     pub id: String,
+    pub seq: u64,
+}
+
+/// `DataMsg::JobProgress`の中身。ジョブ処理中に定期的に送る途中経過の報告。
+/// 完了(`DoneMsg`)とは別物で、これが届いても処理が終わったことにはならない。
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ProgressMsg {
+    pub id: String,
+    /// 0〜100の進捗率。
+    pub percent: u8,
     pub seq: u64,
 }
 

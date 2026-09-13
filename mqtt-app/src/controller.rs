@@ -19,7 +19,7 @@ use reedline_repl_rs::reedline::ExternalPrinter;
 use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 
 use crate::job_queue::JobQueue;
-use crate::messages::{AckMsg, BirthDeathMsg, DataMsg, DoneMsg, PresenceMsg, ReceivedMsg};
+use crate::messages::{AckMsg, BirthDeathMsg, DataMsg, DoneMsg, PresenceMsg, ProgressMsg, ReceivedMsg};
 use crate::mqtt_log;
 use crate::seq::{check_seq, next_seq, ControllerSeqState};
 
@@ -180,6 +180,15 @@ fn handle_death(who: &str, roster: &Roster, printer: &ExternalPrinter<String>) {
     }
 }
 
+/// `ProgressMsg`（`DataMsg::JobProgress`の中身）を受け取ったときの処理。
+/// 完了ではなく途中経過の報告なので、表示するだけで`inflight`の完了待ちには影響しない。
+fn handle_job_progress(who: &str, progress: ProgressMsg, printer: &ExternalPrinter<String>) {
+    say(
+        printer,
+        format!("[system] ジョブ{}: {who}が{}%完了", progress.id, progress.percent),
+    );
+}
+
 /// `DoneMsg`（`DataMsg::JobDone`の中身）を受け取ったときの処理。
 fn handle_job_done(who: &str, done: DoneMsg, inflight: &InFlightState) {
     let guard = inflight.lock().unwrap();
@@ -319,6 +328,7 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
                     let seq_num = match &data {
                         DataMsg::FileAck(a) => a.seq,
                         DataMsg::FileReceived(r) => r.seq,
+                        DataMsg::JobProgress(p) => p.seq,
                         DataMsg::JobDone(d) => d.seq,
                     };
                     check_seq(who, seq_num, &seq.data_tracker, false);
@@ -326,6 +336,7 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
                     match data {
                         DataMsg::FileAck(a) => handle_ack(a, &pending_offers, &printer),
                         DataMsg::FileReceived(r) => handle_file_received(who, r, &printer),
+                        DataMsg::JobProgress(p) => handle_job_progress(who, p, &printer),
                         DataMsg::JobDone(d) => handle_job_done(who, d, &inflight),
                     }
                 } else if publish.topic == topic {
