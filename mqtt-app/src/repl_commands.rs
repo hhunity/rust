@@ -19,8 +19,9 @@
 //! - `job`はキューに積んだうえで、その場で配信を試みる。ただし起動時にファイルから
 //!   引き継いだ未処理ジョブは、自動では配信されない（勝手に印刷が始まると困るため）。
 //!   宛先が誰もオンラインでない等の理由で配信できなかったジョブはPendingのまま
-//!   「止まった」状態になり、`run`コマンドを打つたびに、キューの先頭で止まっている
-//!   ジョブが1件だけ再開される（詳しくは[`crate::job_dispatch`]参照）。
+//!   「止まった」状態になり、`run`コマンドで再開できる。`run`はIDを指定すればその
+//!   ジョブだけを、省略すればPendingジョブを先頭から順に進められるだけ全部処理する
+//!   （詳しくは[`crate::job_dispatch`]参照）。
 
 use std::fs;
 use std::path::PathBuf;
@@ -88,11 +89,25 @@ fn cmd_job(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
     Ok(Some(format!("ジョブ{id}をキューに追加しました。{result}")))
 }
 
-/// 止まっている（配信できずPendingのままの）ジョブを再開する。IDを指定すればそのジョブを
-/// 名指しで、省略すればキューの先頭にあるPendingジョブを1件だけ処理する。
+/// 止まっている（配信できずPendingのままの）ジョブを再開する。IDを指定すればそのジョブ
+/// だけを名指しで再開し、省略すればPendingジョブを先頭から順に進められるだけ全部処理する。
 fn cmd_run(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
-    let id = args.get_one::<String>("id").map(String::as_str);
-    Ok(Some(dispatch(ctx, id)))
+    match args.get_one::<String>("id") {
+        Some(id) => Ok(Some(dispatch(ctx, Some(id)))),
+        None => {
+            let all_cmd_topic = format!("{}/NCMD/all", ctx.topic);
+            let messages = job_dispatch::run_all(
+                &ctx.client,
+                &ctx.name,
+                &all_cmd_topic,
+                &ctx.roster,
+                &ctx.inflight,
+                &ctx.seq,
+                &ctx.queue,
+            );
+            Ok(Some(messages.join("\n")))
+        }
+    }
 }
 
 fn cmd_queue(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
@@ -247,7 +262,7 @@ pub(crate) fn spawn(
         )
         .with_command(
             Command::new("run")
-                .about("止まっている(Pendingの)ジョブを再開する（IDを省略すると先頭の1件）")
+                .about("止まっている(Pendingの)ジョブを再開する（IDを省略すると先頭から全件）")
                 .arg(Arg::new("id").required(false)),
             cmd_run,
         )

@@ -9,8 +9,9 @@
 //!   1回だけ配信を試みる。宛先が誰もオンラインでない等の理由で配信できなければ、
 //!   ジョブはPendingのまま「止まった」状態になる。
 //! - `run`コマンド（[`crate::repl_commands::cmd_run`]）: 止まっている（＝配信できず
-//!   Pendingのままの）ジョブを、後から手動で再開する。IDを指定すればそのジョブを
-//!   名指しで、省略すればキューの先頭にあるPendingジョブを処理する。
+//!   Pendingのままの）ジョブを、後から手動で再開する。IDを指定すればそのジョブだけを
+//!   名指しで（[`run_one`]）、省略すればPendingジョブを先頭から順に進められるだけ
+//!   全部（[`run_all`]）処理する。
 //!
 //! 起動時にファイルから引き継いだ未処理ジョブは、誰かが`job`か`run`を打つまで
 //! 配信されない（勝手に印刷が始まると困る、という要望に合わせている）。
@@ -133,4 +134,43 @@ pub(crate) fn run_one(
             job.id
         )
     }
+}
+
+/// 止まっている（Pendingの）ジョブを、先頭から順に進められるだけ全部処理する
+/// （`run`をIDを指定せずに呼んだときの動作。以前は先頭の1件だけだったが、
+/// 「Pendingジョブ全部を順に開始してほしい」という要望に合わせて全件処理に変えた）。
+///
+/// 1件ごとの結果メッセージのリストを返す。ある1件が「宛先が誰もオンラインでない」
+/// 理由で配信できなかった場合、そのジョブはPendingのまま状態が変わらないので、
+/// それ以上ループを続けても同じ結果を繰り返すだけになる。そのため、その時点で
+/// 打ち切る（残りのPendingジョブは次に`run`を呼んだときのために残る）。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_all(
+    client: &Client,
+    name: &str,
+    all_cmd_topic: &str,
+    roster: &Roster,
+    inflight: &InFlightState,
+    seq: &ControllerSeqState,
+    queue: &JobQueue,
+) -> Vec<String> {
+    let mut messages = Vec::new();
+    loop {
+        let Some(job) = queue.peek_next_pending() else {
+            break;
+        };
+        messages.push(run_one(client, name, all_cmd_topic, roster, inflight, seq, queue, Some(&job.id)));
+
+        // run_oneが「宛先が誰もオンラインでない」と判断した場合、job.idはPendingのまま
+        // 変化していない。同じ状況を繰り返すだけなので、ここで打ち切る。
+        let still_pending =
+            queue.get(&job.id).map(|j| j.status == JobStatus::Pending).unwrap_or(false);
+        if still_pending {
+            break;
+        }
+    }
+    if messages.is_empty() {
+        messages.push("キューに未処理のジョブはありません".to_string());
+    }
+    messages
 }
