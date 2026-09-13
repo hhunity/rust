@@ -19,7 +19,10 @@ use reedline_repl_rs::reedline::ExternalPrinter;
 use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 
 use crate::job_queue::JobQueue;
-use crate::messages::{AckMsg, BirthDeathMsg, DataMsg, DoneMsg, PresenceMsg, ProgressMsg, ReceivedMsg};
+use crate::messages::{
+    AbortedMsg, AckMsg, BirthDeathMsg, Capabilities, DataMsg, DeviceState, DoneMsg, PresenceMsg,
+    ProgressMsg, ReceivedMsg, StatusMsg,
+};
 use crate::mqtt_log;
 use crate::seq::{check_seq, next_seq, ControllerSeqState};
 
@@ -43,18 +46,36 @@ pub(crate) type PendingOffers = Arc<Mutex<HashMap<String, PathBuf>>>;
 /// 「マイコンの名前 → 今オンラインかどうか」を覚えておく辞書（ジョブ配信先の名簿）。
 pub(crate) type Roster = Arc<Mutex<HashMap<String, bool>>>;
 
-/// 今まさに配信中で、全員の完了報告を待っているジョブの情報。
+/// 「マイコンの名前 → 最後に受け取った稼働状態」を覚えておく辞書。
+/// `NSTATUS`をワイルドカード購読して埋める。ジョブを配信する瞬間、ここが`Idle`の
+/// マイコンだけを宛先にする（`Printing`/`Error`中のマイコンには送らない）。
+pub(crate) type DeviceStatuses = Arc<Mutex<HashMap<String, DeviceState>>>;
+
+/// 「マイコンの名前 → NBIRTHで教えてもらった印刷能力」を覚えておく辞書。
+pub(crate) type DeviceCapabilities = Arc<Mutex<HashMap<String, Capabilities>>>;
+
+/// 今まさに配信中のジョブについて、各マイコンからの報告を待っている状態。
 ///
-/// `mpsc::Sender<String>`の`mpsc`は"multi-producer, single-consumer"（送る側は複数いても
+/// `mpsc::Sender<JobSignal>`の`mpsc`は"multi-producer, single-consumer"（送る側は複数いても
 /// いいが、受け取る側は1つだけ）というチャンネルです。C++でいう、スレッドセーフな
 /// キュー＋条件変数（`std::condition_variable`）をセットにしたようなもの、と考えると
 /// イメージしやすいです。「別スレッドから`tx.send(値)`で投げ込み、こちら側は
 /// `rx.recv()`（またはタイムアウト付きの`rx.recv_timeout()`）で待ち受ける」という使い方をします。
 pub(crate) struct InFlightJob {
     pub(crate) id: String,
-    pub(crate) tx: mpsc::Sender<String>,
+    pub(crate) tx: mpsc::Sender<JobSignal>,
 }
 pub(crate) type InFlightState = Arc<Mutex<Option<InFlightJob>>>;
+
+/// 配信中のジョブについて、マイコンから届きうる2種類の報告。
+pub(crate) enum JobSignal {
+    /// 指定したマイコンが完了報告(`JobDone`)を送ってきた。
+    Done(String),
+    /// どこか1台が中断報告(`JobAborted`)を送ってきた。ジョブ全体を「中断された」扱いにし、
+    /// 他のマイコンからの完了報告を待つのはやめる（中断は利用者の意図的な操作なので、
+    /// 残り台数分の完了を待たずに即座に確定させてよい、という判断）。
+    Aborted,
+}
 
 /// 受信したpublishのトピックが `<topic>/<message_type>/<名前>` の形なら、その`<名前>`部分を
 /// 取り出す。`message_type`が一致しなければ`None`。
@@ -162,14 +183,36 @@ fn handle_file_received(who: &str, received: ReceivedMsg, printer: &ExternalPrin
     }
 }
 
-/// `NBIRTH`（マイコンが接続した）を受け取ったときの処理。
-fn handle_birth(who: &str, roster: &Roster, printer: &ExternalPrinter<String>) {
+/// `NBIRTH`（マイコンが接続した）を受け取ったときの処理。`capabilities`が積まれていれば、
+/// あわせて能力情報の名簿にも記録する（切断済みの`NDEATH`には積まれていないので触らない）。
+fn handle_birth(
+    who: &str,
+    capabilities: Option<Capabilities>,
+    roster: &Roster,
+    device_capabilities: &DeviceCapabilities,
+    printer: &ExternalPrinter<String>,
+) {
     // insert()の戻り値は「上書きする前にそこにあった古い値」（無ければNone）。
     // C++のstd::mapならoperator[]で代入した後、以前の値は捨てられてしまいますが、
     // Rustのinsert()は古い値を捨てずにOption<V>として返してくれるので、
     // 「新規追加だったか、既存の更新だったか」をこの1行で判定できます。
-    if roster.lock().unwrap().insert(who.to_string(), true) != Some(true) {
-        say(printer, format!("[system] {who} がオンラインになりました"));
+    let is_new = roster.lock().unwrap().insert(who.to_string(), true) != Some(true);
+    match capabilities {
+        Some(caps) => {
+            if is_new {
+                say(
+                    printer,
+                    format!(
+                        "[system] {who} がオンラインになりました（機種: {} / 対応用紙: {}）",
+                        caps.model,
+                        caps.paper_sizes.join(",")
+                    ),
+                );
+            }
+            device_capabilities.lock().unwrap().insert(who.to_string(), caps);
+        }
+        None if is_new => say(printer, format!("[system] {who} がオンラインになりました")),
+        None => {}
     }
 }
 
@@ -195,9 +238,39 @@ fn handle_job_done(who: &str, done: DoneMsg, inflight: &InFlightState) {
     if let Some(job) = guard.as_ref() {
         if job.id == done.id {
             // send()が失敗するのは、待っている側が既にタイムアウトして諦めた後くらいなので無視してよい
-            let _ = job.tx.send(who.to_string());
+            let _ = job.tx.send(JobSignal::Done(who.to_string()));
         }
     }
+}
+
+/// `AbortedMsg`（`DataMsg::JobAborted`の中身）を受け取ったときの処理。
+/// 中断は利用者の意図的な操作なので、他のマイコンからの完了報告を待たずに
+/// ジョブ全体を即座に「中断された」扱いにする（詳しくは[`JobSignal::Aborted`]参照）。
+fn handle_job_aborted(aborted: AbortedMsg, inflight: &InFlightState) {
+    let guard = inflight.lock().unwrap();
+    if let Some(job) = guard.as_ref() {
+        if job.id == aborted.id {
+            let _ = job.tx.send(JobSignal::Aborted);
+        }
+    }
+}
+
+/// `StatusMsg`（`<topic>/NSTATUS/<名前>`の中身）を受け取ったときの処理。
+/// 名簿を更新して、状態が変わったことを表示する（このメッセージ自体が「状態が
+/// 変わったので送り直した」ものなので、届いた時点で常に変化とみなしてよい）。
+fn handle_status(
+    who: &str,
+    status: StatusMsg,
+    device_statuses: &DeviceStatuses,
+    printer: &ExternalPrinter<String>,
+) {
+    let label = match &status.state {
+        DeviceState::Idle => "アイドル".to_string(),
+        DeviceState::Printing { job_id } => format!("印字中(ジョブ{job_id})"),
+        DeviceState::Error { reason } => format!("エラー({reason})"),
+    };
+    device_statuses.lock().unwrap().insert(who.to_string(), status.state);
+    say(printer, format!("[system] {who}の状態: {label}"));
 }
 
 /// パソコン役としてブローカーへ接続し、チャット・`/send`・`/job`を受け付け続ける。
@@ -208,6 +281,7 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
     let birth_wildcard = format!("{topic}/NBIRTH/+");
     let death_wildcard = format!("{topic}/NDEATH/+");
     let data_wildcard = format!("{topic}/NDATA/+");
+    let status_wildcard = format!("{topic}/NSTATUS/+");
     // パソコン自身の生死を知らせるSTATEトピック（Sparkplug Bの`STATE`そのもの）。
     let state_topic = format!("{topic}/STATE/{name}");
 
@@ -233,6 +307,7 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
     client.subscribe(&birth_wildcard, QoS::AtLeastOnce).unwrap();
     client.subscribe(&death_wildcard, QoS::AtLeastOnce).unwrap();
     client.subscribe(&data_wildcard, QoS::AtLeastOnce).unwrap();
+    client.subscribe(&status_wildcard, QoS::AtLeastOnce).unwrap();
 
     // 接続できたらすぐ自分のstateトピックに"online"をretain付きでpublishする
     let online = serde_json::to_vec(&PresenceMsg {
@@ -247,6 +322,8 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
 
     let pending_offers: PendingOffers = Arc::new(Mutex::new(HashMap::new()));
     let roster: Roster = Arc::new(Mutex::new(HashMap::new()));
+    let device_statuses: DeviceStatuses = Arc::new(Mutex::new(HashMap::new()));
+    let device_capabilities: DeviceCapabilities = Arc::new(Mutex::new(HashMap::new()));
     let inflight: InFlightState = Arc::new(Mutex::new(None));
 
     // 印刷ジョブの永続化キュー。ファイルに前回までの未処理ジョブが残っていれば、
@@ -272,6 +349,8 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
         topic.clone(),
         Arc::clone(&pending_offers),
         Arc::clone(&roster),
+        Arc::clone(&device_statuses),
+        Arc::clone(&device_capabilities),
         Arc::clone(&inflight),
         seq.clone(),
         queue,
@@ -294,6 +373,7 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
     say(&printer, "send <宛先の名前> <ファイルパス> でファイルを送れます（例: send device1 ./photo.png）");
     say(&printer, "job <内容> で印刷ジョブを追加し、その場で配信します（例: job print A4x3）");
     say(&printer, "run で止まっている(配信できなかった)ジョブを先頭から全部再開します（run <ID>で1件だけも可）。queue/status/cancel/retry/clearで管理できます");
+    say(&printer, "abort <ID> で処理中(Dispatched)のジョブを中断します");
     say(&printer, "help で使えるコマンドの一覧を表示します");
 
     // connection.iter() は「ブローカーから届いたイベントを1つずつ返してくれる、
@@ -312,13 +392,19 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
                     // NBIRTHは接続のたびにseqが0から数え直される（再起動すればカウンタは
                     // リセットされる）のが正常な動きなので、is_birth=trueで警告を抑える。
                     check_seq(who, msg.seq, &seq.presence_tracker, true);
-                    handle_birth(who, &roster, &printer);
+                    handle_birth(who, msg.capabilities, &roster, &device_capabilities, &printer);
                 } else if let Some(who) = parse_named_topic(&publish.topic, &topic, "NDEATH") {
                     let Ok(msg) = serde_json::from_str::<BirthDeathMsg>(&text) else {
                         continue;
                     };
                     check_seq(who, msg.seq, &seq.presence_tracker, false);
                     handle_death(who, &roster, &printer);
+                } else if let Some(who) = parse_named_topic(&publish.topic, &topic, "NSTATUS") {
+                    let Ok(status) = serde_json::from_str::<StatusMsg>(&text) else {
+                        continue;
+                    };
+                    check_seq(who, status.seq, &seq.status_tracker, false);
+                    handle_status(who, status, &device_statuses, &printer);
                 } else if let Some(who) = parse_named_topic(&publish.topic, &topic, "NDATA") {
                     let Ok(data) = serde_json::from_str::<DataMsg>(&text) else {
                         continue;
@@ -329,6 +415,7 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
                         DataMsg::FileAck(a) => a.seq,
                         DataMsg::FileReceived(r) => r.seq,
                         DataMsg::JobProgress(p) => p.seq,
+                        DataMsg::JobAborted(a) => a.seq,
                         DataMsg::JobDone(d) => d.seq,
                     };
                     check_seq(who, seq_num, &seq.data_tracker, false);
@@ -337,6 +424,7 @@ pub fn run(name: String, host: String, port: u16, topic: String, queue_file: Str
                         DataMsg::FileAck(a) => handle_ack(a, &pending_offers, &printer),
                         DataMsg::FileReceived(r) => handle_file_received(who, r, &printer),
                         DataMsg::JobProgress(p) => handle_job_progress(who, p, &printer),
+                        DataMsg::JobAborted(a) => handle_job_aborted(a, &inflight),
                         DataMsg::JobDone(d) => handle_job_done(who, d, &inflight),
                     }
                 } else if publish.topic == topic {

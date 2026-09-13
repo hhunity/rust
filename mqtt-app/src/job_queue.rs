@@ -31,6 +31,8 @@ pub enum JobStatus {
     Done,
     /// タイムアウトするまでに完了報告が揃わなかった。
     Failed,
+    /// `abort`コマンドにより、完了する前に中断された。
+    Aborted,
 }
 
 impl JobStatus {
@@ -42,6 +44,7 @@ impl JobStatus {
             "dispatched" => Some(JobStatus::Dispatched),
             "done" => Some(JobStatus::Done),
             "failed" => Some(JobStatus::Failed),
+            "aborted" => Some(JobStatus::Aborted),
             _ => None,
         }
     }
@@ -145,6 +148,10 @@ impl JobQueue {
 
     pub fn mark_failed(&self, id: &str) {
         self.update_status(id, JobStatus::Failed);
+    }
+
+    pub fn mark_aborted(&self, id: &str) {
+        self.update_status(id, JobStatus::Aborted);
     }
 
     /// Failed状態のジョブをPendingへ戻し、キューの中の元の位置（＝投入した順番）から

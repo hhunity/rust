@@ -19,9 +19,9 @@ use std::time::Duration;
 // 自体が持っている仕組みです）。
 use rumqttc::{Client, Event, LastWill, MqttOptions, Packet, QoS};
 
-use mqtt_app::device::{handle_job, handle_offer};
+use mqtt_app::device::{handle_abort, handle_job, handle_offer, new_current_job_state, publish_status};
 use mqtt_app::file_transfer::{detect_local_ip, run_file_listener};
-use mqtt_app::messages::{BirthDeathMsg, CmdMsg, PresenceMsg};
+use mqtt_app::messages::{BirthDeathMsg, Capabilities, CmdMsg, DeviceState, PresenceMsg};
 use mqtt_app::seq::{check_seq, next_seq, DeviceSeqState};
 
 use clap::Parser;
@@ -64,11 +64,19 @@ struct Args {
     /// ログの出力先ファイル（省略時は標準エラー出力）
     #[arg(short, long)]
     log_file: Option<String>,
+
+    /// このマイコンの機種名（NBIRTHに載せて、パソコン役に知らせる）
+    #[arg(long, default_value = "generic-printer")]
+    model: String,
+
+    /// このマイコンが対応する用紙サイズ（カンマ区切り。例: A4,A6,Label-100x150）
+    #[arg(long, default_value = "A4,A6", value_delimiter = ',')]
+    paper_sizes: Vec<String>,
 }
 
 fn main() {
     let args = Args::parse();
-    let Args { name, listen_port, host, port, topic, log_file } = args;
+    let Args { name, listen_port, host, port, topic, log_file, model, paper_sizes } = args;
 
     // ログ出力の仕組み（`log`クレート）を初期化する。環境変数`RUST_LOG=mqtt_app=info`を
     // 指定して起動すると、MQTTのpublish/受信ログが見えるようになる
@@ -80,19 +88,23 @@ fn main() {
     // もし動的な環境で使うなら、OFFERを受け取るたびに調べ直す設計に戻す必要がある）。
     let my_host = detect_local_ip(&host, port);
 
-    // このマイコンが関わるトピックは5つ。Sparkplug B本家のmessage_type名
+    // このマイコンが関わるトピックは6つ。Sparkplug B本家のmessage_type名
     // （`spBv1.0/<group_id>/<message_type>/<edge_node_id>`）をそのまま使っている。
     //   - cmd_topic      … ホスト（パソコン）から自分だけに向けた命令（NCMD）。中身はOFFER
-    //   - all_cmd_topic  … 全マイコンへの一斉配信命令（NCMD、宛先名は特別な"all"）。中身はJOB
+    //   - all_cmd_topic  … 全マイコンへの一斉配信命令（NCMD、宛先名は特別な"all"）。中身はJOB/ABORT
     //   - birth_topic    … 自分の接続通知（NBIRTH）。起動時に1回だけretain publishする
     //   - death_topic    … 自分の切断通知（NDEATH）。Last Willとしてあらかじめ登録しておく
-    //   - data_topic     … 自分からの継続的な報告（NDATA）。ACK・RECEIVED・DONEをまとめて1本
+    //   - data_topic     … 自分からの継続的な報告（NDATA）。ACK・RECEIVED・PROGRESS・ABORTED・DONE
+    //   - status_topic   … 自分の稼働状態（NSTATUS）。アイドル/印字中/エラーが変わるたびに送り直す
     // 名前は常に「そのトピックがどのマイコンのものか」だけを表す（詳しくはREADME参照）。
     let cmd_topic = format!("{topic}/NCMD/{name}");
     let all_cmd_topic = format!("{topic}/NCMD/all");
     let birth_topic = format!("{topic}/NBIRTH/{name}");
     let death_topic = format!("{topic}/NDEATH/{name}");
     let data_topic = format!("{topic}/NDATA/{name}");
+    // 自分の稼働状態（アイドル/印字中/エラー）。接続の有無とは別枠で、状態が変わるたびに
+    // retain付きで送り直す。
+    let status_topic = format!("{topic}/NSTATUS/{name}");
     // パソコン（ホストアプリケーション）自身の生死を知らせるSTATEトピックは、
     // 複数のパソコンがいる可能性もあるのでワイルドカードでまとめて購読する。
     let state_wildcard = format!("{topic}/STATE/+");
@@ -109,7 +121,7 @@ fn main() {
     // 言えずに落ちた場合でも、ブローカーが自動でNDEATHを配ってくれる。
     // retain=trueにしているので、後からNDEATHをワイルドカード購読したパソコン役にも
     // 「切断した」という事実がすぐ届く。
-    let death = serde_json::to_vec(&BirthDeathMsg { seq: 0 }).unwrap();
+    let death = serde_json::to_vec(&BirthDeathMsg { seq: 0, capabilities: None }).unwrap();
     mqttoptions.set_last_will(LastWill::new(&death_topic, death, QoS::AtLeastOnce, true));
 
     // --- ③ 実際にMQTTブローカー（サーバー）へ接続する ---
@@ -121,10 +133,18 @@ fn main() {
     client.subscribe(&all_cmd_topic, QoS::AtLeastOnce).unwrap();
     client.subscribe(&state_wildcard, QoS::AtLeastOnce).unwrap();
 
-    // 接続できたらすぐ自分のNBIRTHをretain付きでpublishする
-    let birth = serde_json::to_vec(&BirthDeathMsg { seq: next_seq(&seq.presence_counter) }).unwrap();
+    // 接続できたらすぐ自分のNBIRTHをretain付きでpublishする（能力情報も一緒に載せる）
+    let birth = serde_json::to_vec(&BirthDeathMsg {
+        seq: next_seq(&seq.presence_counter),
+        capabilities: Some(Capabilities { model: model.clone(), paper_sizes: paper_sizes.clone() }),
+    })
+    .unwrap();
     mqtt_app::mqtt_log::log_publish(&birth_topic, &birth);
     client.publish(&birth_topic, QoS::AtLeastOnce, true, birth).unwrap();
+
+    // 起動直後は何も処理していないので、まずアイドル状態をretain付きでpublishしておく。
+    let current_job = new_current_job_state();
+    publish_status(&client, &status_topic, DeviceState::Idle, &seq.status_counter);
 
     // 起動時に一度だけ固定ポートでlistenを開始し、そのままプログラムが終わるまで
     // ファイル受信を待ち受け続ける（C++でいう、`bind()`＋`listen()`をここで1回だけ行うイメージ）。
@@ -155,7 +175,10 @@ fn main() {
                         CmdMsg::FileOffer(offer) => {
                             handle_offer(offer, &client, &data_topic, &my_host, listen_port, &seq)
                         }
-                        CmdMsg::Job(job) => handle_job(job, &client, &data_topic, &seq),
+                        CmdMsg::Job(job) => {
+                            handle_job(job, &client, &data_topic, &status_topic, &seq, &current_job)
+                        }
+                        CmdMsg::Abort(abort) => handle_abort(abort, &seq, &current_job),
                     }
                 } else if let Some(host_name) = parse_state_topic(&publish.topic, &topic) {
                     // パソコン（ホストアプリケーション）の生死通知。今は表示するだけだが、

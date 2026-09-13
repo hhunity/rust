@@ -22,9 +22,17 @@
 //!   「止まった」状態になり、`run`コマンドで再開できる。`run`はIDを指定すればその
 //!   ジョブだけを、省略すればPendingジョブを先頭から順に進められるだけ全部処理する
 //!   （詳しくは[`crate::job_dispatch`]参照）。
+//! - `job`・`run`の実際の配信・完了待ちは、コールバック自身の中ではなく**別スレッド**で
+//!   行っている。理由は、`abort`（処理中のジョブを中断するコマンド）を使えるようにする
+//!   ため。`reedline-repl-rs`は1行読んでコールバックを実行し終わるまで次の行を読まない
+//!   （＝コールバックが実行中の間、入力自体を受け付けない）ので、`job`/`run`が完了まで
+//!   その場でブロックし続けると、印字中に`abort`を打つこと自体ができなくなってしまう。
+//!   そのため`cmd_job`/`cmd_run`は「配信を始めた」ことだけをその場で返し、実際の待ち受けは
+//!   [`std::thread::spawn`]した別スレッドに任せて、結果が出たら[`PRINTER`]経由で後から表示する。
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -33,12 +41,17 @@ use reedline_repl_rs::reedline::ExternalPrinter;
 use reedline_repl_rs::{Repl, Result as ReplResult};
 use rumqttc::{Client, QoS};
 
-use crate::controller::{InFlightState, PendingOffers, Roster};
+use crate::controller::{DeviceCapabilities, DeviceStatuses, InFlightState, PendingOffers, Roster};
 use crate::job_dispatch;
 use crate::job_queue::{JobQueue, JobStatus};
 use crate::messages::{CmdMsg, OfferMsg};
 use crate::mqtt_log;
 use crate::seq::{next_seq, ControllerSeqState};
+
+/// `job`・`run`が結果を待つ間に別スレッドへ逃がすため、そのスレッドから状況を表示する
+/// のに使う`ExternalPrinter`。`Repl`本体を経由しないと取得できない値なので（`spawn`の
+/// 中で構築される）、いったんここに入れておいて`cmd_job`等から参照する。
+static PRINTER: OnceLock<ExternalPrinter<String>> = OnceLock::new();
 
 /// コールバック（関数ポインタ）に閉じ込められない、コマンド間で共有する状態一式。
 struct Context {
@@ -47,6 +60,8 @@ struct Context {
     topic: String,
     pending_offers: PendingOffers,
     roster: Roster,
+    device_statuses: DeviceStatuses,
+    device_capabilities: DeviceCapabilities,
     inflight: InFlightState,
     seq: ControllerSeqState,
     queue: JobQueue,
@@ -61,53 +76,116 @@ fn joined_arg(args: &ArgMatches, name: &str) -> String {
         .join(" ")
 }
 
-/// ジョブを1件処理する（`job`・`run`の両方から呼ばれる共通処理）。`id`が`Some`なら
-/// そのジョブを名指しで、`None`ならキューの先頭にあるPendingジョブを処理する。
-fn dispatch(ctx: &Context, id: Option<&str>) -> String {
-    let all_cmd_topic = format!("{}/NCMD/all", ctx.topic);
-    job_dispatch::run_one(
-        &ctx.client,
-        &ctx.name,
-        &all_cmd_topic,
-        &ctx.roster,
-        &ctx.inflight,
-        &ctx.seq,
-        &ctx.queue,
-        id,
-    )
+/// `job`・`run`本体の処理を、呼び出し元をブロックしない別スレッドで実行する。
+/// スレッドの中身（`work`）が返したメッセージは、完了時に[`PRINTER`]経由で表示される。
+fn spawn_dispatch(work: impl FnOnce() -> String + Send + 'static) {
+    thread::spawn(move || {
+        let result = work();
+        if let Some(printer) = PRINTER.get() {
+            let _ = printer.print(result);
+        }
+    });
 }
 
-/// キューに積んだうえで、その場で配信を試みる。宛先が誰もオンラインでない等の理由で
+/// キューに積んだうえで、その場で配信を試みる（実際の配信・完了待ちは別スレッドで行う。
+/// 詳しくはこのファイル冒頭のコメント参照）。宛先が誰もオンラインでない等の理由で
 /// 配信できなければ、ジョブはPendingのまま「止まった」状態になる（それを後から
 /// 再開させるのが[`cmd_run`]の役目）。
 fn cmd_job(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
     let id = ctx.queue.enqueue(joined_arg(&args, "content"));
-    // ここは名指し(Some(&id))ではなくNone(先頭のPendingを処理)のまま。キューは厳密に
-    // 投入順で処理する設計なので、自分より前に止まっているジョブがあればそちらが
-    // 優先されるべきで、今追加した自分を横入りさせるべきではないため。
-    let result = dispatch(ctx, None);
-    Ok(Some(format!("ジョブ{id}をキューに追加しました。{result}")))
+    let client = ctx.client.clone();
+    let name = ctx.name.clone();
+    let all_cmd_topic = format!("{}/NCMD/all", ctx.topic);
+    let roster = ctx.roster.clone();
+    let device_statuses = ctx.device_statuses.clone();
+    let inflight = ctx.inflight.clone();
+    let seq = ctx.seq.clone();
+    let queue = ctx.queue.clone();
+    spawn_dispatch(move || {
+        // ここは名指し(Some(&id))ではなくNone(先頭のPendingを処理)のまま。キューは厳密に
+        // 投入順で処理する設計なので、自分より前に止まっているジョブがあればそちらが
+        // 優先されるべきで、今追加した自分を横入りさせるべきではないため。
+        job_dispatch::run_one(
+            &client,
+            &name,
+            &all_cmd_topic,
+            &roster,
+            &device_statuses,
+            &inflight,
+            &seq,
+            &queue,
+            None,
+        )
+    });
+    Ok(Some(format!(
+        "ジョブ{id}をキューに追加し、配信を開始しました（結果は追って表示されます。queueでも確認できます）"
+    )))
 }
 
 /// 止まっている（配信できずPendingのままの）ジョブを再開する。IDを指定すればそのジョブ
 /// だけを名指しで再開し、省略すればPendingジョブを先頭から順に進められるだけ全部処理する。
+/// `job`同様、実際の処理は別スレッドで行い、その場ではすぐ返る。
 fn cmd_run(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
-    match args.get_one::<String>("id") {
-        Some(id) => Ok(Some(dispatch(ctx, Some(id)))),
+    let client = ctx.client.clone();
+    let name = ctx.name.clone();
+    let all_cmd_topic = format!("{}/NCMD/all", ctx.topic);
+    let roster = ctx.roster.clone();
+    let device_statuses = ctx.device_statuses.clone();
+    let inflight = ctx.inflight.clone();
+    let seq = ctx.seq.clone();
+    let queue = ctx.queue.clone();
+    match args.get_one::<String>("id").cloned() {
+        Some(id) => {
+            spawn_dispatch(move || {
+                job_dispatch::run_one(
+                    &client,
+                    &name,
+                    &all_cmd_topic,
+                    &roster,
+                    &device_statuses,
+                    &inflight,
+                    &seq,
+                    &queue,
+                    Some(&id),
+                )
+            });
+            Ok(Some("再開を開始しました（結果は追って表示されます）".to_string()))
+        }
         None => {
-            let all_cmd_topic = format!("{}/NCMD/all", ctx.topic);
-            let messages = job_dispatch::run_all(
-                &ctx.client,
-                &ctx.name,
-                &all_cmd_topic,
-                &ctx.roster,
-                &ctx.inflight,
-                &ctx.seq,
-                &ctx.queue,
-            );
-            Ok(Some(messages.join("\n")))
+            spawn_dispatch(move || {
+                job_dispatch::run_all(
+                    &client,
+                    &name,
+                    &all_cmd_topic,
+                    &roster,
+                    &device_statuses,
+                    &inflight,
+                    &seq,
+                    &queue,
+                )
+                .join("\n")
+            });
+            Ok(Some(
+                "止まっているジョブの再開を開始しました（結果は追って表示されます）".to_string(),
+            ))
         }
     }
+}
+
+/// 処理中(Dispatched)のジョブを中断させる。指示を送るだけなのでその場で結果が分かり、
+/// 別スレッドに逃がす必要はない（実際に止まったかどうかは、待っている`job`/`run`側の
+/// スレッドが後から表示する）。
+fn cmd_abort(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
+    let id = args.get_one::<String>("id").unwrap();
+    let all_cmd_topic = format!("{}/NCMD/all", ctx.topic);
+    Ok(Some(job_dispatch::abort(
+        &ctx.client,
+        &ctx.name,
+        &all_cmd_topic,
+        &ctx.seq,
+        &ctx.queue,
+        id,
+    )))
 }
 
 fn cmd_queue(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
@@ -117,7 +195,7 @@ fn cmd_queue(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> 
             Some(status) => Some(status),
             None => {
                 return Ok(Some(
-                    "使い方: queue [pending|dispatched|done|failed]".to_string(),
+                    "使い方: queue [pending|dispatched|done|failed|aborted]".to_string(),
                 ))
             }
         },
@@ -169,6 +247,33 @@ fn cmd_clear(_args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>>
     Ok(Some(format!(
         "完了/失敗済みのジョブを{removed}件削除しました"
     )))
+}
+
+/// オンラインなマイコンの一覧を、状態(idle/printing/error)と印刷能力つきで表示する。
+fn cmd_devices(_args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
+    let roster = ctx.roster.lock().unwrap();
+    if roster.is_empty() {
+        return Ok(Some("オンラインのマイコンはいません".to_string()));
+    }
+    let statuses = ctx.device_statuses.lock().unwrap();
+    let capabilities = ctx.device_capabilities.lock().unwrap();
+    let mut names: Vec<&String> = roster.keys().collect();
+    names.sort();
+    let lines: Vec<String> = names
+        .into_iter()
+        .map(|name| {
+            let status = statuses.get(name).map(|s| format!("{s:?}")).unwrap_or_else(|| "不明".to_string());
+            match capabilities.get(name) {
+                Some(caps) => format!(
+                    "{name} [{status}] 機種: {} / 対応用紙: {}",
+                    caps.model,
+                    caps.paper_sizes.join(",")
+                ),
+                None => format!("{name} [{status}]"),
+            }
+        })
+        .collect();
+    Ok(Some(lines.join("\n")))
 }
 
 fn cmd_send(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
@@ -226,9 +331,9 @@ fn cmd_chat(args: ArgMatches, ctx: &mut Context) -> ReplResult<Option<String>> {
 
 /// 標準入力を`reedline-repl-rs`のREPLとして受け付ける専用スレッドを立てる。
 /// この関数自体はスレッドを立てたらすぐ返るが、`Repl`（と、その内部の
-/// `ExternalPrinter`）はこの関数の中で先に組み立てる。呼び出し側は、戻り値の
-/// `ExternalPrinter`を`controller`のメインループなど他のスレッドにも渡すことで、
-/// それらの状況報告もプロンプトと衝突せずに表示できる（詳しくは
+/// `ExternalPrinter`）はこの関数の中で先に組み立てる。得られた`ExternalPrinter`は
+/// [`PRINTER`]に保存して`cmd_job`等の別スレッドからも使えるようにしつつ、戻り値としても
+/// 返して`controller`のメインループなど他のスレッドにも渡せるようにしている（詳しくは
 /// `controller.rs`の`say`ヘルパーのコメントも参照）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn(
@@ -237,6 +342,8 @@ pub(crate) fn spawn(
     topic: String,
     pending_offers: PendingOffers,
     roster: Roster,
+    device_statuses: DeviceStatuses,
+    device_capabilities: DeviceCapabilities,
     inflight: InFlightState,
     seq: ControllerSeqState,
     queue: JobQueue,
@@ -247,6 +354,8 @@ pub(crate) fn spawn(
         topic,
         pending_offers,
         roster,
+        device_statuses,
+        device_capabilities,
         inflight,
         seq,
         queue,
@@ -265,6 +374,12 @@ pub(crate) fn spawn(
                 .about("止まっている(Pendingの)ジョブを再開する（IDを省略すると先頭から全件）")
                 .arg(Arg::new("id").required(false)),
             cmd_run,
+        )
+        .with_command(
+            Command::new("abort")
+                .about("処理中(Dispatched)のジョブを中断する")
+                .arg(Arg::new("id").required(true)),
+            cmd_abort,
         )
         .with_command(
             Command::new("queue")
@@ -295,6 +410,10 @@ pub(crate) fn spawn(
             cmd_clear,
         )
         .with_command(
+            Command::new("devices").about("オンラインなマイコンの状態・印刷能力を一覧表示する"),
+            cmd_devices,
+        )
+        .with_command(
             Command::new("send")
                 .about("宛先のマイコンへファイル送信を申し出る")
                 .arg(Arg::new("to").required(true))
@@ -310,6 +429,7 @@ pub(crate) fn spawn(
         );
 
     let printer = repl.external_printer();
+    let _ = PRINTER.set(printer.clone());
     thread::spawn(move || {
         if let Err(e) = repl.run() {
             eprintln!("[system] コマンド入力ループが終了しました: {e}");

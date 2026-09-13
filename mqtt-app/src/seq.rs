@@ -122,6 +122,8 @@ pub struct ControllerSeqState {
     pub presence_tracker: SeqTracker,
     /// 各マイコンの`NDATA`（`<topic>/NDATA/<名前>`）の欠落検知用トラッカー
     pub data_tracker: SeqTracker,
+    /// 各マイコンの`NSTATUS`（`<topic>/NSTATUS/<名前>`）の欠落検知用トラッカー
+    pub status_tracker: SeqTracker,
     /// 自分（パソコン）自身の生死を知らせる`<topic>/STATE/<自分の名前>`のseqカウンタ
     pub state_counter: SeqCounter,
 }
@@ -138,6 +140,7 @@ impl ControllerSeqState {
             job_counter: new_counter(),
             presence_tracker: new_tracker(),
             data_tracker: new_tracker(),
+            status_tracker: new_tracker(),
             state_counter: new_counter(),
         }
     }
@@ -157,8 +160,10 @@ pub struct DeviceSeqState {
     /// あらかじめ内容を登録しておくだけで、実際の送信はブローカーが代理で行う）
     pub presence_counter: SeqCounter,
     /// 自分が送る`<topic>/NDATA/<自分の名前>`のseqカウンタ
-    /// （ACK・RECEIVED・DONEをまとめて、この1本のカウンタを使う）
+    /// （ACK・RECEIVED・PROGRESS・ABORTED・DONEをまとめて、この1本のカウンタを使う）
     pub data_counter: SeqCounter,
+    /// 自分が送る`<topic>/NSTATUS/<自分の名前>`のseqカウンタ（状態が変わるたびに使う）
+    pub status_counter: SeqCounter,
     /// パソコンの`<topic>/STATE/<パソコンの名前>`の欠落検知用トラッカー
     /// （パソコンの名前ごとに、最後に見たseqを覚えておく。将来複数パソコンが
     /// 居ても対応できるようにHashMapベースのトラッカーにしている）
@@ -172,6 +177,7 @@ impl DeviceSeqState {
             job_tracker: new_tracker(),
             presence_counter: new_counter(),
             data_counter: new_counter(),
+            status_counter: new_counter(),
             host_state_tracker: new_tracker(),
         }
     }

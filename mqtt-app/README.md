@@ -53,17 +53,25 @@ cargo run --bin mqtt-client
 |---|---|---|
 | `chat [--qos 0\|1\|2] <テキスト...>` | `<topic>`（`--qos`省略時はQoS1） | なし |
 | `send <宛先の名前> <ファイルパス>` | `<topic>/NCMD/<宛先の名前>`（`OfferMsg`） | `<topic>/NDATA/<宛先の名前>`から`file_ack`→（生TCPでファイル本体を送信した後）同じトピックから`file_received` |
-| `job <内容...>` | キューに追加し、その場で配信を試みる（下記「印刷ジョブキュー」参照） | 宛先マイコンの完了報告を待って結果を表示（最大10秒） |
-| `run [ジョブID]` | IDを指定すればそのジョブだけ、省略すれば止まっている(Pendingの)ジョブを先頭から全件再開 | ジョブごとに宛先マイコンの完了報告を待って結果を表示 |
-| `queue [状態]` | なし | キュー内のジョブ一覧を表示（`pending`/`dispatched`/`done`/`failed`を付けるとその状態だけに絞れる） |
+| `job <内容...>` | キューに追加し、その場で配信を試みる（下記「印刷ジョブキュー」参照） | 即座に「配信を開始した」旨を表示し、結果（完了/失敗/中断）は後から追って表示される |
+| `run [ジョブID]` | IDを指定すればそのジョブだけ、省略すれば止まっている(Pendingの)ジョブを先頭から全件再開 | `job`と同様、即座に返り、結果は後から追って表示される |
+| `abort <ジョブID>` | `<topic>/NCMD/all`（`AbortMsg`） | 処理中(Dispatched)のジョブを中断させる。宛先マイコンからの`job_aborted`を待つのは`job`/`run`側なので、この場では中断要求を送った旨だけ表示 |
+| `queue [状態]` | なし | キュー内のジョブ一覧を表示（`pending`/`dispatched`/`done`/`failed`/`aborted`を付けるとその状態だけに絞れる） |
 | `status <ジョブID>` | なし | 指定した1件のジョブの状態を表示 |
 | `cancel <ジョブID>` | なし | 未配信（Pending）のジョブをキューから取り消す |
 | `retry <ジョブID>` | なし | 失敗（Failed）したジョブをPendingへ戻し、再配信させる |
-| `clear` | なし | 完了（Done）・失敗（Failed）のジョブをキューから削除して履歴を片付ける |
+| `clear` | なし | 完了（Done）・失敗（Failed）・中断（Aborted）のジョブをキューから削除して履歴を片付ける |
+| `devices` | なし | オンラインなマイコンの状態（idle/printing/error）と印刷能力（機種・対応用紙）を一覧表示 |
 
-`send`・`job`に相当する処理は、マイコン側では**人間が打つコマンドではなく、パソコンから届いた
-`OFFER`/`JOB`メッセージへの自動応答**として行われます（`src/device.rs`の
-`handle_offer`・`handle_job`関数を参照）。
+`send`・`job`・`abort`に相当する処理は、マイコン側では**人間が打つコマンドではなく、パソコンから
+届いた`OFFER`/`JOB`/`ABORT`メッセージへの自動応答**として行われます（`src/device.rs`の
+`handle_offer`・`handle_job`・`handle_abort`関数を参照）。
+
+**`job`・`run`は即座に返る設計です**。以前は完了（または失敗）するまでコマンド自体がブロック
+していましたが、それだと印字中に`abort`を打つこと自体ができませんでした（`reedline-repl-rs`は
+1行読んでコールバックの実行が終わるまで次の行を読まないため）。今は配信・完了待ちを別スレッドに
+逃がし、`job`/`run`は「配信を開始した」旨だけをその場で返して、結果は後から画面に差し込まれる
+形にしています（詳しくは`src/repl_commands.rs`冒頭のコメント参照）。
 
 ### コマンド入力の実装について（`reedline-repl-rs`と、元の自作パーサ）
 
@@ -173,6 +181,9 @@ cargo run --bin mqtt-client -- --name device1 --listen-port 9101 --host 192.168.
 
 # 例（MQTT通信ログをファイルへ書き出す）
 RUST_LOG=mqtt_app=info cargo run --bin mqtt-client -- --name device1 --listen-port 9101 --log-file mqtt-client.log
+
+# 例（機種名・対応用紙サイズを指定。NBIRTHに載ってパソコン役の`devices`コマンドで見える）
+cargo run --bin mqtt-client -- --name device1 --listen-port 9101 --model LabelPro3000 --paper-sizes A4,Label-100x150
 ```
 
 | 引数 | 短縮形 | 必須/デフォルト |
@@ -183,6 +194,8 @@ RUST_LOG=mqtt_app=info cargo run --bin mqtt-client -- --name device1 --listen-po
 | `--port <PORT>` | `-p` | `1883` |
 | `--topic <TOPIC>` | `-t` | `chat` |
 | `--log-file <PATH>` | `-l` | （標準エラー出力） |
+| `--model <NAME>` | （無し） | `generic-printer` |
+| `--paper-sizes <CSV>` | （無し） | `A4,A6` |
 
 `--name`・`--listen-port`だけは必須で、指定し忘れると`clap`が「必須です」という
 エラーを表示して終了します（マイコン役は必ずファイル受信用のTCP待ち受けを行うため、
@@ -374,18 +387,40 @@ clear             # 完了・失敗済みのジョブをキューから削除し
 - マイコンは接続時に自分の`NBIRTH`トピック（`<topic>/NBIRTH/<名前>`）へ接続通知をpublishし、
   異常切断時にはLast Willで自動的に`NDEATH`（`<topic>/NDEATH/<名前>`）が配信される。パソコンは
   これらをワイルドカード購読して「今どのマイコンがオンラインか」を動的な名簿として持っている
-  （固定リストの設定は不要）。配信するマイコンの一覧は、実際に`job`・`run`した瞬間のこの
-  名簿から決まる
+  （固定リストの設定は不要）
+- **宛先はオンラインなだけでなく、稼働状態が`idle`のマイコンに限られる**（下記「マイコンの
+  稼働状態」参照）。印字中(`printing`)・エラー中(`error`)のマイコンには重ねて配信しない
 - 配信後、一定時間（デフォルト10秒）応答が無いマイコンがいた場合は`failed`にして結果を返す
   （自動リトライはしない。やり直したければ`retry`してから`run`する）
+- **`abort <ジョブID>`で、処理中(Dispatched)のジョブを中断できる**。宛先マイコンが実際に
+  処理を止めて`job_aborted`を返すと、そのジョブの状態は（`done`/`failed`とは別に）`aborted`
+  になる。中断は利用者の意図的な操作なので、他のマイコンからの完了報告を待たずに即座に
+  確定させる（複数マイコンへ一斉配信していた場合でも同様）
 
 マイコン役は、ジョブを受け取ると（このサンプルでは実際の印刷は行わず）処理を5段階に分けて
 1秒かけて進め、1段階終わるたびに途中経過（`job_progress`、進捗率20%刻み）を、全段階終わったら
 完了報告（`job_done`）を返す、という簡易的な処理をします（`src/device.rs`の`handle_job`関数）。
-パソコン役はこの途中経過を受け取ると`[system] ジョブ<ID>: <マイコン名>が<N>%完了`と表示します
+途中で`abort`（同じ`<topic>/NCMD/all`に乗る`AbortMsg`）を受け取り、それが今処理中のジョブと
+同じIDなら、その場で処理を打ち切って中断報告（`job_aborted`）を返します。
+パソコン役は途中経過を受け取ると`[system] ジョブ<ID>: <マイコン名>が<N>%完了`と表示します
 （`src/controller.rs`の`handle_job_progress`関数。ジョブの完了判定自体には影響しない、単なる
 表示用の報告）。実機では、この「1秒かけて5段階」の部分を、実際の印刷やモーター制御の進捗に
 置き換えることになります。
+
+### マイコンの稼働状態（`NSTATUS`）と印刷能力（`NBIRTH`）
+
+マイコンは接続の有無（`NBIRTH`/`NDEATH`）とは別枠で、今`idle`（何も処理していない）・
+`printing`（ジョブを処理中）・`error`（用紙切れ等の物理的な異常）のどれかを、
+`<topic>/NSTATUS/<名前>`へretain付きでpublishします（状態が変わるたびに送り直すので、
+このトピックには常に最新の1件だけが残ります）。パソコン役はこれをワイルドカード購読して
+名簿（`DeviceStatuses`）を持ち、`job`・`run`で配信する瞬間、オンラインかつ`idle`な
+マイコンだけを宛先にします（今はダミー処理なので`error`状態を実際に作り出す手段は
+用意していませんが、メッセージ形式・保持する名簿は実機での障害検知にそのまま使える
+想定で作ってあります）。
+
+`devices`コマンドで、今オンラインなマイコンの状態と、`NBIRTH`に載っている印刷能力
+（機種名・対応用紙サイズ。`mqtt-client`の`--model`/`--paper-sizes`引数で指定）を
+一覧表示できます。
 
 ## ログ出力（MQTTのpublish/受信を確認する）
 
@@ -438,9 +473,9 @@ mqtt-app/
     ├── broker.rs          … MQTTブローカーの起動（mqtt-serverだけが使う）
     ├── controller.rs      … パソコン役の指示出しロジック（mqtt-serverだけが使う）
     ├── file_transfer.rs   … マイコン役の生TCPファイル受信（mqtt-clientだけが使う）
-    ├── device.rs          … マイコン役のOFFER/JOB受信処理（mqtt-clientだけが使う）
+    ├── device.rs          … マイコン役のOFFER/JOB/ABORT受信処理・稼働状態publish（mqtt-clientだけが使う）
     ├── job_queue.rs        … 印刷ジョブの永続化キュー（mqtt-serverだけが使う）
-    ├── job_dispatch.rs     … runコマンドが呼ばれたときにjob_queueの先頭を1件配信する処理（mqtt-serverだけが使う）
+    ├── job_dispatch.rs     … job/runが呼ばれたときにジョブを配信・完了待ちする処理、abort指示の送信（mqtt-serverだけが使う）
     └── bin/
         ├── mqtt-server.rs … パソコン役の実行ファイルの入り口（main関数）
         └── mqtt-client.rs … マイコン役の実行ファイルの入り口（main関数）
@@ -479,7 +514,7 @@ Sparkplug Bには3種類の役割があり、**「MQTTブローカーに自分�
 |---|---|---|
 | **Edge Node** | MQTTに**自分で直接接続**し、自分の状態を自分で`NBIRTH`/`NDATA`/`NDEATH`としてpublishする。コマンド(`NCMD`)を受け取る側 | **マイコン**（`mqtt-client`が自分でブローカーへ接続し、自分の名前で報告している） |
 | **Device** | MQTT接続を**持たない**末端機器（Modbusのセンサーなど）。Edge Nodeが代わりに`DBIRTH`/`DDATA`を代理publishする | 本プロジェクトには無し（マイコンは全部自分でMQTT接続を持つので、代理publishされる存在はいない） |
-| **Host Application** | 全Edge Node/Deviceをワイルドカード購読して監視し、コマンドを出す「監督者」。自分の生死は専用の1本のトピック（`spBv1.0/STATE/<host_id>`）だけで知らせる | **パソコン**（`<topic>/NBIRTH/+`・`<topic>/NDEATH/+`・`<topic>/NDATA/+`で全マイコンを監視し、`NCMD`でOFFER/JOBの指示を出す。自分の生死は`<topic>/STATE/<自分の名前>`で知らせる） |
+| **Host Application** | 全Edge Node/Deviceをワイルドカード購読して監視し、コマンドを出す「監督者」。自分の生死は専用の1本のトピック（`spBv1.0/STATE/<host_id>`）だけで知らせる | **パソコン**（`<topic>/NBIRTH/+`・`<topic>/NDEATH/+`・`<topic>/NDATA/+`・`<topic>/NSTATUS/+`で全マイコンを監視し、`NCMD`でOFFER/JOB/ABORTの指示を出す。自分の生死は`<topic>/STATE/<自分の名前>`で知らせる） |
 
 「エッジ（現場に近い）」という一般的な語感からパソコンをEdge Nodeだと思ってしまいがちですが、
 Sparkplug Bでの判定基準はあくまで「MQTT接続を自分で持っているか」です。マイコンは自分で
@@ -512,14 +547,16 @@ Sparkplug B本家の名前をそのまま使っています（全マイコンへ
 
 - `<topic>/NCMD/<名前>` … ホスト（パソコン）が、名前のマイコンへ向けて送る命令。
   `OfferMsg`（ファイル送信の申し出）が乗る
-- `<topic>/NCMD/all` … ホストが、全マイコンへ一斉配信する命令。`JobMsg`が乗る
+- `<topic>/NCMD/all` … ホストが、全マイコンへ一斉配信する命令。`JobMsg`・`AbortMsg`が乗る
   （`"all"`は「全員」を表す特別な名前で、実在するマイコン名ではない）
 - `<topic>/NBIRTH/<名前>` … 名前のマイコンが接続した（起動した）ことの通知。
-  起動時に1回だけretainでpublishする
+  起動時に1回だけretainでpublishする（印刷能力`Capabilities`も一緒に載せる）
 - `<topic>/NDEATH/<名前>` … 名前のマイコンが切断した（終了した）ことの通知。
   Last Willとしてあらかじめ内容を登録しておき、実際の送信はブローカーが代理で行う
 - `<topic>/NDATA/<名前>` … 名前のマイコンからの、動作中の継続的な報告。
-  `AckMsg`・`ReceivedMsg`・`DoneMsg`の3種類がここに乗る
+  `AckMsg`・`ReceivedMsg`・`ProgressMsg`・`AbortedMsg`・`DoneMsg`の5種類がここに乗る
+- `<topic>/NSTATUS/<名前>` … 名前のマイコンの、今の稼働状態（idle/printing/error）。
+  状態が変わるたびにretainで送り直す。中身は`StatusMsg`
 - `<topic>/STATE/<名前>` … 名前のパソコン自身が、自分の生死を報告するデータ
   （Sparkplug Bの`STATE`そのもの）。中身は`PresenceMsg`
 
@@ -531,33 +568,38 @@ publishする必要があるため、`all`という実在の名前を約束事�
 あらかじめこれも購読させています（ネットワークでいうブロードキャストアドレスに近い発想です）。
 
 `NBIRTH`/`NDEATH`はトピック自体が意味（オンライン/オフライン）を語るので、ペイロードは
-`seq`だけの`BirthDeathMsg`です。一方`NCMD`/`NDATA`は複数種類のメッセージが同じトピックに
-乗るので、JSON自身に`"type"`フィールドを持たせて中身を区別しています（`messages.rs`の
+`seq`＋能力情報だけの`BirthDeathMsg`です。一方`NCMD`/`NDATA`は複数種類のメッセージが同じ
+トピックに乗るので、JSON自身に`"type"`フィールドを持たせて中身を区別しています（`messages.rs`の
 `CmdMsg`・`DataMsg`という`enum`。C++でいう`std::variant`やタグ付きunionに近いものです。
-`STATE`トピックだけは乗るメッセージが`PresenceMsg`の1種類しか無いので、こうした`enum`で
-包んでいません）。
+`STATE`/`NSTATUS`トピックだけは乗るメッセージがそれぞれ`PresenceMsg`/`StatusMsg`の1種類しか
+無いので、こうした`enum`で包んでいません）。
 
 | トピック | 乗るメッセージ（`"type"`） | 送信元→送信先 | ペイロード（JSON） |
 |---|---|---|---|
 | `<topic>/NCMD/<名前>` | `"file_offer"` | パソコン → 名指しした1台のマイコン | `{"type":"file_offer","id","from","filename","size","seq"}` |
 | `<topic>/NCMD/all` | `"job"` | パソコン → 全マイコンへの一斉配信 | `{"type":"job","id","from","content","seq"}` |
-| `<topic>/NBIRTH/<名前>` | （包まず`BirthDeathMsg`そのまま） | マイコン → 見ている全員 | `{"seq"}` |
-| `<topic>/NDEATH/<名前>` | （包まず`BirthDeathMsg`そのまま） | マイコン → 見ている全員 | `{"seq"}` |
+| `<topic>/NCMD/all` | `"abort"` | パソコン → 全マイコンへの一斉配信（該当IDを処理中のマイコンだけが反応） | `{"type":"abort","id","from","seq"}` |
+| `<topic>/NBIRTH/<名前>` | （包まず`BirthDeathMsg`そのまま） | マイコン → 見ている全員 | `{"seq","capabilities":{"model","paper_sizes"}}` |
+| `<topic>/NDEATH/<名前>` | （包まず`BirthDeathMsg`そのまま） | マイコン → 見ている全員 | `{"seq","capabilities":null}` |
 | `<topic>/NDATA/<名前>` | `"file_ack"` | マイコン → 見ている全員 | `{"type":"file_ack","id","host","port","seq"}` |
 | `<topic>/NDATA/<名前>` | `"file_received"` | マイコン → 見ている全員 | `{"type":"file_received","id","status","size","seq"}`（`status`は`"ok"`か`"failed"`） |
 | `<topic>/NDATA/<名前>` | `"job_progress"` | マイコン → 見ている全員 | `{"type":"job_progress","id","percent","seq"}`（`percent`は0〜100。完了ではなく途中経過） |
+| `<topic>/NDATA/<名前>` | `"job_aborted"` | マイコン → 見ている全員 | `{"type":"job_aborted","id","seq"}`（`abort`を受けて実際に処理を止めた報告） |
 | `<topic>/NDATA/<名前>` | `"job_done"` | マイコン → 見ている全員 | `{"type":"job_done","id","seq"}` |
+| `<topic>/NSTATUS/<名前>` | （包まず`StatusMsg`そのまま） | マイコン → 見ている全員 | `{"state":{"state":"idle"},"seq"}`（他に`{"state":"printing","job_id"}`・`{"state":"error","reason"}`） |
 | `<topic>/STATE/<名前>` | （包まず`PresenceMsg`そのまま） | パソコン → 見ている全員 | `{"status","seq"}`（`status`は`"online"`か`"offline"`） |
 
-各フィールドの型や意味は`src/messages.rs`（`OfferMsg`・`JobMsg`・`AckMsg`・`ReceivedMsg`・
-`DoneMsg`・`BirthDeathMsg`・`PresenceMsg`構造体、およびそれらをまとめる`CmdMsg`・`DataMsg`）に
-コメント付きで定義されています。`cargo doc`で生成したドキュメントの`messages`モジュールでも
-同じ内容が見られます。
+各フィールドの型や意味は`src/messages.rs`（`OfferMsg`・`JobMsg`・`AbortMsg`・`AckMsg`・
+`ReceivedMsg`・`ProgressMsg`・`AbortedMsg`・`DoneMsg`・`BirthDeathMsg`・`Capabilities`・
+`StatusMsg`・`PresenceMsg`構造体、およびそれらをまとめる`CmdMsg`・`DataMsg`）にコメント付きで
+定義されています。`cargo doc`で生成したドキュメントの`messages`モジュールでも同じ内容が
+見られます。
 
 マイコン側は自分の名前が付いた`NCMD`トピック（＋`NCMD/all`）だけを購読すればよく、他のマイコン
 宛てのOFFERを気にする必要がありません。パソコン役は`<topic>/NBIRTH/+`・`<topic>/NDEATH/+`・
-`<topic>/NDATA/+`とワイルドカード購読すれば、全マイコンの状態と報告をまとめて拾えます。
-マイコン役も同様に`<topic>/STATE/+`をワイルドカード購読して、パソコンの生死を知ることができます。
+`<topic>/NDATA/+`・`<topic>/NSTATUS/+`とワイルドカード購読すれば、全マイコンの状態と報告を
+まとめて拾えます。マイコン役も同様に`<topic>/STATE/+`をワイルドカード購読して、パソコンの
+生死を知ることができます。
 
 なお、宛先・送信者の名前がすでにトピックで分かるようになったぶん、以前の版にあった
 `OfferMsg.to`・`AckMsg.from`・`ReceivedMsg.who`・`DoneMsg.who`のような重複フィールドは
@@ -583,22 +625,24 @@ MQTT接続そのものの切断エラーとして気付きました）。`"onlin
 **重要な注意点**: seqカウンタは**トピックごとに別々**に用意しています（`ControllerSeqState`・
 `DeviceSeqState`構造体）。理由は、あるトピックを購読している人には、そこに流れるメッセージが
 （中身の種類が違っても）必ず全部見えるはずだからです。例えば`<topic>/NDATA/<名前>`には
-ACK・RECEIVED・PROGRESS・DONEの4種類が乗りますが、同じトピックである以上、観測者からは必ず全部見えるので、
-1本のカウンタ（`data_counter`/`data_tracker`）でまとめて欠落検知できます（これはSparkplug B
-本家が「ノード1つにつきseqは1系列」としている設計にも合わせた形です）。逆に、別のトピックへ
-流れるメッセージ（例えば他のマイコン宛ての`<topic>/NCMD/他の名前`）は見えないので、それを
-同じカウンタに混ぜてしまうと、番号が「飛んで」見えてしまい、実際は何も欠落していないのに
-誤って警告が出てしまいます（もともとの2プロジェクト構成での実装中に、実際にこの誤検知が
-起きたことがあります）。
+ACK・RECEIVED・PROGRESS・ABORTED・DONEの5種類が乗りますが、同じトピックである以上、観測者からは
+必ず全部見えるので、1本のカウンタ（`data_counter`/`data_tracker`）でまとめて欠落検知できます
+（これはSparkplug B本家が「ノード1つにつきseqは1系列」としている設計にも合わせた形です）。
+同様に`<topic>/NCMD/all`にはJOB・ABORTの2種類が乗りますが、こちらも同じトピックなので
+`job_counter`/`job_tracker`を共用しています。逆に、別のトピックへ流れるメッセージ（例えば
+他のマイコン宛ての`<topic>/NCMD/他の名前`）は見えないので、それを同じカウンタに混ぜてしまうと、
+番号が「飛んで」見えてしまい、実際は何も欠落していないのに誤って警告が出てしまいます
+（もともとの2プロジェクト構成での実装中に、実際にこの誤検知が起きたことがあります）。
 
-具体的には5系統のトピックに対応する5系統のカウンタ/トラッカーを用意しています。
-`<topic>/NCMD/<名前>`（OFFER。宛先ごとに別トピック）、`<topic>/NCMD/all`（JOB。全マイコン
+具体的には6系統のトピックに対応する6系統のカウンタ/トラッカーを用意しています。
+`<topic>/NCMD/<名前>`（OFFER。宛先ごとに別トピック）、`<topic>/NCMD/all`（JOB・ABORT。全マイコン
 共通の1トピック）、`<topic>/NBIRTH/<名前>`＋`<topic>/NDEATH/<名前>`（接続・切断。合わせて1本の
-カウンタ/トラッカーで管理）、`<topic>/NDATA/<名前>`（ACK・RECEIVED・PROGRESS・DONEをまとめた1トピック）、
-`<topic>/STATE/<名前>`（パソコンの生死。パソコンごとに別トピック）の5つです。パソコン役は
-「OFFER・JOBを送る側」「各マイコンのNBIRTH/NDEATH/NDATAを受け取る側」「自分のSTATEを送る側」、
-マイコン役はちょうど逆の組み合わせ（＋各パソコンのSTATEを受け取る側）なので、
-`ControllerSeqState`・`DeviceSeqState`にはそれぞれが実際に使うカウンタ/トラッカーだけを
+カウンタ/トラッカーで管理）、`<topic>/NDATA/<名前>`（ACK・RECEIVED・PROGRESS・ABORTED・DONEを
+まとめた1トピック）、`<topic>/NSTATUS/<名前>`（稼働状態。マイコンごとに別トピック）、
+`<topic>/STATE/<名前>`（パソコンの生死。パソコンごとに別トピック）の6つです。パソコン役は
+「OFFER・JOB・ABORTを送る側」「各マイコンのNBIRTH/NDEATH/NDATA/NSTATUSを受け取る側」
+「自分のSTATEを送る側」、マイコン役はちょうど逆の組み合わせ（＋各パソコンのSTATEを受け取る側）
+なので、`ControllerSeqState`・`DeviceSeqState`にはそれぞれが実際に使うカウンタ/トラッカーだけを
 持たせています。
 
 `NBIRTH`（Sparkplug BでいうBIRTH）を受け取ったときだけは、再接続でseqが0から数え直されるのが

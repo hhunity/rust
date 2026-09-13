@@ -16,9 +16,14 @@
 //! 起動時にファイルから引き継いだ未処理ジョブは、誰かが`job`か`run`を打つまで
 //! 配信されない（勝手に印刷が始まると困る、という要望に合わせている）。
 //!
-//! 呼び出しはREPLのコマンドコールバック（同じスレッド）から行われるため、完了報告を
-//! 待つ間（最大[`JOB_TIMEOUT`]）はその場でブロックする。これは`job_worker`だった頃に
-//! 別スレッドで待っていたのと同じ待ち方を、呼び出し元のスレッドでそのまま行うだけの違い。
+//! [`abort`]は処理中(Dispatched)のジョブを中断させる。中断の完了を待つ必要はなく
+//! （実際に止まったかどうかは、待っている側＝`run_one`の完了待ちループに、後から
+//! [`crate::controller::JobSignal::Aborted`]として届く）、指示を送るだけですぐ戻る。
+//!
+//! これらの呼び出しはREPLのコマンドコールバックから行われるが、`job`・`run`の実際の
+//! 配信・完了待ちは`repl_commands`側で別スレッドに逃がしているため、待っている間も
+//! REPL自体は次のコマンド（`abort`など）を受け付けられる（詳しくは`repl_commands.rs`の
+//! `cmd_job`・`cmd_run`のコメント参照）。
 
 use std::collections::HashSet;
 use std::sync::mpsc;
@@ -26,14 +31,28 @@ use std::time::{Duration, Instant};
 
 use rumqttc::{Client, QoS};
 
-use crate::controller::{InFlightJob, InFlightState, Roster};
+use crate::controller::{DeviceStatuses, InFlightJob, InFlightState, JobSignal, Roster};
 use crate::job_queue::{JobQueue, JobStatus};
-use crate::messages::{CmdMsg, JobMsg};
+use crate::messages::{AbortMsg, CmdMsg, DeviceState, JobMsg};
 use crate::mqtt_log;
 use crate::seq::{next_seq, ControllerSeqState};
 
 /// ジョブを送ってから、完了報告が来ないマイコンを「失敗」と判断するまでの待ち時間。
 const JOB_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 今オンラインで、かつ`Idle`状態（印字中・エラー中でない）のマイコン名の集合を返す。
+/// ジョブを配信できる宛先は常にこの集合から選ぶ（印字中のマイコンへ重ねて送らない）。
+fn idle_targets(roster: &Roster, device_statuses: &DeviceStatuses) -> HashSet<String> {
+    let statuses = device_statuses.lock().unwrap();
+    roster
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, &online)| online)
+        .map(|(who, _)| who.clone())
+        .filter(|who| !matches!(statuses.get(who), Some(DeviceState::Printing { .. } | DeviceState::Error { .. })))
+        .collect()
+}
 
 /// ジョブを1件処理する。結果を人間向けの1メッセージとして返す
 /// （呼び出し元の`job`・`run`コマンドがそのままREPLの応答として表示する）。
@@ -43,7 +62,9 @@ const JOB_TIMEOUT: Duration = Duration::from_secs(10);
 /// 呼んだときの、これまで通りの挙動）。
 ///
 /// - 対象のPendingジョブが無ければ、何もせずその旨を返す。
-/// - 宛先にできるマイコンが1台もオンラインでなければ、配信はせずその旨を返す
+/// - 既に別のジョブが処理中（`inflight`が埋まっている）なら、配信はせずその旨を返す
+///   （同時に処理するジョブは常に1件だけ、という設計を守るための防御）。
+/// - 宛先にできるマイコン（オンラインかつIdle）が1台もいなければ、配信はせずその旨を返す
 ///   （以前のように「誰か来るまで待つ」ことはしない。呼び出し元をブロックしない設計にしている）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_one(
@@ -51,6 +72,7 @@ pub(crate) fn run_one(
     name: &str,
     all_cmd_topic: &str,
     roster: &Roster,
+    device_statuses: &DeviceStatuses,
     inflight: &InFlightState,
     seq: &ControllerSeqState,
     queue: &JobQueue,
@@ -75,23 +97,21 @@ pub(crate) fn run_one(
         }
     };
 
-    let targets: HashSet<String> = roster
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|(_, &online)| online)
-        .map(|(who, _)| who.clone())
-        .collect();
+    if inflight.lock().unwrap().is_some() {
+        return format!("既に処理中のジョブがあります。完了を待つか、abortしてください（ジョブ{}はPendingのまま）", job.id);
+    }
+
+    let targets = idle_targets(roster, device_statuses);
     if targets.is_empty() {
         return format!(
-            "ジョブ{}: 今オンラインのマイコンがいないため配信できません（ジョブはPendingのまま。後でもう一度runしてください）",
+            "ジョブ{}: 宛先にできるマイコン（オンラインかつアイドル）がいないため配信できません（ジョブはPendingのまま。後でもう一度runしてください）",
             job.id
         );
     }
 
     queue.mark_dispatched(&job.id);
 
-    let (tx, rx) = mpsc::channel::<String>();
+    let (tx, rx) = mpsc::channel::<JobSignal>();
     *inflight.lock().unwrap() = Some(InFlightJob { id: job.id.clone(), tx });
 
     let msg = JobMsg {
@@ -106,21 +126,29 @@ pub(crate) fn run_one(
 
     let mut remaining = targets.clone();
     let deadline = Instant::now() + JOB_TIMEOUT;
+    let mut aborted = false;
     while !remaining.is_empty() {
         let now = Instant::now();
         if now >= deadline {
             break;
         }
         match rx.recv_timeout(deadline - now) {
-            Ok(who) => {
+            Ok(JobSignal::Done(who)) => {
                 remaining.remove(&who);
+            }
+            Ok(JobSignal::Aborted) => {
+                aborted = true;
+                break;
             }
             Err(_) => break, // タイムアウト（これ以上待っても来ない）
         }
     }
     *inflight.lock().unwrap() = None; // 待つのをやめたので、共有状態も片付ける
 
-    if remaining.is_empty() {
+    if aborted {
+        queue.mark_aborted(&job.id);
+        format!("ジョブ{}は中断されました", job.id)
+    } else if remaining.is_empty() {
         queue.mark_done(&job.id);
         format!(
             "ジョブ{}を{}台のマイコン({targets:?})へ配信し、全員完了しました",
@@ -137,19 +165,20 @@ pub(crate) fn run_one(
 }
 
 /// 止まっている（Pendingの）ジョブを、先頭から順に進められるだけ全部処理する
-/// （`run`をIDを指定せずに呼んだときの動作。以前は先頭の1件だけだったが、
-/// 「Pendingジョブ全部を順に開始してほしい」という要望に合わせて全件処理に変えた）。
+/// （`run`をIDを指定せずに呼んだときの動作）。
 ///
-/// 1件ごとの結果メッセージのリストを返す。ある1件が「宛先が誰もオンラインでない」
-/// 理由で配信できなかった場合、そのジョブはPendingのまま状態が変わらないので、
-/// それ以上ループを続けても同じ結果を繰り返すだけになる。そのため、その時点で
-/// 打ち切る（残りのPendingジョブは次に`run`を呼んだときのために残る）。
+/// 1件ごとの結果メッセージのリストを返す。あるジョブが「配信できる宛先がいない」
+/// 理由で処理できなかった場合、そのジョブはPendingのまま状態が変わらないので、
+/// それ以上ループを続けても同じ結果を繰り返すだけになる。また、あるジョブが`abort`で
+/// 中断された場合も、それ以上は利用者の意図に反する可能性があるのでそこで打ち切る。
+/// どちらの場合も、残りのPendingジョブは次に`run`を呼んだときのために残る。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_all(
     client: &Client,
     name: &str,
     all_cmd_topic: &str,
     roster: &Roster,
+    device_statuses: &DeviceStatuses,
     inflight: &InFlightState,
     seq: &ControllerSeqState,
     queue: &JobQueue,
@@ -159,13 +188,24 @@ pub(crate) fn run_all(
         let Some(job) = queue.peek_next_pending() else {
             break;
         };
-        messages.push(run_one(client, name, all_cmd_topic, roster, inflight, seq, queue, Some(&job.id)));
+        messages.push(run_one(
+            client,
+            name,
+            all_cmd_topic,
+            roster,
+            device_statuses,
+            inflight,
+            seq,
+            queue,
+            Some(&job.id),
+        ));
 
-        // run_oneが「宛先が誰もオンラインでない」と判断した場合、job.idはPendingのまま
-        // 変化していない。同じ状況を繰り返すだけなので、ここで打ち切る。
-        let still_pending =
-            queue.get(&job.id).map(|j| j.status == JobStatus::Pending).unwrap_or(false);
-        if still_pending {
+        // Pendingのまま（誰も宛先にできなかった）か、Abortedになった場合はそこで打ち切る。
+        let stop = queue
+            .get(&job.id)
+            .map(|j| matches!(j.status, JobStatus::Pending | JobStatus::Aborted))
+            .unwrap_or(true);
+        if stop {
             break;
         }
     }
@@ -173,4 +213,34 @@ pub(crate) fn run_all(
         messages.push("キューに未処理のジョブはありません".to_string());
     }
     messages
+}
+
+/// 処理中(Dispatched)のジョブを中断させる。指示を送るだけで、実際に止まるのを待たない
+/// （待っているのは、そのジョブを配信した`run_one`の完了待ちループの方）。
+pub(crate) fn abort(
+    client: &Client,
+    name: &str,
+    all_cmd_topic: &str,
+    seq: &ControllerSeqState,
+    queue: &JobQueue,
+    id: &str,
+) -> String {
+    match queue.get(id) {
+        Some(job) if job.status == JobStatus::Dispatched => {
+            let msg = AbortMsg {
+                id: job.id.clone(),
+                from: name.to_string(),
+                seq: next_seq(&seq.job_counter),
+            };
+            let payload = serde_json::to_vec(&CmdMsg::Abort(msg)).unwrap();
+            mqtt_log::log_publish(all_cmd_topic, &payload);
+            client.publish(all_cmd_topic, QoS::AtLeastOnce, false, payload).unwrap();
+            format!("ジョブ{id}の中断を要求しました")
+        }
+        Some(job) => format!(
+            "ジョブ{id}は現在{:?}状態のため中断できません（処理中(Dispatched)のジョブのみ中断できます）",
+            job.status
+        ),
+        None => format!("ジョブ{id}は見つかりません"),
+    }
 }

@@ -22,15 +22,18 @@
 //! `message_type`にはSparkplug B本家の名前をそのまま使っています（詳しくは`mqtt-app`の
 //! READMEを参照）。
 //!
-//! - `NBIRTH` … マイコンが接続した（起動）ことの通知
-//! - `NDEATH` … マイコンが切断した（終了）ことの通知（Last Willで代理publishされる）
-//! - `NDATA`  … マイコンからの、動作中の継続的な報告（ACK・受信結果・ジョブ完了など）
-//! - `NCMD`   … ホスト（パソコン）からマイコンへの命令（ファイル送信の申し出・ジョブ配信）
+//! - `NBIRTH`  … マイコンが接続した（起動）ことの通知（能力情報[`Capabilities`]も一緒に載せる）
+//! - `NDEATH`  … マイコンが切断した（終了）ことの通知（Last Willで代理publishされる）
+//! - `NDATA`   … マイコンからの、動作中の継続的な報告（ACK・受信結果・進捗・中断・完了など）
+//! - `NCMD`    … ホスト（パソコン）からマイコンへの命令（ファイル送信の申し出・ジョブ配信・中断指示）
+//! - `NSTATUS` … マイコン自身の稼働状態（アイドル/印字中/エラー）。接続の有無とは別枠で、
+//!   状態が変わるたびにretain付きでpublishし直す。
 //!
 //! `NBIRTH`/`NDEATH`はトピック自体が意味（オンライン/オフライン）を語るので、ペイロードは
-//! `seq`だけの[`BirthDeathMsg`]です。一方`NDATA`/`NCMD`は複数種類のメッセージが同じ
-//! トピックに乗るので、JSON自身に`"type"`フィールドを持たせて中身を区別しています。
-//! それを表すのが下の`CmdMsg`・`DataMsg`という2つの`enum`です。
+//! `seq`＋能力情報だけの[`BirthDeathMsg`]です。一方`NDATA`/`NCMD`は複数種類のメッセージが
+//! 同じトピックに乗るので、JSON自身に`"type"`フィールドを持たせて中身を区別しています。
+//! それを表すのが下の`CmdMsg`・`DataMsg`という2つの`enum`です。`NSTATUS`は`STATE`と同様、
+//! 乗るメッセージが[`StatusMsg`]の1種類だけなので、`enum`で包んでいません。
 
 use serde::{Deserialize, Serialize};
 
@@ -54,6 +57,9 @@ use serde::{Deserialize, Serialize};
 pub enum CmdMsg {
     FileOffer(OfferMsg),
     Job(JobMsg),
+    /// 処理中(Dispatched)のジョブを中断させる指示。`Job`と同じ`<topic>/NCMD/all`に乗るので、
+    /// seqカウンタ/トラッカーも`Job`と共用する（同じトピックは1系列、という設計のため）。
+    Abort(AbortMsg),
 }
 
 /// `NDATA`（`<topic>/NDATA/<自分の名前>`）に乗る、マイコン自身の動作中の継続的な報告。
@@ -68,6 +74,8 @@ pub enum DataMsg {
     FileAck(AckMsg),
     FileReceived(ReceivedMsg),
     JobProgress(ProgressMsg),
+    /// ジョブが完了ではなく`Abort`によって中断された、という報告。
+    JobAborted(AbortedMsg),
     JobDone(DoneMsg),
 }
 
@@ -75,10 +83,21 @@ pub enum DataMsg {
 ///
 /// オンラインかオフラインかは**トピック自体**（`NBIRTH`か`NDEATH`か）が表しているので、
 /// ペイロードには持たせていない（トピックとペイロードで同じ情報を重複させない、という
-/// このプロジェクト全体の方針に合わせている）。残るのは欠落検知用の`seq`だけ。
+/// このプロジェクト全体の方針に合わせている）。欠落検知用の`seq`に加えて、`NBIRTH`のときは
+/// 自分の印刷能力（[`Capabilities`]）を`Some`で載せる（`NDEATH`は`None`。切断済みの機械の
+/// 能力を聞いても意味が無いため）。
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BirthDeathMsg {
     pub seq: u64,
+    pub capabilities: Option<Capabilities>,
+}
+
+/// マイコン（プリンタ）の印刷能力。機種名と対応用紙サイズだけの簡易版。
+/// `NBIRTH`に載せて、パソコン役へ一度だけ知らせる。
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Capabilities {
+    pub model: String,
+    pub paper_sizes: Vec<String>,
 }
 
 /// `CmdMsg::FileOffer`の中身。「このファイルを送りたい」という申し出。
@@ -145,6 +164,45 @@ pub struct ProgressMsg {
     pub id: String,
     /// 0〜100の進捗率。
     pub percent: u8,
+    pub seq: u64,
+}
+
+/// `CmdMsg::Abort`の中身。「このジョブ(id)を今すぐ中断して」という指示。
+/// 処理中でない（Pending/Done/Failedな）ジョブIDを指定された場合、マイコン側は無視してよい。
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AbortMsg {
+    pub id: String,
+    /// この中断指示を出した（＝パソコン役の）名前
+    pub from: String,
+    pub seq: u64,
+}
+
+/// `DataMsg::JobAborted`の中身。`AbortMsg`を受けて実際に処理を止めた、という報告。
+/// `JobDone`とは別物（完了はしていない）。
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AbortedMsg {
+    pub id: String,
+    pub seq: u64,
+}
+
+/// マイコン自身の稼働状態。接続の有無（`NBIRTH`/`NDEATH`）とは別枠で、今アイドルか
+/// 印字中かエラー中かを表す。`<topic>/NSTATUS/<名前>`にretain付きでpublishされ、
+/// 状態が変わるたびに送り直される（常に最新の状態が1つだけ残る）。
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum DeviceState {
+    /// 何も処理していない、ジョブを受け付けられる状態。
+    Idle,
+    /// 指定したジョブを処理中で、新しいジョブは受け付けられない状態。
+    Printing { job_id: String },
+    /// 用紙切れ等の物理的な異常が起きている状態（`reason`は人間向けの説明）。
+    Error { reason: String },
+}
+
+/// `<topic>/NSTATUS/<名前>`の中身。
+#[derive(Serialize, Deserialize, Debug)]
+pub struct StatusMsg {
+    pub state: DeviceState,
     pub seq: u64,
 }
 
