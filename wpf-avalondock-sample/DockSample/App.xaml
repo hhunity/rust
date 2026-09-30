@@ -1,0 +1,39 @@
+<Application x:Class="DockSample.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DockSample.ViewModels">
+    <!-- StartupUri は削除（DIで MainWindow を生成するため） -->
+    <Application.Resources>
+
+        <!-- ドキュメント -->
+        <DataTemplate DataType="{x:Type vm:DocumentViewModel}">
+            <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"
+                     AcceptsReturn="True" AcceptsTab="True"
+                     VerticalScrollBarVisibility="Auto"
+                     FontFamily="Consolas" BorderThickness="0" />
+        </DataTemplate>
+
+        <!-- エクスプローラー -->
+        <DataTemplate DataType="{x:Type vm:ExplorerViewModel}">
+            <ListBox ItemsSource="{Binding Items}"
+                     SelectedItem="{Binding SelectedItem}" BorderThickness="0" />
+        </DataTemplate>
+
+        <!-- プロパティ -->
+        <DataTemplate DataType="{x:Type vm:PropertiesViewModel}">
+            <StackPanel Margin="8">
+                <TextBlock Text="選択項目" FontWeight="Bold" />
+                <TextBlock Text="{Binding SelectedName, TargetNullValue=(なし)}" Margin="0,0,0,8" />
+                <TextBlock Text="文字数" FontWeight="Bold" />
+                <TextBlock Text="{Binding Length}" />
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- 出力 -->
+        <DataTemplate DataType="{x:Type vm:OutputViewModel}">
+            <ListBox ItemsSource="{Binding Log.Messages}"
+                     FontFamily="Consolas" BorderThickness="0" />
+        </DataTemplate>
+
+    </Application.Resources>
+</Application>
