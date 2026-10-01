@@ -31,4 +31,4 @@ cd DockSample
 dotnet run
 ```
 
-Windows + .NET 8 SDK が必要。
+Windows + .NET 9 SDK が必要（Dirkster.AvalonDock v5 を使用。v5 は net9 / net10 / net48 のみ対応）。

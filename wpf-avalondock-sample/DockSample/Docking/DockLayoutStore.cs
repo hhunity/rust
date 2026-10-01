@@ -1,7 +1,7 @@
 using System.IO;
 using AvalonDock;
 using AvalonDock.Layout;
-using AvalonDock.Layout.Serialization;
+using AvalonDock.Serializer.Xml;   // v5: 旧 AvalonDock.Layout.Serialization
 using DockSample.Services;
 using DockSample.ViewModels;
 
