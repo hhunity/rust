@@ -10,8 +10,11 @@
     <Window.Resources>
         <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
 
-        <!-- ツール（Anchorable）とモデルの紐付け -->
-        <Style x:Key="ToolStyle" TargetType="{x:Type avalonDock:LayoutAnchorableItem}">
+        <!--
+          ペインとモデルの紐付け。
+          ドキュメントもツールも全部 Anchorable として扱うので、スタイルは1つだけ。
+        -->
+        <Style x:Key="PaneStyle" TargetType="{x:Type avalonDock:LayoutAnchorableItem}">
             <Setter Property="Title" Value="{Binding Model.Title}" />
             <Setter Property="ContentId" Value="{Binding Model.ContentId}" />
             <Setter Property="IsSelected" Value="{Binding Model.IsSelected, Mode=TwoWay}" />
@@ -19,18 +22,10 @@
             <!--
               表示/非表示を ViewModel の IsVisible と双方向で同期。
               ×ボタンは「閉じる」ではなく「隠す」なので、AvalonDock が元の位置を覚えている。
+              （ドキュメント領域のタブの×も、CanClose=False / CanHide=True なら「隠す」になる）
             -->
             <Setter Property="Visibility"
                     Value="{Binding Model.IsVisible, Mode=TwoWay, Converter={StaticResource BoolToVisibility}}" />
-        </Style>
-
-        <!-- ドキュメントとモデルの紐付け -->
-        <Style x:Key="DocumentStyle" TargetType="{x:Type avalonDock:LayoutDocumentItem}">
-            <Setter Property="Title" Value="{Binding Model.Title}" />
-            <Setter Property="ContentId" Value="{Binding Model.ContentId}" />
-            <Setter Property="IsSelected" Value="{Binding Model.IsSelected, Mode=TwoWay}" />
-            <Setter Property="IsActive" Value="{Binding Model.IsActive, Mode=TwoWay}" />
-            <Setter Property="CloseCommand" Value="{Binding Model.CloseCommand}" />
         </Style>
     </Window.Resources>
 
@@ -42,32 +37,27 @@
 
         <!-- ===== 上部：水平ボタン ===== -->
         <Border Grid.Row="0" Background="#F0F0F0" BorderBrush="#CCC" BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" Margin="6">
-                <StackPanel.Resources>
-                    <Style TargetType="ButtonBase" x:Key="BarButton">
-                        <Setter Property="Margin" Value="0,0,6,0" />
-                        <Setter Property="Padding" Value="12,4" />
-                    </Style>
-                    <Style TargetType="Button" BasedOn="{StaticResource BarButton}" />
-                    <Style TargetType="ToggleButton" BasedOn="{StaticResource BarButton}" />
-                </StackPanel.Resources>
-
-                <Button Content="新規ドキュメント" Command="{Binding NewDocumentCommand}" />
-
-                <Separator Margin="4,2,10,2" Style="{StaticResource {x:Static ToolBar.SeparatorStyleKey}}" />
-
-                <!-- 押すと表示、もう一度押すと非表示（ViewModel の IsVisible と双方向） -->
-                <ToggleButton Content="エクスプローラー" IsChecked="{Binding Explorer.IsVisible}" />
-                <ToggleButton Content="プロパティ"       IsChecked="{Binding Properties.IsVisible}" />
-                <ToggleButton Content="出力"             IsChecked="{Binding Output.IsVisible}" />
-            </StackPanel>
+            <!-- ペインごとのトグルボタン。押すと表示、もう一度押すと非表示 -->
+            <ItemsControl ItemsSource="{Binding Panes}" Margin="6">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <ToggleButton Content="{Binding Title}"
+                                      IsChecked="{Binding IsVisible}"
+                                      Margin="0,0,6,0" Padding="12,4" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
         </Border>
 
         <!-- ===== 下部：ドッキングスペース ===== -->
         <avalonDock:DockingManager x:Name="DockManager" Grid.Row="1"
-                                   DocumentsSource="{Binding Documents}"
-                                   AnchorablesSource="{Binding Tools}"
-                                   ActiveContent="{Binding ActiveContent, Mode=TwoWay}">
+                                   AnchorablesSource="{Binding Panes}"
+                                   LayoutItemContainerStyle="{StaticResource PaneStyle}">
 
             <avalonDock:DockingManager.Theme>
                 <themes:Vs2013LightTheme />
@@ -76,11 +66,6 @@
             <avalonDock:DockingManager.LayoutUpdateStrategy>
                 <docking:LayoutInitializer />
             </avalonDock:DockingManager.LayoutUpdateStrategy>
-
-            <avalonDock:DockingManager.LayoutItemContainerStyleSelector>
-                <docking:PanesStyleSelector ToolStyle="{StaticResource ToolStyle}"
-                                            DocumentStyle="{StaticResource DocumentStyle}" />
-            </avalonDock:DockingManager.LayoutItemContainerStyleSelector>
 
             <!-- 初期レイアウト（保存済みレイアウトがあれば起動時に上書きされる） -->
             <avalonDock:LayoutRoot>

@@ -8,27 +8,36 @@ public class LayoutInitializer : ILayoutUpdateStrategy
     public bool BeforeInsertAnchorable(LayoutRoot layout, LayoutAnchorable anchorableToShow,
                                        ILayoutContainer destinationContainer)
     {
-        // 一度隠したツールを再表示するときは、AvalonDock が覚えている元の位置に戻す
+        // 一度隠したペインを再表示するときは、AvalonDock が覚えている元の位置に戻す
         if (destinationContainer is { Root: not null }) return false;
         if (((ILayoutPreviousContainer)anchorableToShow).PreviousContainer is { Root: not null }) return false;
 
-        if (anchorableToShow.Content is not ToolViewModel tool) return false;
+        if (anchorableToShow.Content is not PaneViewModel pane) return false;
 
         // 初めて表示するときだけ、PreferredLocation に従って配置する
-        var (paneName, strategy) = tool.PreferredLocation switch
+        if (pane.PreferredLocation == DockLocation.Document)
         {
-            ToolLocation.Left  => ("LeftPane",   AnchorableShowStrategy.Left),
-            ToolLocation.Right => ("RightPane",  AnchorableShowStrategy.Right),
+            // ドキュメントは中央のドキュメント領域にタブとして入れる
+            var documentPane = layout.Descendents().OfType<LayoutDocumentPane>().FirstOrDefault();
+            if (documentPane == null) return false;
+            documentPane.Children.Add(anchorableToShow);
+            return true;
+        }
+
+        var (paneName, strategy) = pane.PreferredLocation switch
+        {
+            DockLocation.Left  => ("LeftPane",   AnchorableShowStrategy.Left),
+            DockLocation.Right => ("RightPane",  AnchorableShowStrategy.Right),
             _                  => ("BottomPane", AnchorableShowStrategy.Bottom),
         };
 
-        var pane = layout.Descendents()
-                         .OfType<LayoutAnchorablePane>()
-                         .FirstOrDefault(p => p.Name == paneName);
+        var anchorablePane = layout.Descendents()
+                                   .OfType<LayoutAnchorablePane>()
+                                   .FirstOrDefault(p => p.Name == paneName);
 
-        if (pane != null)
+        if (anchorablePane != null)
         {
-            pane.Children.Add(anchorableToShow);
+            anchorablePane.Children.Add(anchorableToShow);
         }
         else
         {

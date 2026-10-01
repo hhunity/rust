@@ -1,25 +1,15 @@
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
-using DockSample.Services;
 
 namespace DockSample.ViewModels;
 
+/// <summary>中央のドキュメント領域に表示するペイン</summary>
 public partial class DocumentViewModel : PaneViewModel
 {
-    private static int _counter;
-
-    public DocumentViewModel(ILogService log)
-        : base($"Document_{Guid.NewGuid():N}")
+    public DocumentViewModel(string contentId, string title)
+        : base(contentId, title, DockLocation.Document)
     {
-        Title = $"Document {++_counter}";
-        log.Write($"{Title} を作成");
     }
 
+    /// <summary>非表示にしても ViewModel は残るので、再表示すると内容もそのまま</summary>
     [ObservableProperty] private string _text = "";
-
-    /// <summary>×ボタンで閉じるよう要求された（MainViewModel が購読）</summary>
-    public event EventHandler? CloseRequested;
-
-    [RelayCommand]
-    private void Close() => CloseRequested?.Invoke(this, EventArgs.Empty);
 }

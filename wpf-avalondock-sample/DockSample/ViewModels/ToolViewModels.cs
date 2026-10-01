@@ -6,40 +6,17 @@ using DockSample.Services;
 
 namespace DockSample.ViewModels;
 
-public enum ToolLocation { Left, Right, Bottom }
-
-public abstract partial class ToolViewModel : PaneViewModel
-{
-    protected ToolViewModel(string contentId, string title, ToolLocation location)
-        : base(contentId)
-    {
-        Title = title;
-        PreferredLocation = location;
-    }
-
-    /// <summary>初めて開くときにドッキングする場所</summary>
-    public ToolLocation PreferredLocation { get; }
-
-    /// <summary>表示中かどうか（ToggleButton と ×ボタンの両方から変わる）</summary>
-    [ObservableProperty] private bool _isVisible;
-
-    partial void OnIsVisibleChanged(bool value)
-    {
-        if (value) IsSelected = true;   // 表示したらそのタブを前面に
-    }
-}
-
 // ---- メッセージ ----
 public sealed class SelectedItemChangedMessage(string? value) : ValueChangedMessage<string?>(value);
 
 // ---- エクスプローラー（左） ----
-public partial class ExplorerViewModel : ToolViewModel
+public partial class ExplorerViewModel : PaneViewModel
 {
     private readonly IMessenger _messenger;
     private readonly ILogService _log;
 
     public ExplorerViewModel(IMessenger messenger, ILogService log)
-        : base("Tool_Explorer", "エクスプローラー", ToolLocation.Left)
+        : base("Tool_Explorer", "エクスプローラー", DockLocation.Left)
     {
         _messenger = messenger;
         _log = log;
@@ -58,10 +35,10 @@ public partial class ExplorerViewModel : ToolViewModel
 }
 
 // ---- プロパティ（右） ----
-public partial class PropertiesViewModel : ToolViewModel, IRecipient<SelectedItemChangedMessage>
+public partial class PropertiesViewModel : PaneViewModel, IRecipient<SelectedItemChangedMessage>
 {
     public PropertiesViewModel(IMessenger messenger)
-        : base("Tool_Properties", "プロパティ", ToolLocation.Right)
+        : base("Tool_Properties", "プロパティ", DockLocation.Right)
     {
         messenger.RegisterAll(this);
     }
@@ -77,10 +54,10 @@ public partial class PropertiesViewModel : ToolViewModel, IRecipient<SelectedIte
 }
 
 // ---- 出力（下） ----
-public class OutputViewModel : ToolViewModel
+public class OutputViewModel : PaneViewModel
 {
     public OutputViewModel(ILogService log)
-        : base("Tool_Output", "出力", ToolLocation.Bottom)
+        : base("Tool_Output", "出力", DockLocation.Bottom)
     {
         Log = log;
     }

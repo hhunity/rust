@@ -21,7 +21,7 @@ public class DockLayoutStore
 
     public DockLayoutStore(ILogService log) => _log = log;
 
-    public void Load(DockingManager manager, IEnumerable<ToolViewModel> tools)
+    public void Load(DockingManager manager, IEnumerable<PaneViewModel> panes)
     {
         if (!File.Exists(FilePath)) return;
 
@@ -29,18 +29,18 @@ public class DockLayoutStore
         serializer.LayoutSerializationCallback += (_, e) =>
         {
             // ContentId から ViewModel を探して結び付け直す
-            var tool = tools.FirstOrDefault(t => t.ContentId == e.Model.ContentId);
-            if (tool == null)
+            var pane = panes.FirstOrDefault(p => p.ContentId == e.Model.ContentId);
+            if (pane == null)
             {
-                // ドキュメントは中身を保存していないので復元しない
+                // もう存在しないペインは捨てる
                 e.Cancel = true;
                 return;
             }
 
-            e.Content = tool;
+            e.Content = pane;
             // 表示/非表示の状態も ViewModel に反映（ToggleButton の状態と一致させる）
             if (e.Model is LayoutAnchorable anchorable)
-                tool.IsVisible = !anchorable.IsHidden;
+                pane.IsVisible = !anchorable.IsHidden;
         };
 
         try

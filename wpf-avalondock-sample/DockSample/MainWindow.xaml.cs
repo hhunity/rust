@@ -13,7 +13,7 @@ public partial class MainWindow : Window
         DataContext = viewModel;
 
         // レイアウトの復元・保存は DockingManager(View) が必要なので View 側で行う
-        Loaded  += (_, _) => layoutStore.Load(DockManager, viewModel.Tools);
+        Loaded  += (_, _) => layoutStore.Load(DockManager, viewModel.Panes);
         Closing += (_, _) => layoutStore.Save(DockManager);
     }
 }

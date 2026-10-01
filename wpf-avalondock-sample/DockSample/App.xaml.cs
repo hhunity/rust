@@ -22,14 +22,13 @@ public partial class App : Application
         services.AddSingleton<IMessenger>(WeakReferenceMessenger.Default);
         services.AddSingleton<DockLayoutStore>();
 
-        // ツールウィンドウ（1つだけ存在する → Singleton）
-        services.AddSingleton<ExplorerViewModel>();
-        services.AddSingleton<PropertiesViewModel>();
-        services.AddSingleton<OutputViewModel>();
-
-        // ドキュメント（毎回新しく作る → Transient + ファクトリ）
-        services.AddTransient<DocumentViewModel>();
-        services.AddSingleton<Func<DocumentViewModel>>(sp => () => sp.GetRequiredService<DocumentViewModel>());
+        // ドッキングペイン。PaneViewModel として登録した順にトグルボタンが並ぶ。
+        // ペインを増やすときはここに1行足して、App.xaml に DataTemplate を足すだけ。
+        services.AddSingleton<PaneViewModel>(_ => new DocumentViewModel("Document_1", "ドキュメント1"));
+        services.AddSingleton<PaneViewModel>(_ => new DocumentViewModel("Document_2", "ドキュメント2"));
+        services.AddSingleton<PaneViewModel, ExplorerViewModel>();
+        services.AddSingleton<PaneViewModel, PropertiesViewModel>();
+        services.AddSingleton<PaneViewModel, OutputViewModel>();
 
         // Main
         services.AddSingleton<MainViewModel>();

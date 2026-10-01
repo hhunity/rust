@@ -2,9 +2,11 @@
 
 Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extensions.DependencyInjection) で使うサンプル。
 
-- 上部の水平ボタンで、下のドッキングスペースにペインを開く
-  - 「新規ドキュメント」: 押すたびに新しいドキュメントタブ
-  - 「エクスプローラー / プロパティ / 出力」: トグルボタン。押すと表示、もう一度押すと非表示
+- 上部の水平トグルボタンで、下のドッキングスペースにペインを表示/非表示
+  - 「ドキュメント1 / ドキュメント2」: 中央のドキュメント領域にタブで表示
+  - 「エクスプローラー / プロパティ / 出力」: 左 / 右 / 下に表示
+  - ドキュメントもツールも同じ仕組み（AvalonDock の Anchorable + IsVisible）で扱う
+  - ペインの追加は `App.xaml.cs` に `AddSingleton<PaneViewModel>` を1行 + `App.xaml` に DataTemplate
 - ペインはドラッグでドッキング位置の変更・フローティングが可能
 - 配置を記憶
   - 隠して再表示すると、隠す前の位置に戻る
@@ -18,8 +20,8 @@ DockSample/
 ├─ App.xaml(.cs)            DI 設定 / ViewModel→View の DataTemplate
 ├─ MainWindow.xaml(.cs)     ボタン + DockingManager / レイアウト保存・復元の呼び出し
 ├─ Views/                   各ペインの UserControl
-├─ ViewModels/              Main / Document / Tool(Explorer, Properties, Output)
-├─ Docking/                 StyleSelector / LayoutInitializer / DockLayoutStore(保存・復元)
+├─ ViewModels/              Main / Pane(基底) / Document / Explorer, Properties, Output
+├─ Docking/                 LayoutInitializer(初期配置) / DockLayoutStore(保存・復元)
 ├─ Converters/              bool → Visibility(Hidden)
 └─ Services/                ILogService
 ```
