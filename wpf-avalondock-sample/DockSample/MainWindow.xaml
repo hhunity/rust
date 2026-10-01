@@ -4,19 +4,24 @@
         xmlns:avalonDock="https://github.com/Dirkster99/AvalonDock"
         xmlns:themes="clr-namespace:AvalonDock.Themes;assembly=AvalonDock.Themes.VS2013"
         xmlns:docking="clr-namespace:DockSample.Docking"
+        xmlns:conv="clr-namespace:DockSample.Converters"
         Title="AvalonDock MVVM + DI Sample" Width="1100" Height="700">
 
     <Window.Resources>
+        <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+
         <!-- ツール（Anchorable）とモデルの紐付け -->
         <Style x:Key="ToolStyle" TargetType="{x:Type avalonDock:LayoutAnchorableItem}">
             <Setter Property="Title" Value="{Binding Model.Title}" />
             <Setter Property="ContentId" Value="{Binding Model.ContentId}" />
             <Setter Property="IsSelected" Value="{Binding Model.IsSelected, Mode=TwoWay}" />
             <Setter Property="IsActive" Value="{Binding Model.IsActive, Mode=TwoWay}" />
-            <!-- ×ボタンで「隠す」のではなく「閉じる」→ ViewModel のコレクションから削除 -->
-            <Setter Property="CanHide" Value="False" />
-            <Setter Property="CanClose" Value="True" />
-            <Setter Property="CloseCommand" Value="{Binding Model.CloseCommand}" />
+            <!--
+              表示/非表示を ViewModel の IsVisible と双方向で同期。
+              ×ボタンは「閉じる」ではなく「隠す」なので、AvalonDock が元の位置を覚えている。
+            -->
+            <Setter Property="Visibility"
+                    Value="{Binding Model.IsVisible, Mode=TwoWay, Converter={StaticResource BoolToVisibility}}" />
         </Style>
 
         <!-- ドキュメントとモデルの紐付け -->
@@ -39,21 +44,27 @@
         <Border Grid.Row="0" Background="#F0F0F0" BorderBrush="#CCC" BorderThickness="0,0,0,1">
             <StackPanel Orientation="Horizontal" Margin="6">
                 <StackPanel.Resources>
-                    <Style TargetType="Button">
+                    <Style TargetType="ButtonBase" x:Key="BarButton">
                         <Setter Property="Margin" Value="0,0,6,0" />
                         <Setter Property="Padding" Value="12,4" />
                     </Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource BarButton}" />
+                    <Style TargetType="ToggleButton" BasedOn="{StaticResource BarButton}" />
                 </StackPanel.Resources>
 
                 <Button Content="新規ドキュメント" Command="{Binding NewDocumentCommand}" />
-                <Button Content="エクスプローラー" Command="{Binding ShowExplorerCommand}" />
-                <Button Content="プロパティ"       Command="{Binding ShowPropertiesCommand}" />
-                <Button Content="出力"             Command="{Binding ShowOutputCommand}" />
+
+                <Separator Margin="4,2,10,2" Style="{StaticResource {x:Static ToolBar.SeparatorStyleKey}}" />
+
+                <!-- 押すと表示、もう一度押すと非表示（ViewModel の IsVisible と双方向） -->
+                <ToggleButton Content="エクスプローラー" IsChecked="{Binding Explorer.IsVisible}" />
+                <ToggleButton Content="プロパティ"       IsChecked="{Binding Properties.IsVisible}" />
+                <ToggleButton Content="出力"             IsChecked="{Binding Output.IsVisible}" />
             </StackPanel>
         </Border>
 
         <!-- ===== 下部：ドッキングスペース ===== -->
-        <avalonDock:DockingManager Grid.Row="1"
+        <avalonDock:DockingManager x:Name="DockManager" Grid.Row="1"
                                    DocumentsSource="{Binding Documents}"
                                    AnchorablesSource="{Binding Tools}"
                                    ActiveContent="{Binding ActiveContent, Mode=TwoWay}">
@@ -71,7 +82,7 @@
                                             DocumentStyle="{StaticResource DocumentStyle}" />
             </avalonDock:DockingManager.LayoutItemContainerStyleSelector>
 
-            <!-- 初期レイアウト：左 / 中央(ドキュメント) / 右、その下に下部ペイン -->
+            <!-- 初期レイアウト（保存済みレイアウトがあれば起動時に上書きされる） -->
             <avalonDock:LayoutRoot>
                 <avalonDock:LayoutPanel Orientation="Vertical">
                     <avalonDock:LayoutPanel Orientation="Horizontal">

@@ -8,10 +8,13 @@ public class LayoutInitializer : ILayoutUpdateStrategy
     public bool BeforeInsertAnchorable(LayoutRoot layout, LayoutAnchorable anchorableToShow,
                                        ILayoutContainer destinationContainer)
     {
-        // レイアウト復元時など、行き先が決まっている場合は任せる
-        if (destinationContainer != null) return false;
+        // 一度隠したツールを再表示するときは、AvalonDock が覚えている元の位置に戻す
+        if (destinationContainer is { Root: not null }) return false;
+        if (((ILayoutPreviousContainer)anchorableToShow).PreviousContainer is { Root: not null }) return false;
+
         if (anchorableToShow.Content is not ToolViewModel tool) return false;
 
+        // 初めて表示するときだけ、PreferredLocation に従って配置する
         var (paneName, strategy) = tool.PreferredLocation switch
         {
             ToolLocation.Left  => ("LeftPane",   AnchorableShowStrategy.Left),

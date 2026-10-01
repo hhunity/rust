@@ -7,9 +7,6 @@ namespace DockSample.ViewModels;
 
 public partial class MainViewModel : ObservableObject
 {
-    private readonly ExplorerViewModel _explorer;
-    private readonly PropertiesViewModel _properties;
-    private readonly OutputViewModel _output;
     private readonly Func<DocumentViewModel> _documentFactory;
     private readonly ILogService _log;
 
@@ -20,58 +17,44 @@ public partial class MainViewModel : ObservableObject
         Func<DocumentViewModel> documentFactory,
         ILogService log)
     {
-        _explorer = explorer;
-        _properties = properties;
-        _output = output;
+        Explorer = explorer;
+        Properties = properties;
+        Output = output;
         _documentFactory = documentFactory;
         _log = log;
+
+        // ツールは最初から全部登録しておき、表示/非表示は IsVisible で切り替える。
+        // （コレクションから消さないので、AvalonDock が隠す直前の位置を覚えていられる）
+        Tools = new() { explorer, properties, output };
     }
+
+    // ToggleButton のバインド先
+    public ExplorerViewModel Explorer { get; }
+    public PropertiesViewModel Properties { get; }
+    public OutputViewModel Output { get; }
 
     /// <summary>DockingManager.DocumentsSource</summary>
     public ObservableCollection<DocumentViewModel> Documents { get; } = new();
 
     /// <summary>DockingManager.AnchorablesSource</summary>
-    public ObservableCollection<ToolViewModel> Tools { get; } = new();
+    public ObservableCollection<ToolViewModel> Tools { get; }
 
     [ObservableProperty] private object? _activeContent;
 
-    // ===== ボタンのコマンド =====
     [RelayCommand]
     private void NewDocument()
     {
         var doc = _documentFactory();
-        doc.CloseRequested += OnPaneCloseRequested;
+        doc.CloseRequested += OnDocumentCloseRequested;
         Documents.Add(doc);
         ActiveContent = doc;
     }
 
-    [RelayCommand] private void ShowExplorer()   => ShowTool(_explorer);
-    [RelayCommand] private void ShowProperties() => ShowTool(_properties);
-    [RelayCommand] private void ShowOutput()     => ShowTool(_output);
-
-    private void ShowTool(ToolViewModel tool)
+    private void OnDocumentCloseRequested(object? sender, EventArgs e)
     {
-        if (!Tools.Contains(tool))
-        {
-            tool.CloseRequested += OnPaneCloseRequested;
-            Tools.Add(tool);   // → LayoutInitializer が配置先を決める
-            _log.Write($"{tool.Title} を表示");
-        }
-        tool.IsSelected = true;
-        ActiveContent = tool;
-    }
-
-    // ===== ×ボタンで閉じられたとき =====
-    private void OnPaneCloseRequested(object? sender, EventArgs e)
-    {
-        if (sender is not PaneViewModel pane) return;
-        pane.CloseRequested -= OnPaneCloseRequested;
-
-        switch (pane)
-        {
-            case DocumentViewModel doc: Documents.Remove(doc); break;
-            case ToolViewModel tool:    Tools.Remove(tool);    break;
-        }
-        _log.Write($"{pane.Title} を閉じました");
+        if (sender is not DocumentViewModel doc) return;
+        doc.CloseRequested -= OnDocumentCloseRequested;
+        Documents.Remove(doc);
+        _log.Write($"{doc.Title} を閉じました");
     }
 }

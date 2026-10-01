@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using DockSample.Services;
 
 namespace DockSample.ViewModels;
@@ -15,4 +16,10 @@ public partial class DocumentViewModel : PaneViewModel
     }
 
     [ObservableProperty] private string _text = "";
+
+    /// <summary>×ボタンで閉じるよう要求された（MainViewModel が購読）</summary>
+    public event EventHandler? CloseRequested;
+
+    [RelayCommand]
+    private void Close() => CloseRequested?.Invoke(this, EventArgs.Empty);
 }

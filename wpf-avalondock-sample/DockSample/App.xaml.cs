@@ -1,5 +1,6 @@
 using System.Windows;
 using CommunityToolkit.Mvvm.Messaging;
+using DockSample.Docking;
 using DockSample.Services;
 using DockSample.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,6 +20,7 @@ public partial class App : Application
         // Services
         services.AddSingleton<ILogService, LogService>();
         services.AddSingleton<IMessenger>(WeakReferenceMessenger.Default);
+        services.AddSingleton<DockLayoutStore>();
 
         // ツールウィンドウ（1つだけ存在する → Singleton）
         services.AddSingleton<ExplorerViewModel>();

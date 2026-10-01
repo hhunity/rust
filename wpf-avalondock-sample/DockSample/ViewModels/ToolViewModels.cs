@@ -8,7 +8,7 @@ namespace DockSample.ViewModels;
 
 public enum ToolLocation { Left, Right, Bottom }
 
-public abstract class ToolViewModel : PaneViewModel
+public abstract partial class ToolViewModel : PaneViewModel
 {
     protected ToolViewModel(string contentId, string title, ToolLocation location)
         : base(contentId)
@@ -19,6 +19,14 @@ public abstract class ToolViewModel : PaneViewModel
 
     /// <summary>初めて開くときにドッキングする場所</summary>
     public ToolLocation PreferredLocation { get; }
+
+    /// <summary>表示中かどうか（ToggleButton と ×ボタンの両方から変わる）</summary>
+    [ObservableProperty] private bool _isVisible;
+
+    partial void OnIsVisibleChanged(bool value)
+    {
+        if (value) IsSelected = true;   // 表示したらそのタブを前面に
+    }
 }
 
 // ---- メッセージ ----
