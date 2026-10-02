@@ -35,6 +35,12 @@ public abstract partial class PaneViewModel : ObservableObject
     [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private bool _isActive;
 
+    /// <summary>
+    /// このペインにエラーがあるか（上部のトグルボタンに印を出す）。
+    /// エラーを持つペインは override して、変化したら OnPropertyChanged(nameof(HasErrors)) すること。
+    /// </summary>
+    public virtual bool HasErrors => false;
+
     /// <summary>表示中かどうか（ToggleButton と ×ボタンの両方から変わる）</summary>
     [ObservableProperty] private bool _isVisible;
 

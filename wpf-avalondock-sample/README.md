@@ -9,6 +9,10 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - ボタンの表示名（`ButtonText`）とタブ/フローティングのタイトル（`Title`）は別々に指定できる
   - ペインの追加は `App.xaml.cs` に `AddSingleton<PaneViewModel>` を1行 + `App.xaml` に DataTemplate
 - ペインはドラッグでドッキング位置の変更・フローティングが可能
+- 「設定」ペイン：中に左タブ（TabStripPlacement=Left）を持つペインの例
+  - タブ名は左寄せ、`\n` で改行、幅を超えたら自動折り返し
+  - 入力エラーがあるタブに赤い「!」を表示（ObservableValidator + DataAnnotations）。ツールチップにエラー内容
+  - どこかのタブにエラーがあると、上部の「設定」ボタンにも同じ印を表示
 - 配置を記憶
   - 隠して再表示すると、隠す前の位置に戻る
   - 終了時に `%LocalAppData%\DockSample\layout.xml` へ保存し、次回起動時に復元（ファイルを消すと初期配置に戻る）

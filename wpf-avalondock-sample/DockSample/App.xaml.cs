@@ -30,6 +30,11 @@ public partial class App : Application
         services.AddSingleton<PaneViewModel, ExplorerViewModel>();
         services.AddSingleton<PaneViewModel, PropertiesViewModel>();
         services.AddSingleton<PaneViewModel, OutputViewModel>();
+        services.AddSingleton<PaneViewModel, SettingsViewModel>();
+
+        // 設定ペインの左タブのページ（登録順にタブが並ぶ）
+        services.AddSingleton<SettingsPageViewModel, GeneralPageViewModel>();
+        services.AddSingleton<SettingsPageViewModel, AppearancePageViewModel>();
 
         // Main
         services.AddSingleton<MainViewModel>();

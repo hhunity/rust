@@ -5,6 +5,7 @@
         xmlns:themes="clr-namespace:AvalonDock.Themes;assembly=AvalonDock.Themes.VS2013"
         xmlns:docking="clr-namespace:DockSample.Docking"
         xmlns:conv="clr-namespace:DockSample.Converters"
+        xmlns:views="clr-namespace:DockSample.Views"
         Title="AvalonDock MVVM + DI Sample" Width="1100" Height="700">
 
     <Window.Resources>
@@ -46,9 +47,19 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <ToggleButton Content="{Binding ButtonText}"
-                                      IsChecked="{Binding IsVisible}"
-                                      Margin="0,0,6,0" Padding="12,4" />
+                        <ToggleButton IsChecked="{Binding IsVisible}"
+                                      Margin="0,0,6,0" Padding="12,4">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding ButtonText}" VerticalAlignment="Center" />
+                                <!-- ペインにエラーがあるときだけ表示 -->
+                                <views:ErrorBadge x:Name="ErrorMark" Margin="6,0,0,0" Visibility="Collapsed" />
+                            </StackPanel>
+                        </ToggleButton>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding HasErrors}" Value="True">
+                                <Setter TargetName="ErrorMark" Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
