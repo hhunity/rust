@@ -8,8 +8,9 @@ public class LayoutInitializer : ILayoutUpdateStrategy
     public bool BeforeInsertAnchorable(LayoutRoot layout, LayoutAnchorable anchorableToShow,
                                        ILayoutContainer destinationContainer)
     {
-        // 一度隠したペインを再表示するときは、AvalonDock が覚えている元の位置に戻す
-        if (destinationContainer is { Root: not null }) return false;
+        // 一度隠したペインを再表示するときは、AvalonDock が覚えている元の位置に戻す。
+        // ※ destinationContainer では判定しないこと。AvalonDock は初回追加時にも
+        //   既定の候補（右側のペイン）を渡してくるので、それに任せると全部右に入ってしまう。
         if (((ILayoutPreviousContainer)anchorableToShow).PreviousContainer is { Root: not null }) return false;
 
         if (anchorableToShow.Content is not PaneViewModel pane) return false;
