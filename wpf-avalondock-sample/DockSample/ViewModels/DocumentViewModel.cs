@@ -5,8 +5,8 @@ namespace DockSample.ViewModels;
 /// <summary>中央のドキュメント領域に表示するペイン</summary>
 public partial class DocumentViewModel : PaneViewModel
 {
-    public DocumentViewModel(string contentId, string title)
-        : base(contentId, title, DockLocation.Document)
+    public DocumentViewModel(string contentId, string title, string? buttonText = null)
+        : base(contentId, title, DockLocation.Document, buttonText)
     {
     }
 

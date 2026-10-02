@@ -3,9 +3,10 @@
 Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extensions.DependencyInjection) で使うサンプル。
 
 - 上部の水平トグルボタンで、下のドッキングスペースにペインを表示/非表示
-  - 「ドキュメント1 / ドキュメント2」: 中央のドキュメント領域にタブで表示
+  - 「メモ / ドキュメント2」: 中央のドキュメント領域にタブで表示
   - 「エクスプローラー / プロパティ / 出力」: 左 / 右 / 下に表示
   - ドキュメントもツールも同じ仕組み（AvalonDock の Anchorable + IsVisible）で扱う
+  - ボタンの表示名（`ButtonText`）とタブ/フローティングのタイトル（`Title`）は別々に指定できる
   - ペインの追加は `App.xaml.cs` に `AddSingleton<PaneViewModel>` を1行 + `App.xaml` に DataTemplate
 - ペインはドラッグでドッキング位置の変更・フローティングが可能
 - 配置を記憶

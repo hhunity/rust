@@ -16,7 +16,7 @@ public partial class ExplorerViewModel : PaneViewModel
     private readonly ILogService _log;
 
     public ExplorerViewModel(IMessenger messenger, ILogService log)
-        : base("Tool_Explorer", "エクスプローラー", DockLocation.Left)
+        : base("Tool_Explorer", "ソリューション エクスプローラー", DockLocation.Left, buttonText: "エクスプローラー")
     {
         _messenger = messenger;
         _log = log;
@@ -57,7 +57,7 @@ public partial class PropertiesViewModel : PaneViewModel, IRecipient<SelectedIte
 public class OutputViewModel : PaneViewModel
 {
     public OutputViewModel(ILogService log)
-        : base("Tool_Output", "出力", DockLocation.Bottom)
+        : base("Tool_Output", "出力 - アプリケーションログ", DockLocation.Bottom, buttonText: "出力")
     {
         Log = log;
     }

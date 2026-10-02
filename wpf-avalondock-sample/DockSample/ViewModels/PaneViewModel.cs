@@ -12,10 +12,13 @@ public enum DockLocation { Left, Right, Bottom, Document }
 /// </summary>
 public abstract partial class PaneViewModel : ObservableObject
 {
-    protected PaneViewModel(string contentId, string title, DockLocation location)
+    /// <param name="title">タブ・タイトルバー・フローティングウィンドウに表示する名前</param>
+    /// <param name="buttonText">上部のトグルボタンに表示する名前（省略時は title と同じ）</param>
+    protected PaneViewModel(string contentId, string title, DockLocation location, string? buttonText = null)
     {
         ContentId = contentId;
         Title = title;
+        ButtonText = buttonText ?? title;
         PreferredLocation = location;
     }
 
@@ -24,7 +27,11 @@ public abstract partial class PaneViewModel : ObservableObject
 
     public DockLocation PreferredLocation { get; }
 
+    /// <summary>タブ・タイトルバー・フローティングウィンドウのタイトル</summary>
     [ObservableProperty] private string _title;
+
+    /// <summary>上部のトグルボタンの表示</summary>
+    [ObservableProperty] private string _buttonText;
     [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private bool _isActive;
 

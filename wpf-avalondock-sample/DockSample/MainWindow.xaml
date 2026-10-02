@@ -46,7 +46,7 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <ToggleButton Content="{Binding Title}"
+                        <ToggleButton Content="{Binding ButtonText}"
                                       IsChecked="{Binding IsVisible}"
                                       Margin="0,0,6,0" Padding="12,4" />
                     </DataTemplate>
