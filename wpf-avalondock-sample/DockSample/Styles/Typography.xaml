@@ -1,0 +1,70 @@
+<!--
+  文字のスタイル定義。App.xaml の MergedDictionaries で読み込み、アプリ全体で使う。
+
+  使い方:
+    <TextBlock Style="{StaticResource Text.Heading}" />
+    <TextBox FontSize="{DynamicResource FontSize.Body}" />
+
+  ・サイズは DynamicResource で参照しているので、実行中に
+    Application.Current.Resources["FontSize.Body"] = 14.0; のように差し替えると画面に反映される
+    （AppearanceService が設定ペインのフォントサイズと連動させている）
+  ・x:Key なしの TextBlock スタイル（暗黙スタイル）はここに置かないこと。
+    ボタンや AvalonDock のタブの中の TextBlock まで変わってしまう。
+-->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+
+    <!-- ===== 部品（フォント・サイズ・色） ===== -->
+    <FontFamily x:Key="Font.Base">Yu Gothic UI, Segoe UI</FontFamily>
+    <FontFamily x:Key="Font.Mono">Consolas, BIZ UDGothic</FontFamily>
+
+    <sys:Double x:Key="FontSize.Caption">11</sys:Double>
+    <sys:Double x:Key="FontSize.Body">12</sys:Double>
+    <sys:Double x:Key="FontSize.Heading">14</sys:Double>
+    <sys:Double x:Key="FontSize.Title">18</sys:Double>
+
+    <SolidColorBrush x:Key="Brush.Text"    Color="#1E1E1E" />
+    <SolidColorBrush x:Key="Brush.TextSub" Color="#6B6B6B" />
+    <SolidColorBrush x:Key="Brush.Error"   Color="#E81123" />
+
+    <!-- ===== 文字スタイル ===== -->
+    <!-- 基本。ほかのスタイルはこれを BasedOn で引き継ぐ -->
+    <Style x:Key="Text.Body" TargetType="TextBlock">
+        <Setter Property="FontFamily" Value="{StaticResource Font.Base}" />
+        <Setter Property="FontSize"   Value="{DynamicResource FontSize.Body}" />
+        <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style x:Key="Text.Title" TargetType="TextBlock" BasedOn="{StaticResource Text.Body}">
+        <Setter Property="FontSize"   Value="{DynamicResource FontSize.Title}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Margin"     Value="0,0,0,10" />
+    </Style>
+
+    <Style x:Key="Text.Heading" TargetType="TextBlock" BasedOn="{StaticResource Text.Body}">
+        <Setter Property="FontSize"   Value="{DynamicResource FontSize.Heading}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Margin"     Value="0,8,0,4" />
+    </Style>
+
+    <!-- 入力欄の上の項目名 -->
+    <Style x:Key="Text.Label" TargetType="TextBlock" BasedOn="{StaticResource Text.Body}">
+        <Setter Property="Margin" Value="0,0,0,4" />
+    </Style>
+
+    <!-- 補足説明・小さい項目名 -->
+    <Style x:Key="Text.Caption" TargetType="TextBlock" BasedOn="{StaticResource Text.Body}">
+        <Setter Property="FontSize"   Value="{DynamicResource FontSize.Caption}" />
+        <Setter Property="Foreground" Value="{StaticResource Brush.TextSub}" />
+    </Style>
+
+    <Style x:Key="Text.Error" TargetType="TextBlock" BasedOn="{StaticResource Text.Caption}">
+        <Setter Property="Foreground" Value="{StaticResource Brush.Error}" />
+    </Style>
+
+    <Style x:Key="Text.Code" TargetType="TextBlock" BasedOn="{StaticResource Text.Body}">
+        <Setter Property="FontFamily" Value="{StaticResource Font.Mono}" />
+    </Style>
+</ResourceDictionary>

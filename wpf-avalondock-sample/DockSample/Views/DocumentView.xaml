@@ -9,7 +9,5 @@
              d:DesignWidth="300" d:DesignHeight="200">
     <!-- DataContext は DataTemplate から DocumentViewModel が自動で入る（ここで設定しない） -->
     <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"
-             AcceptsReturn="True" AcceptsTab="True"
-             VerticalScrollBarVisibility="Auto"
-             FontFamily="Consolas" BorderThickness="0" />
+             Style="{StaticResource Input.Code}" />
 </UserControl>

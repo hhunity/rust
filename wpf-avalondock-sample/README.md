@@ -13,6 +13,11 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - タブ名は左寄せ、`\n` で改行、幅を超えたら自動折り返し
   - 入力エラーがあるタブに赤い「!」を表示（ObservableValidator + DataAnnotations）。ツールチップにエラー内容
   - どこかのタブにエラーがあると、上部の「設定」ボタンにも同じ印を表示
+- 共通スタイル（`Styles/`）
+  - `Typography.xaml`: フォント・文字サイズ・色と、文字スタイル（Text.Title / Heading / Label / Body / Caption / Error / Code）
+  - `Controls.xaml`: 入力欄・一覧のスタイル（Input.TextBox / Input.Code / Input.CheckBox / List.Plain / List.Code）
+  - 使い方: `<TextBlock Style="{StaticResource Text.Heading}" />`
+  - 文字サイズは DynamicResource なので、設定ペインの「文字サイズ」を変えるとアプリ全体に即反映
 - 配置を記憶
   - 隠して再表示すると、隠す前の位置に戻る
   - 終了時に `%LocalAppData%\DockSample\layout.xml` へ保存し、次回起動時に復元（ファイルを消すと初期配置に戻る）
@@ -27,8 +32,9 @@ DockSample/
 ├─ Views/                   各ペインの UserControl
 ├─ ViewModels/              Main / Pane(基底) / Document / Explorer, Properties, Output
 ├─ Docking/                 LayoutInitializer(初期配置) / DockLayoutStore(保存・復元)
+├─ Styles/                  文字・コントロールの共通スタイル
 ├─ Converters/              bool → Visibility(Hidden)
-└─ Services/                ILogService
+└─ Services/                ILogService / IAppearanceService(文字サイズの変更)
 ```
 
 ## 実行

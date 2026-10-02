@@ -21,6 +21,7 @@ public partial class App : Application
         services.AddSingleton<ILogService, LogService>();
         services.AddSingleton<IMessenger>(WeakReferenceMessenger.Default);
         services.AddSingleton<DockLayoutStore>();
+        services.AddSingleton<IAppearanceService, AppearanceService>();
 
         // ドッキングペイン。PaneViewModel として登録した順にトグルボタンが並ぶ。
         // ペインを増やすときはここに1行足して、App.xaml に DataTemplate を足すだけ。

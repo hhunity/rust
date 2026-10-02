@@ -50,7 +50,8 @@
                         <ToggleButton IsChecked="{Binding IsVisible}"
                                       Margin="0,0,6,0" Padding="12,4">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="{Binding ButtonText}" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding ButtonText}" Style="{StaticResource Text.Body}"
+                                           VerticalAlignment="Center" />
                                 <!-- ペインにエラーがあるときだけ表示 -->
                                 <views:ErrorBadge x:Name="ErrorMark" Margin="6,0,0,0" Visibility="Collapsed" />
                             </StackPanel>

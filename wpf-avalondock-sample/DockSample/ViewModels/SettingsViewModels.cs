@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using CommunityToolkit.Mvvm.ComponentModel;
+using DockSample.Services;
 
 namespace DockSample.ViewModels;
 
@@ -47,12 +48,24 @@ public partial class GeneralPageViewModel : SettingsPageViewModel
 // ---- 外観 ----
 public partial class AppearancePageViewModel : SettingsPageViewModel
 {
-    public AppearancePageViewModel() : base("外観と\nフォント設定") { }
+    private readonly IAppearanceService _appearance;
+
+    public AppearancePageViewModel(IAppearanceService appearance) : base("外観と\nフォント設定")
+    {
+        _appearance = appearance;
+    }
 
     [ObservableProperty]
     [NotifyDataErrorInfo]
     [Range(8, 32, ErrorMessage = "フォントサイズは 8～32 で指定してください")]
     private int _fontSize = 12;
+
+    // 範囲内の値になったら、アプリ全体の文字サイズに反映する
+    partial void OnFontSizeChanged(int value)
+    {
+        if (value is >= 8 and <= 32)
+            _appearance.ApplyBaseFontSize(value);
+    }
 }
 
 // ---- 設定ペイン本体（左にタブ） ----

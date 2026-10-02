@@ -9,9 +9,10 @@
              d:DesignWidth="300" d:DesignHeight="200">
     <!-- DataContext は DataTemplate から PropertiesViewModel が自動で入る（ここで設定しない） -->
     <StackPanel Margin="8">
-        <TextBlock Text="選択項目" FontWeight="Bold" />
-        <TextBlock Text="{Binding SelectedName, TargetNullValue=(なし)}" Margin="0,0,0,8" />
-        <TextBlock Text="文字数" FontWeight="Bold" />
-        <TextBlock Text="{Binding Length}" />
+        <TextBlock Text="選択項目" Style="{StaticResource Text.Caption}" />
+        <TextBlock Text="{Binding SelectedName, TargetNullValue=(なし)}"
+                   Style="{StaticResource Text.Heading}" Margin="0,0,0,8" />
+        <TextBlock Text="文字数" Style="{StaticResource Text.Caption}" />
+        <TextBlock Text="{Binding Length}" Style="{StaticResource Text.Body}" />
     </StackPanel>
 </UserControl>

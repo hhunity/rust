@@ -7,30 +7,24 @@
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:AppearancePageViewModel}"
              d:DesignWidth="300" d:DesignHeight="200">
-    <UserControl.Resources>
-        <!-- エラー時に入力欄の下へメッセージを出す（INotifyDataErrorInfo の内容） -->
-        <Style TargetType="TextBox">
-            <Setter Property="Padding" Value="3,2" />
-            <Setter Property="Validation.ErrorTemplate">
-                <Setter.Value>
-                    <ControlTemplate>
-                        <StackPanel>
-                            <Border BorderBrush="#E81123" BorderThickness="1">
-                                <AdornedElementPlaceholder />
-                            </Border>
-                            <TextBlock Text="{Binding [0].ErrorContent}" Foreground="#E81123" Margin="0,2,0,0" />
-                        </StackPanel>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </UserControl.Resources>
 
+    <!-- 文字・入力欄のスタイルは Styles/Typography.xaml, Styles/Controls.xaml -->
     <StackPanel Margin="12">
-        <TextBlock Text="フォントサイズ (8～32)" Margin="0,0,0,4" />
-        <TextBox Text="{Binding FontSize, UpdateSourceTrigger=PropertyChanged}"
-                 Width="80" HorizontalAlignment="Left" Margin="0,0,0,22" />
+        <TextBlock Text="外観" Style="{StaticResource Text.Title}" />
 
-        <TextBlock Text="プレビュー" FontSize="{Binding FontSize}" />
+        <TextBlock Text="文字サイズ" Style="{StaticResource Text.Label}" />
+        <TextBox Text="{Binding FontSize, UpdateSourceTrigger=PropertyChanged}"
+                 Style="{StaticResource Input.TextBox}"
+                 Width="80" HorizontalAlignment="Left" Margin="0,0,0,22" />
+        <TextBlock Text="8～32 で指定。アプリ全体の文字サイズがすぐに変わります。"
+                   Style="{StaticResource Text.Caption}" />
+
+        <TextBlock Text="スタイル見本" Style="{StaticResource Text.Heading}" />
+        <TextBlock Text="Text.Title"   Style="{StaticResource Text.Title}" Margin="0" />
+        <TextBlock Text="Text.Heading" Style="{StaticResource Text.Heading}" Margin="0" />
+        <TextBlock Text="Text.Body"    Style="{StaticResource Text.Body}" />
+        <TextBlock Text="Text.Caption" Style="{StaticResource Text.Caption}" />
+        <TextBlock Text="Text.Error"   Style="{StaticResource Text.Error}" />
+        <TextBlock Text="Text.Code"    Style="{StaticResource Text.Code}" />
     </StackPanel>
 </UserControl>

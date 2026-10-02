@@ -7,31 +7,21 @@
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:GeneralPageViewModel}"
              d:DesignWidth="300" d:DesignHeight="200">
-    <UserControl.Resources>
-        <!-- エラー時に入力欄の下へメッセージを出す（INotifyDataErrorInfo の内容） -->
-        <Style TargetType="TextBox">
-            <Setter Property="Padding" Value="3,2" />
-            <Setter Property="Validation.ErrorTemplate">
-                <Setter.Value>
-                    <ControlTemplate>
-                        <StackPanel>
-                            <Border BorderBrush="#E81123" BorderThickness="1">
-                                <AdornedElementPlaceholder />
-                            </Border>
-                            <TextBlock Text="{Binding [0].ErrorContent}" Foreground="#E81123" Margin="0,2,0,0" />
-                        </StackPanel>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-    </UserControl.Resources>
 
+    <!-- 文字・入力欄のスタイルは Styles/Typography.xaml, Styles/Controls.xaml -->
     <StackPanel Margin="12">
-        <TextBlock Text="ユーザー名" Margin="0,0,0,4" />
+        <TextBlock Text="全般" Style="{StaticResource Text.Title}" />
+
+        <TextBlock Text="ユーザー名" Style="{StaticResource Text.Label}" />
         <!-- 下にエラーメッセージを出す分、余白を多めに取る -->
         <TextBox Text="{Binding UserName, UpdateSourceTrigger=PropertyChanged}"
+                 Style="{StaticResource Input.TextBox}"
                  Width="200" HorizontalAlignment="Left" Margin="0,0,0,22" />
 
-        <CheckBox Content="自動保存する" IsChecked="{Binding AutoSave}" />
+        <TextBlock Text="保存" Style="{StaticResource Text.Heading}" />
+        <CheckBox Content="自動保存する" IsChecked="{Binding AutoSave}"
+                  Style="{StaticResource Input.CheckBox}" />
+        <TextBlock Text="編集内容を一定間隔で自動的に保存します。"
+                   Style="{StaticResource Text.Caption}" Margin="20,2,0,0" />
     </StackPanel>
 </UserControl>

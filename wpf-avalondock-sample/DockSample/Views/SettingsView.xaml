@@ -39,6 +39,7 @@
 
                     <TextBlock x:Name="HeaderText"
                                Text="{Binding Header}"
+                               Style="{StaticResource Text.Body}"
                                TextWrapping="Wrap" TextAlignment="Left"
                                HorizontalAlignment="Left" VerticalAlignment="Center" />
 
@@ -50,7 +51,7 @@
                 <DataTemplate.Triggers>
                     <DataTrigger Binding="{Binding HasErrors}" Value="True">
                         <Setter TargetName="ErrorMark" Property="Visibility" Value="Visible" />
-                        <Setter TargetName="HeaderText" Property="Foreground" Value="#E81123" />
+                        <Setter TargetName="HeaderText" Property="Foreground" Value="{StaticResource Brush.Error}" />
                     </DataTrigger>
                 </DataTemplate.Triggers>
             </DataTemplate>

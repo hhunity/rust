@@ -4,7 +4,7 @@
              Width="14" Height="14" VerticalAlignment="Center">
     <!-- エラーの印（赤丸に「!」）。タブと上部ボタンで共通に使う -->
     <Grid>
-        <Ellipse Fill="#E81123" />
+        <Ellipse Fill="{StaticResource Brush.Error}" />
         <TextBlock Text="!" Foreground="White" FontWeight="Bold" FontSize="10"
                    HorizontalAlignment="Center" VerticalAlignment="Center" />
     </Grid>

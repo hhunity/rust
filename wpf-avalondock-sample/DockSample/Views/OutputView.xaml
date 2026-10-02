@@ -9,5 +9,5 @@
              d:DesignWidth="300" d:DesignHeight="200">
     <!-- DataContext は DataTemplate から OutputViewModel が自動で入る（ここで設定しない） -->
     <ListBox ItemsSource="{Binding Log.Messages}"
-             FontFamily="Consolas" BorderThickness="0" />
+             Style="{StaticResource List.Code}" />
 </UserControl>

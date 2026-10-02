@@ -9,5 +9,6 @@
              d:DesignWidth="300" d:DesignHeight="200">
     <!-- DataContext は DataTemplate から ExplorerViewModel が自動で入る（ここで設定しない） -->
     <ListBox ItemsSource="{Binding Items}"
-             SelectedItem="{Binding SelectedItem}" BorderThickness="0" />
+             SelectedItem="{Binding SelectedItem}"
+             Style="{StaticResource List.Plain}" />
 </UserControl>

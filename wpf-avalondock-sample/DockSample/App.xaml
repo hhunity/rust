@@ -5,37 +5,45 @@
              xmlns:views="clr-namespace:DockSample.Views">
     <!-- StartupUri は削除（DIで MainWindow を生成するため） -->
     <Application.Resources>
-        <!--
-          ViewModel → View(UserControl) の対応表。
-          フローティングウィンドウからも見つかるよう App レベルに置く。
-        -->
-        <DataTemplate DataType="{x:Type vm:DocumentViewModel}">
-            <views:DocumentView />
-        </DataTemplate>
+        <ResourceDictionary>
+            <!-- 共通スタイル（Styles/ フォルダ）。文字 → コントロールの順で読み込む -->
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Styles/Typography.xaml" />
+                <ResourceDictionary Source="Styles/Controls.xaml" />
+            </ResourceDictionary.MergedDictionaries>
 
-        <DataTemplate DataType="{x:Type vm:ExplorerViewModel}">
-            <views:ExplorerView />
-        </DataTemplate>
+            <!--
+              ViewModel → View(UserControl) の対応表。
+              フローティングウィンドウからも見つかるよう App レベルに置く。
+            -->
+            <DataTemplate DataType="{x:Type vm:DocumentViewModel}">
+                <views:DocumentView />
+            </DataTemplate>
 
-        <DataTemplate DataType="{x:Type vm:PropertiesViewModel}">
-            <views:PropertiesView />
-        </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:ExplorerViewModel}">
+                <views:ExplorerView />
+            </DataTemplate>
 
-        <DataTemplate DataType="{x:Type vm:OutputViewModel}">
-            <views:OutputView />
-        </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:PropertiesViewModel}">
+                <views:PropertiesView />
+            </DataTemplate>
 
-        <!-- 設定ペインと、その左タブの各ページ -->
-        <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
-            <views:SettingsView />
-        </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:OutputViewModel}">
+                <views:OutputView />
+            </DataTemplate>
 
-        <DataTemplate DataType="{x:Type vm:GeneralPageViewModel}">
-            <views:GeneralPageView />
-        </DataTemplate>
+            <!-- 設定ペインと、その左タブの各ページ -->
+            <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
+                <views:SettingsView />
+            </DataTemplate>
 
-        <DataTemplate DataType="{x:Type vm:AppearancePageViewModel}">
-            <views:AppearancePageView />
-        </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:GeneralPageViewModel}">
+                <views:GeneralPageView />
+            </DataTemplate>
+
+            <DataTemplate DataType="{x:Type vm:AppearancePageViewModel}">
+                <views:AppearancePageView />
+            </DataTemplate>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>
