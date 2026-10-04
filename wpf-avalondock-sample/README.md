@@ -12,6 +12,7 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
 - 「設定」ペイン：中に左タブ（TabStripPlacement=Left）を持つペインの例
   - タブ名は左寄せ、`\n` で改行、幅を超えたら自動折り返し
   - 入力エラーがあるタブに赤い「!」を表示（ObservableValidator + DataAnnotations）。ツールチップにエラー内容
+  - 「全般」の「自動保存する」をチェックすると、下に保存間隔などの詳細設定が出る（OFF の間は隠れた項目のエラーを数えない）
   - どこかのタブにエラーがあると、上部の「設定」ボタンにも同じ印を表示
 - 共通スタイル（`Styles/`）
   - `Typography.xaml`: フォント・文字サイズ・色と、文字スタイル（Text.Title / Heading / Label / Body / Caption / Error / Code）

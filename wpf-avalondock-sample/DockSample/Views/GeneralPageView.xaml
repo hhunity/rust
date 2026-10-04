@@ -23,5 +23,17 @@
                   Style="{StaticResource Input.CheckBox}" />
         <TextBlock Text="編集内容を一定間隔で自動的に保存します。"
                    Style="{StaticResource Text.Caption}" Margin="20,2,0,0" />
+
+        <!-- ▼ チェック ON のときだけ出てくる詳細設定（OFF なら Collapsed で場所ごと消える） -->
+        <StackPanel Margin="20,8,0,0"
+                    Visibility="{Binding AutoSave, Converter={StaticResource BoolToVisible}}">
+            <TextBlock Text="保存間隔（分）" Style="{StaticResource Text.Label}" />
+            <TextBox Text="{Binding AutoSaveInterval, UpdateSourceTrigger=PropertyChanged}"
+                     Style="{StaticResource Input.TextBox}"
+                     Width="60" HorizontalAlignment="Left" Margin="0,0,0,22" />
+
+            <CheckBox Content="終了時にも保存する" IsChecked="{Binding SaveOnClose}"
+                      Style="{StaticResource Input.CheckBox}" />
+        </StackPanel>
     </StackPanel>
 </UserControl>

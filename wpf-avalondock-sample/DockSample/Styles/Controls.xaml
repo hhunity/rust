@@ -39,6 +39,10 @@
         <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
     </Style>
 
+    <!-- true → Visible / false → Collapsed（WPF標準）。チェックONで項目を出す、などに使う。
+         ※ Converters/BoolToVisibilityConverter（Hidden を返す）は AvalonDock のペイン専用 -->
+    <BooleanToVisibilityConverter x:Key="BoolToVisible" />
+
     <Style x:Key="Input.CheckBox" TargetType="CheckBox">
         <Setter Property="FontFamily" Value="{StaticResource Font.Base}" />
         <Setter Property="FontSize"   Value="{DynamicResource FontSize.Body}" />

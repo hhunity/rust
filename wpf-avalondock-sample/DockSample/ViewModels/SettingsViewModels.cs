@@ -42,7 +42,25 @@ public partial class GeneralPageViewModel : SettingsPageViewModel
     [MaxLength(20, ErrorMessage = "ユーザー名は20文字以内です")]
     private string _userName = "";
 
+    /// <summary>チェックボックスと、下に出てくる詳細設定の両方がこれを見る</summary>
     [ObservableProperty] private bool _autoSave = true;
+
+    // ---- 自動保存が ON のときだけ表示される設定 ----
+    [ObservableProperty]
+    [NotifyDataErrorInfo]
+    [Range(1, 60, ErrorMessage = "保存間隔は 1～60 分で指定してください")]
+    private int _autoSaveInterval = 5;
+
+    [ObservableProperty] private bool _saveOnClose = true;
+
+    // 隠れている項目のエラーでタブに印が出ないよう、OFF ならエラーを消し、ON で検証し直す
+    partial void OnAutoSaveChanged(bool value)
+    {
+        if (value)
+            ValidateProperty(AutoSaveInterval, nameof(AutoSaveInterval));
+        else
+            ClearErrors(nameof(AutoSaveInterval));
+    }
 }
 
 // ---- 外観 ----
