@@ -20,7 +20,8 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - 使い方: `<TextBlock Style="{StaticResource Text.Heading}" />`
   - 文字サイズは DynamicResource なので、設定ペインの「文字サイズ」を変えるとアプリ全体に即反映
 - 数値入力の部品（`Controls/NumericUpDown`）
-  - テキストボックス＋上下ボタン。↑↓キー・ホイール（フォーカス時）・PageUp/PageDown（10倍）でも増減、押しっぱなしで連続増減
+  - テキストボックス＋上下ボタン。↑↓キーでも増減、押しっぱなしで連続増減
+  - PageUp/PageDown とマウスホイール（フォーカス時）は `LargeIncrement`（未指定なら Increment の10倍）ずつ。Ctrl＋ホイールは Increment ずつの微調整
   - `Minimum` / `Maximum` の外には出ない（端に達したボタンは無効）。`Increment` で増減幅、`DecimalPlaces` で小数の桁数
   - 使い方: `<controls:NumericUpDown Value="{Binding X}" Minimum="0" Maximum="10" Increment="0.1" DecimalPlaces="1" Style="{StaticResource Input.Numeric}" />`
 - 配置を記憶

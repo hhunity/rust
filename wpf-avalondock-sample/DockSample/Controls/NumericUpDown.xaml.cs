@@ -7,7 +7,8 @@ namespace DockSample.Controls;
 
 /// <summary>
 /// 数値入力の部品（テキストボックス＋上下ボタン）。
-/// ・上下ボタン / ↑↓キー / マウスホイールで Increment ずつ増減（PageUp/PageDown は10倍）
+/// ・上下ボタン / ↑↓キーで Increment ずつ増減
+/// ・PageUp/PageDown とマウスホイールで LargeIncrement ずつ増減（Ctrl＋ホイールは Increment ずつの微調整）
 /// ・Minimum～Maximum の範囲外にはならない（ボタンも端で無効になる）
 /// ・直接入力した値は Enter かフォーカスが外れたときに確定。数値でなければ元に戻す
 /// ・DecimalPlaces の桁で丸める（0.1 を足し続けたときの 0.30000000000000004 のような誤差を防ぐ）
@@ -70,6 +71,21 @@ public partial class NumericUpDown : UserControl
         nameof(Increment), typeof(double), typeof(NumericUpDown),
         new PropertyMetadata(1.0));
 
+    /// <summary>
+    /// PageUp/PageDown・マウスホイールの増減幅。未指定（NaN）なら Increment の10倍
+    /// </summary>
+    public double LargeIncrement
+    {
+        get => (double)GetValue(LargeIncrementProperty);
+        set => SetValue(LargeIncrementProperty, value);
+    }
+    public static readonly DependencyProperty LargeIncrementProperty = DependencyProperty.Register(
+        nameof(LargeIncrement), typeof(double), typeof(NumericUpDown),
+        new PropertyMetadata(double.NaN));
+
+    private double EffectiveLargeIncrement =>
+        double.IsNaN(LargeIncrement) ? Increment * 10 : LargeIncrement;
+
     /// <summary>小数点以下の桁数（表示と丸め）。0 なら整数</summary>
     public int DecimalPlaces
     {
@@ -117,34 +133,40 @@ public partial class NumericUpDown : UserControl
 
     // ===== 操作 =====
 
-    private void OnUpClick(object sender, RoutedEventArgs e) => Step(+1);
-    private void OnDownClick(object sender, RoutedEventArgs e) => Step(-1);
+    private void OnUpClick(object sender, RoutedEventArgs e) => Step(+Increment);
+    private void OnDownClick(object sender, RoutedEventArgs e) => Step(-Increment);
 
-    /// <summary>Increment × count だけ増減する</summary>
-    private void Step(int count)
+    /// <summary>delta だけ増減する</summary>
+    private void Step(double delta)
     {
         CommitText();   // 入力途中の値があれば、それを基準にする
-        Value = Normalize(Value + Increment * count);
+        Value = Normalize(Value + delta);
     }
 
     private void OnTextPreviewKeyDown(object sender, KeyEventArgs e)
     {
         switch (e.Key)
         {
-            case Key.Up:       Step(+1);  e.Handled = true; break;
-            case Key.Down:     Step(-1);  e.Handled = true; break;
-            case Key.PageUp:   Step(+10); e.Handled = true; break;
-            case Key.PageDown: Step(-10); e.Handled = true; break;
+            case Key.Up:       Step(+Increment);               e.Handled = true; break;
+            case Key.Down:     Step(-Increment);               e.Handled = true; break;
+            case Key.PageUp:   Step(+EffectiveLargeIncrement); e.Handled = true; break;
+            case Key.PageDown: Step(-EffectiveLargeIncrement); e.Handled = true; break;
             case Key.Enter:    CommitText(); PART_Text.SelectAll(); e.Handled = true; break;
             case Key.Escape:   UpdateText(); PART_Text.SelectAll(); e.Handled = true; break;
         }
     }
 
-    // ホイールはフォーカスがあるときだけ（スクロール中に誤って値が変わらないように）
+    // ホイール：PageUp/PageDown と同じ幅で増減。Ctrl を押しながらなら Increment ずつ（微調整）。
+    // フォーカスがあるときだけ反応する（画面をスクロール中に誤って値が変わらないように）
     private void OnTextMouseWheel(object sender, MouseWheelEventArgs e)
     {
         if (!PART_Text.IsKeyboardFocusWithin) return;
-        Step(e.Delta > 0 ? +1 : -1);
+
+        var step = Keyboard.Modifiers.HasFlag(ModifierKeys.Control)
+            ? Increment
+            : EffectiveLargeIncrement;
+
+        Step(e.Delta > 0 ? +step : -step);
         e.Handled = true;
     }
 
