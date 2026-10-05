@@ -25,7 +25,9 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - `Minimum` / `Maximum` の外には出ない（端に達したボタンは無効）。`Increment` で増減幅、`DecimalPlaces` で小数の桁数
   - 使い方: `<controls:NumericUpDown Value="{Binding X}" Minimum="0" Maximum="10" Increment="0.1" DecimalPlaces="1" Style="{StaticResource Input.Numeric}" />`
 - 設定の保存（`Settings/`, `Services/SettingsService.cs`）
-  - 設定画面の値を `%LocalAppData%\DockSample\settings.json` に保存し、次回起動時に復元（ファイルを消すと初期値）
+  - 設定ペイン下の「保存」で `%LocalAppData%\DockSample\settings.json` に保存し、次回起動時に復元（ファイルを消すと初期値）
+  - 「元に戻す」で最後に保存した状態に戻る。どちらも変更があるときだけ押せる（保存はエラーがあると押せない）
+  - 未保存の変更があるまま終了しようとすると、保存するか確認する
   - 保存する項目は `Settings/AppSettings.cs` に定義。ViewModel と**同じ名前**のプロパティが自動で読み書きされる（`BindSettings`）
   - 項目を増やすときは、ViewModel に `[ObservableProperty]` を、`AppSettings` 側に同じ名前のプロパティを足すだけ
 - 配置を記憶

@@ -56,6 +56,14 @@
         <Setter Property="FontSize"   Value="{DynamicResource FontSize.Body}" />
     </Style>
 
+    <!-- ボタン。幅は Auto（文字＋左右の Padding）で、短い文字でも MinWidth までは確保する -->
+    <Style x:Key="Button.Default" TargetType="Button">
+        <Setter Property="FontFamily" Value="{StaticResource Font.Base}" />
+        <Setter Property="FontSize"   Value="{DynamicResource FontSize.Body}" />
+        <Setter Property="Padding"    Value="12,4" />
+        <Setter Property="MinWidth"   Value="72" />
+    </Style>
+
     <!-- 一覧 -->
     <Style x:Key="List.Plain" TargetType="ListBox">
         <Setter Property="FontFamily" Value="{StaticResource Font.Base}" />

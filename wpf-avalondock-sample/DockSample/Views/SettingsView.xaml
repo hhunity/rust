@@ -13,50 +13,68 @@
       HorizontalContentAlignment は TabControl 側に指定する
       （標準の TabItem はヘッダー位置を親の TabControl から取るため、TabItem に指定しても効かない）
     -->
-    <TabControl ItemsSource="{Binding Pages}"
-                SelectedItem="{Binding SelectedPage}"
-                TabStripPlacement="Left"
-                HorizontalContentAlignment="Left"
-                BorderThickness="1,0,0,0">
+    <DockPanel>
+        <!-- 下：保存 / 元に戻す（右寄せ）。左に未保存の表示 -->
+        <Border DockPanel.Dock="Bottom" BorderBrush="#CCC" BorderThickness="0,1,0,0" Padding="8,6">
+            <DockPanel LastChildFill="False">
+                <Button DockPanel.Dock="Right" Content="保存"
+                        Command="{Binding SaveCommand}"
+                        Style="{StaticResource Button.Default}" />
+                <Button DockPanel.Dock="Right" Content="元に戻す"
+                        Command="{Binding RevertCommand}"
+                        Style="{StaticResource Button.Default}" Margin="0,0,6,0" />
 
-        <!-- タブの幅・余白 -->
-        <TabControl.ItemContainerStyle>
-            <Style TargetType="TabItem">
-                <!-- 自動で折り返したいなら Width を固定する。\n で改行するだけなら MinWidth でよい -->
-                <Setter Property="Width" Value="120" />
-                <Setter Property="Padding" Value="10,6" />
-            </Style>
-        </TabControl.ItemContainerStyle>
+                <TextBlock DockPanel.Dock="Left" Text="● 保存していない変更があります"
+                           Style="{StaticResource Text.Caption}" VerticalAlignment="Center"
+                           Visibility="{Binding IsDirty, Converter={StaticResource BoolToVisible}}" />
+            </DockPanel>
+        </Border>
 
-        <!-- ヘッダー：左寄せ・改行対応・エラーの印 -->
-        <TabControl.ItemTemplate>
-            <DataTemplate>
-                <Grid ToolTip="{Binding ErrorSummary}">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
+        <TabControl ItemsSource="{Binding Pages}"
+                    SelectedItem="{Binding SelectedPage}"
+                    TabStripPlacement="Left"
+                    HorizontalContentAlignment="Left"
+                    BorderThickness="1,0,0,0">
 
-                    <TextBlock x:Name="HeaderText"
-                               Text="{Binding Header}"
-                               Style="{StaticResource Text.Body}"
-                               TextWrapping="Wrap" TextAlignment="Left"
-                               HorizontalAlignment="Left" VerticalAlignment="Center" />
+            <!-- タブの幅・余白 -->
+            <TabControl.ItemContainerStyle>
+                <Style TargetType="TabItem">
+                    <!-- 自動で折り返したいなら Width を固定する。\n で改行するだけなら MinWidth でよい -->
+                    <Setter Property="Width" Value="120" />
+                    <Setter Property="Padding" Value="10,6" />
+                </Style>
+            </TabControl.ItemContainerStyle>
 
-                    <views:ErrorBadge x:Name="ErrorMark" Grid.Column="1"
-                                      Margin="6,0,0,0" Visibility="Collapsed" />
-                </Grid>
+            <!-- ヘッダー：左寄せ・改行対応・エラーの印 -->
+            <TabControl.ItemTemplate>
+                <DataTemplate>
+                    <Grid ToolTip="{Binding ErrorSummary}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
 
-                <!-- HasErrors が true のときだけ、印を表示して文字も赤くする -->
-                <DataTemplate.Triggers>
-                    <DataTrigger Binding="{Binding HasErrors}" Value="True">
-                        <Setter TargetName="ErrorMark" Property="Visibility" Value="Visible" />
-                        <Setter TargetName="HeaderText" Property="Foreground" Value="{StaticResource Brush.Error}" />
-                    </DataTrigger>
-                </DataTemplate.Triggers>
-            </DataTemplate>
-        </TabControl.ItemTemplate>
+                        <TextBlock x:Name="HeaderText"
+                                   Text="{Binding Header}"
+                                   Style="{StaticResource Text.Body}"
+                                   TextWrapping="Wrap" TextAlignment="Left"
+                                   HorizontalAlignment="Left" VerticalAlignment="Center" />
 
-        <!-- タブの中身は App.xaml の DataTemplate（ページの ViewModel → View）で決まる -->
-    </TabControl>
+                        <views:ErrorBadge x:Name="ErrorMark" Grid.Column="1"
+                                          Margin="6,0,0,0" Visibility="Collapsed" />
+                    </Grid>
+
+                    <!-- HasErrors が true のときだけ、印を表示して文字も赤くする -->
+                    <DataTemplate.Triggers>
+                        <DataTrigger Binding="{Binding HasErrors}" Value="True">
+                            <Setter TargetName="ErrorMark" Property="Visibility" Value="Visible" />
+                            <Setter TargetName="HeaderText" Property="Foreground" Value="{StaticResource Brush.Error}" />
+                        </DataTrigger>
+                    </DataTemplate.Triggers>
+                </DataTemplate>
+            </TabControl.ItemTemplate>
+
+            <!-- タブの中身は App.xaml の DataTemplate（ページの ViewModel → View）で決まる -->
+        </TabControl>
+    </DockPanel>
 </UserControl>

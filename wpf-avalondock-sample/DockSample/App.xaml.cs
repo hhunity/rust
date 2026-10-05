@@ -48,8 +48,6 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        // 設定を settings.json に保存（画面で変えた値は、その時点で AppSettings に書き写されている）
-        _provider?.GetRequiredService<ISettingsService>().Save();
         _provider?.Dispose();
         base.OnExit(e);
     }

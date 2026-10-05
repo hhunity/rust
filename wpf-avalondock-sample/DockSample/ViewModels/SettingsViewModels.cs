@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using DockSample.Services;
 using DockSample.Settings;
 
@@ -14,24 +15,38 @@ namespace DockSample.ViewModels;
 /// </summary>
 public abstract class SettingsPageViewModel : ObservableValidator
 {
+    private ISettingsService? _service;
     private object? _settings;
 
     /// <summary>
     /// このページが読み書きする設定クラスを登録し、保存されていた値を読み込む。
     /// 以降、ViewModel のプロパティが変わるたびに、同じ名前の設定にも書き写される。
+    /// 「元に戻す」されたときは、設定から値を読み直す。
     /// </summary>
-    protected void BindSettings(object settings)
+    protected void BindSettings(ISettingsService service, object settings)
     {
         PropertyCopier.CopyAll(settings, this);   // 設定 → ViewModel（同じ名前のものだけ）
+        _service = service;
         _settings = settings;                     // 読み込みが終わってから書き写しを有効にする
+        service.Reverted += (_, _) => ReloadFromSettings();
+    }
+
+    private void ReloadFromSettings()
+    {
+        if (_settings is not { } settings) return;
+        _settings = null;                         // 読み直している間は書き写さない
+        PropertyCopier.CopyAll(settings, this);
+        _settings = settings;
     }
 
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
+        if (_settings is null) return;
+
         // ViewModel → 設定（設定クラスに同じ名前がないプロパティは無視される）
-        if (_settings is not null)
-            PropertyCopier.CopyOne(this, _settings, e.PropertyName);
+        PropertyCopier.CopyOne(this, _settings, e.PropertyName);
+        _service?.NotifyChanged();                // 未保存の変更があるかを更新
     }
 
     protected SettingsPageViewModel(string header)
@@ -55,7 +70,7 @@ public partial class GeneralPageViewModel : SettingsPageViewModel
 {
     public GeneralPageViewModel(ISettingsService settings) : base("全般")
     {
-        BindSettings(settings.Current.General);   // 保存値の読み込み＋以降の自動書き写し
+        BindSettings(settings, settings.Current.General);   // 保存値の読み込み＋以降の自動書き写し
         ValidateAllProperties();                  // 起動直後から未入力をエラーとして表示する
     }
 
@@ -96,7 +111,7 @@ public partial class AppearancePageViewModel : SettingsPageViewModel
     {
         _appearance = appearance;
         // 保存値の読み込み。FontSize が変われば OnFontSizeChanged が呼ばれ、起動時に文字サイズも反映される
-        BindSettings(settings.Current.Appearance);
+        BindSettings(settings, settings.Current.Appearance);
     }
 
     [ObservableProperty]
@@ -115,17 +130,42 @@ public partial class AppearancePageViewModel : SettingsPageViewModel
 // ---- 設定ペイン本体（左にタブ） ----
 public partial class SettingsViewModel : PaneViewModel
 {
+    private readonly ISettingsService _settings;
+
     /// <param name="pages">DI に SettingsPageViewModel として登録したページ（登録順にタブが並ぶ）</param>
-    public SettingsViewModel(IEnumerable<SettingsPageViewModel> pages)
+    public SettingsViewModel(IEnumerable<SettingsPageViewModel> pages, ISettingsService settings)
         : base("Tool_Settings", "設定", DockLocation.Right)
     {
+        _settings = settings;
         Pages = new ObservableCollection<SettingsPageViewModel>(pages);
         _selectedPage = Pages.FirstOrDefault();
 
         // どれかのページのエラー状態が変わったら、ペイン全体の HasErrors も通知する
         foreach (var page in Pages)
             page.PropertyChanged += OnPagePropertyChanged;
+
+        // 未保存の変更の有無が変わったら、表示とボタンの押せる/押せないを更新する
+        _settings.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(ISettingsService.IsDirty)) return;
+            OnPropertyChanged(nameof(IsDirty));
+            SaveCommand.NotifyCanExecuteChanged();
+            RevertCommand.NotifyCanExecuteChanged();
+        };
     }
+
+    /// <summary>最後に保存してから変更があるか（「未保存」の表示に使う）</summary>
+    public bool IsDirty => _settings.IsDirty;
+
+    /// <summary>保存：変更があり、エラーがないときだけ押せる</summary>
+    [RelayCommand(CanExecute = nameof(CanSave))]
+    private void Save() => _settings.Save();
+    private bool CanSave() => _settings.IsDirty && !HasErrors;
+
+    /// <summary>元に戻す：最後に保存した状態に戻す。変更があるときだけ押せる</summary>
+    [RelayCommand(CanExecute = nameof(CanRevert))]
+    private void Revert() => _settings.Revert();
+    private bool CanRevert() => _settings.IsDirty;
 
     public ObservableCollection<SettingsPageViewModel> Pages { get; }
 
@@ -137,6 +177,9 @@ public partial class SettingsViewModel : PaneViewModel
     private void OnPagePropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(SettingsPageViewModel.HasErrors))
+        {
             OnPropertyChanged(nameof(HasErrors));
+            SaveCommand.NotifyCanExecuteChanged();   // エラーがある間は保存できない
+        }
     }
 }
