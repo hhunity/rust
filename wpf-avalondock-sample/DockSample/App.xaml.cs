@@ -22,6 +22,7 @@ public partial class App : Application
         services.AddSingleton<IMessenger>(WeakReferenceMessenger.Default);
         services.AddSingleton<DockLayoutStore>();
         services.AddSingleton<IAppearanceService, AppearanceService>();
+        services.AddSingleton<ISettingsService, JsonSettingsService>();
 
         // ドッキングペイン。PaneViewModel として登録した順にトグルボタンが並ぶ。
         // ペインを増やすときはここに1行足して、App.xaml に DataTemplate を足すだけ。
@@ -47,6 +48,8 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        // 設定を settings.json に保存（画面で変えた値は、その時点で AppSettings に書き写されている）
+        _provider?.GetRequiredService<ISettingsService>().Save();
         _provider?.Dispose();
         base.OnExit(e);
     }

@@ -3,15 +3,37 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DockSample.Services;
+using DockSample.Settings;
 
 namespace DockSample.ViewModels;
 
 /// <summary>
 /// 設定ペインの左タブ1ページ分の基底。
 /// ObservableValidator なので INotifyDataErrorInfo（HasErrors / GetErrors）付き。
+/// BindSettings で設定クラスと結び付けると、同じ名前のプロパティが自動で読み書きされる。
 /// </summary>
 public abstract class SettingsPageViewModel : ObservableValidator
 {
+    private object? _settings;
+
+    /// <summary>
+    /// このページが読み書きする設定クラスを登録し、保存されていた値を読み込む。
+    /// 以降、ViewModel のプロパティが変わるたびに、同じ名前の設定にも書き写される。
+    /// </summary>
+    protected void BindSettings(object settings)
+    {
+        PropertyCopier.CopyAll(settings, this);   // 設定 → ViewModel（同じ名前のものだけ）
+        _settings = settings;                     // 読み込みが終わってから書き写しを有効にする
+    }
+
+    protected override void OnPropertyChanged(PropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        // ViewModel → 設定（設定クラスに同じ名前がないプロパティは無視される）
+        if (_settings is not null)
+            PropertyCopier.CopyOne(this, _settings, e.PropertyName);
+    }
+
     protected SettingsPageViewModel(string header)
     {
         Header = header;
@@ -31,9 +53,10 @@ public abstract class SettingsPageViewModel : ObservableValidator
 // ---- 全般 ----
 public partial class GeneralPageViewModel : SettingsPageViewModel
 {
-    public GeneralPageViewModel() : base("全般")
+    public GeneralPageViewModel(ISettingsService settings) : base("全般")
     {
-        ValidateAllProperties();   // 起動直後から未入力をエラーとして表示する
+        BindSettings(settings.Current.General);   // 保存値の読み込み＋以降の自動書き写し
+        ValidateAllProperties();                  // 起動直後から未入力をエラーとして表示する
     }
 
     [ObservableProperty]
@@ -68,9 +91,12 @@ public partial class AppearancePageViewModel : SettingsPageViewModel
 {
     private readonly IAppearanceService _appearance;
 
-    public AppearancePageViewModel(IAppearanceService appearance) : base("外観と\nフォント設定")
+    public AppearancePageViewModel(IAppearanceService appearance, ISettingsService settings)
+        : base("外観と\nフォント設定")
     {
         _appearance = appearance;
+        // 保存値の読み込み。FontSize が変われば OnFontSizeChanged が呼ばれ、起動時に文字サイズも反映される
+        BindSettings(settings.Current.Appearance);
     }
 
     [ObservableProperty]

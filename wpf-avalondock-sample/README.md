@@ -24,6 +24,10 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - PageUp/PageDown とマウスホイール（フォーカス時）は `LargeIncrement`（未指定なら Increment の10倍）ずつ。Ctrl＋ホイールは Increment ずつの微調整
   - `Minimum` / `Maximum` の外には出ない（端に達したボタンは無効）。`Increment` で増減幅、`DecimalPlaces` で小数の桁数
   - 使い方: `<controls:NumericUpDown Value="{Binding X}" Minimum="0" Maximum="10" Increment="0.1" DecimalPlaces="1" Style="{StaticResource Input.Numeric}" />`
+- 設定の保存（`Settings/`, `Services/SettingsService.cs`）
+  - 設定画面の値を `%LocalAppData%\DockSample\settings.json` に保存し、次回起動時に復元（ファイルを消すと初期値）
+  - 保存する項目は `Settings/AppSettings.cs` に定義。ViewModel と**同じ名前**のプロパティが自動で読み書きされる（`BindSettings`）
+  - 項目を増やすときは、ViewModel に `[ObservableProperty]` を、`AppSettings` 側に同じ名前のプロパティを足すだけ
 - 配置を記憶
   - 隠して再表示すると、隠す前の位置に戻る
   - 終了時に `%LocalAppData%\DockSample\layout.xml` へ保存し、次回起動時に復元（ファイルを消すと初期配置に戻る）
@@ -38,10 +42,11 @@ DockSample/
 ├─ Views/                   各ペインの UserControl
 ├─ Controls/                使い回す部品（NumericUpDown）
 ├─ ViewModels/              Main / Pane(基底) / Document / Explorer, Properties, Output
+├─ Settings/                保存する設定のクラス / 名前で自動コピーする道具
 ├─ Docking/                 LayoutInitializer(初期配置) / DockLayoutStore(保存・復元)
 ├─ Styles/                  文字・コントロールの共通スタイル
 ├─ Converters/              bool → Visibility(Hidden)
-└─ Services/                ILogService / IAppearanceService(文字サイズの変更)
+└─ Services/                ILogService / IAppearanceService(文字サイズの変更) / ISettingsService(設定の保存)
 ```
 
 ## 実行
