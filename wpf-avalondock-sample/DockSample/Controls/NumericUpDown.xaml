@@ -1,0 +1,69 @@
+<!--
+  数値入力の部品：テキストボックス＋右側の上下ボタン。
+  使い方:
+    <controls:NumericUpDown Value="{Binding Price}" Minimum="0" Maximum="100"
+                            Increment="0.5" DecimalPlaces="1" Width="100" />
+
+  ※ 中で DataContext を設定しないこと（使う側の {Binding} が効かなくなる）。
+     中の部品の更新はコードビハインドで行っている。
+-->
+<UserControl x:Class="DockSample.Controls.NumericUpDown"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             MinHeight="22" Focusable="False">
+
+    <UserControl.Resources>
+        <!-- 上下ボタンの三角。ボタンが無効（最大/最小に達した）ときは薄くする -->
+        <Style x:Key="Arrow" TargetType="Path">
+            <Setter Property="Fill" Value="#444444" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Fill" Value="#BBBBBB" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="SpinButton" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False" />   <!-- 押してもテキストボックスからフォーカスを奪わない -->
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Delay" Value="400" />         <!-- 押しっぱなしで連続増減：開始までの時間(ms) -->
+            <Setter Property="Interval" Value="60" />       <!-- 連続増減の間隔(ms) -->
+            <Setter Property="BorderThickness" Value="1,0,0,0" />
+        </Style>
+    </UserControl.Resources>
+
+    <Border BorderBrush="#ABADB3" BorderThickness="1" Background="White">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="18" />
+            </Grid.ColumnDefinitions>
+
+            <!-- フォントは UserControl に指定したもの（スタイル）を引き継ぐ -->
+            <TextBox x:Name="PART_Text"
+                     BorderThickness="0" Padding="3,1"
+                     HorizontalContentAlignment="Right"
+                     VerticalContentAlignment="Center" />
+
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition />
+                    <RowDefinition />
+                </Grid.RowDefinitions>
+
+                <RepeatButton x:Name="PART_Up" Style="{StaticResource SpinButton}"
+                              BorderThickness="1,0,0,1" Click="OnUpClick">
+                    <Path Style="{StaticResource Arrow}" Data="M 0,4 L 4,0 L 8,4 Z" />
+                </RepeatButton>
+
+                <RepeatButton x:Name="PART_Down" Grid.Row="1" Style="{StaticResource SpinButton}"
+                              Click="OnDownClick">
+                    <Path Style="{StaticResource Arrow}" Data="M 0,0 L 8,0 L 4,4 Z" />
+                </RepeatButton>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

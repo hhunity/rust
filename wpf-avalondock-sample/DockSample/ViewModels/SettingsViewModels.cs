@@ -76,10 +76,10 @@ public partial class AppearancePageViewModel : SettingsPageViewModel
     [ObservableProperty]
     [NotifyDataErrorInfo]
     [Range(8, 32, ErrorMessage = "フォントサイズは 8～32 で指定してください")]
-    private int _fontSize = 12;
+    private double _fontSize = 12;
 
     // 範囲内の値になったら、アプリ全体の文字サイズに反映する
-    partial void OnFontSizeChanged(int value)
+    partial void OnFontSizeChanged(double value)
     {
         if (value is >= 8 and <= 32)
             _appearance.ApplyBaseFontSize(value);

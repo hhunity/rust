@@ -4,6 +4,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:DockSample.ViewModels"
+             xmlns:controls="clr-namespace:DockSample.Controls"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:GeneralPageViewModel}"
              d:DesignWidth="300" d:DesignHeight="200">
@@ -28,9 +29,11 @@
         <StackPanel Margin="20,8,0,0"
                     Visibility="{Binding AutoSave, Converter={StaticResource BoolToVisible}}">
             <TextBlock Text="保存間隔（分）" Style="{StaticResource Text.Label}" />
-            <TextBox Text="{Binding AutoSaveInterval, UpdateSourceTrigger=PropertyChanged}"
-                     Style="{StaticResource Input.TextBox}"
-                     Width="60" HorizontalAlignment="Left" Margin="0,0,0,22" />
+            <!-- 整数で使う場合は DecimalPlaces="0"（int のプロパティにもそのままバインドできる） -->
+            <controls:NumericUpDown Value="{Binding AutoSaveInterval}"
+                                    Minimum="1" Maximum="60" Increment="1" DecimalPlaces="0"
+                                    Style="{StaticResource Input.Numeric}"
+                                    Width="80" Margin="0,0,0,22" />
 
             <CheckBox Content="終了時にも保存する" IsChecked="{Binding SaveOnClose}"
                       Style="{StaticResource Input.CheckBox}" />

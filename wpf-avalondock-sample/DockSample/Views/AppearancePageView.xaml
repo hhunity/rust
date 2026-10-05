@@ -4,6 +4,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:DockSample.ViewModels"
+             xmlns:controls="clr-namespace:DockSample.Controls"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:AppearancePageViewModel}"
              d:DesignWidth="300" d:DesignHeight="200">
@@ -13,10 +14,12 @@
         <TextBlock Text="外観" Style="{StaticResource Text.Title}" />
 
         <TextBlock Text="文字サイズ" Style="{StaticResource Text.Label}" />
-        <TextBox Text="{Binding FontSize, UpdateSourceTrigger=PropertyChanged}"
-                 Style="{StaticResource Input.TextBox}"
-                 Width="80" HorizontalAlignment="Left" Margin="0,0,0,22" />
-        <TextBlock Text="8～32 で指定。アプリ全体の文字サイズがすぐに変わります。"
+        <!-- 数値入力の部品：上下ボタン・↑↓キー・ホイールで 0.5 ずつ。8～32 の外には出ない -->
+        <controls:NumericUpDown Value="{Binding FontSize}"
+                                Minimum="8" Maximum="32" Increment="0.5" DecimalPlaces="1"
+                                Style="{StaticResource Input.Numeric}"
+                                Width="90" Margin="0,0,0,22" />
+        <TextBlock Text="8～32 で指定（0.5 刻み）。アプリ全体の文字サイズがすぐに変わります。"
                    Style="{StaticResource Text.Caption}" />
 
         <TextBlock Text="スタイル見本" Style="{StaticResource Text.Heading}" />
