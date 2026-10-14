@@ -25,7 +25,7 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - `Minimum` / `Maximum` の外には出ない（端に達したボタンは無効）。`Increment` で増減幅、`DecimalPlaces` で小数の桁数
   - 使い方: `<controls:NumericUpDown Value="{Binding X}" Minimum="0" Maximum="10" Increment="0.1" DecimalPlaces="1" Style="{StaticResource Input.Numeric}" />`
 - 設定の保存（`Settings/`, `Services/SettingsService.cs`）
-  - 設定ペイン下の「保存」で今の設定ファイルに保存し、次回起動時に復元（既定は `%LocalAppData%\DockSample\settings.json`）
+  - 設定ペイン下の「保存」で今の設定ファイルに上書き保存。まだ保存先が決まっていない（初回）ときは保存先を聞く
   - 「開く...」で好きな設定ファイルを読み込み、「名前を付けて保存...」で保存先を選べる。最後に使ったファイルは次回起動時に自動で開く
   - ファイル選択やメッセージは `IDialogService` 経由で出す（ViewModel から OpenFileDialog / MessageBox を直接使わない）
   - 「元に戻す」で最後に保存した状態に戻る。どちらも変更があるときだけ押せる（保存はエラーがあると押せない）

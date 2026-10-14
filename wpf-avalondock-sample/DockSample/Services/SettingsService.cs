@@ -16,13 +16,16 @@ public interface ISettingsService : INotifyPropertyChanged
     /// </summary>
     AppSettings Current { get; }
 
-    /// <summary>今開いている設定ファイルのパス（「保存」の保存先）</summary>
-    string FilePath { get; }
+    /// <summary>
+    /// 今開いている設定ファイルのパス（「保存」の保存先）。
+    /// まだ一度も保存していない（保存先が決まっていない）ときは null。
+    /// </summary>
+    string? FilePath { get; }
 
     /// <summary>最後に保存（または読み込み）してから変更があるか</summary>
     bool IsDirty { get; }
 
-    /// <summary>今のファイル（FilePath）に保存する。成功したら true</summary>
+    /// <summary>今のファイル（FilePath）に上書き保存する。保存先が決まっていない・失敗したら false</summary>
     bool Save();
 
     /// <summary>指定したファイルに保存し、以降はそのファイルを使う。成功したら true</summary>
@@ -43,8 +46,9 @@ public interface ISettingsService : INotifyPropertyChanged
 
 /// <summary>
 /// 設定を JSON ファイルで保存する。
-/// ・既定のファイル：%LocalAppData%\DockSample\settings.json
 /// ・「開く」「名前を付けて保存」で使ったファイルは last-settings.txt に覚えておき、次回起動時にそれを開く
+/// ・覚えているファイルがなければ、保存先が決まっていない状態（FilePath = null）で初期値から始める
+///   （以前の版で使っていた %LocalAppData%\DockSample\settings.json があれば、それを開く）
 /// ・最後に保存した内容を JSON 文字列で覚えておき、変更の有無の判定と「元に戻す」に使う
 /// </summary>
 public partial class JsonSettingsService : ObservableObject, ISettingsService
@@ -52,7 +56,7 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
     private static readonly string AppDataDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DockSample");
 
-    /// <summary>何も指定していないときの設定ファイル</summary>
+    /// <summary>以前の版の保存先。「名前を付けて保存」で最初に提案するファイル名にも使う</summary>
     public static readonly string DefaultFilePath = Path.Combine(AppDataDir, "settings.json");
 
     /// <summary>最後に使った設定ファイルのパスを覚えておくファイル</summary>
@@ -73,9 +77,9 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
     {
         _log = log;
 
-        // 前回「開く」「名前を付けて保存」したファイルがあればそれを、なければ既定のファイルを使う
-        FilePath = ReadLastFilePath() ?? DefaultFilePath;
-        Current = File.Exists(FilePath)
+        // 前回使ったファイル → 以前の版の既定ファイル → どちらもなければ保存先なし（初期値）
+        FilePath = ReadLastFilePath() ?? (File.Exists(DefaultFilePath) ? DefaultFilePath : null);
+        Current = FilePath is not null
             ? TryRead(FilePath) ?? new AppSettings()   // 壊れていたら初期値（次の保存で上書きされる）
             : new AppSettings();
         _savedJson = Serialize(Current);
@@ -83,14 +87,14 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
 
     public AppSettings Current { get; private set; }
 
-    [ObservableProperty] private string _filePath = "";
+    [ObservableProperty] private string? _filePath;
     [ObservableProperty] private bool _isDirty;
 
     public event EventHandler? Reloaded;
 
     public void NotifyChanged() => IsDirty = Serialize(Current) != _savedJson;
 
-    public bool Save() => WriteTo(FilePath);
+    public bool Save() => FilePath is not null && WriteTo(FilePath);
 
     public bool SaveAs(string path)
     {

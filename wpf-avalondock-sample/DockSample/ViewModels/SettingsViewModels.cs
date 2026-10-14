@@ -160,8 +160,6 @@ public partial class AppearancePageViewModel : SettingsPageViewModel
 // ---- 設定ペイン本体（左にタブ） ----
 public partial class SettingsViewModel : PaneViewModel
 {
-    private const string FileFilter = "設定ファイル (*.json)|*.json|すべてのファイル (*.*)|*.*";
-
     private readonly ISettingsService _settings;
     private readonly IDialogService _dialogs;
 
@@ -191,6 +189,7 @@ public partial class SettingsViewModel : PaneViewModel
                 case nameof(ISettingsService.FilePath):
                     OnPropertyChanged(nameof(FilePath));
                     OnPropertyChanged(nameof(FileName));
+                    SaveCommand.NotifyCanExecuteChanged();   // 保存先が決まったかで押せる条件が変わる
                     break;
             }
         };
@@ -199,31 +198,23 @@ public partial class SettingsViewModel : PaneViewModel
     /// <summary>最後に保存してから変更があるか（「未保存」の表示に使う）</summary>
     public bool IsDirty => _settings.IsDirty;
 
-    /// <summary>今開いている設定ファイル（フルパス。ツールチップ用）</summary>
-    public string FilePath => _settings.FilePath;
+    /// <summary>今開いている設定ファイル（フルパス。ツールチップ用）。未保存なら null</summary>
+    public string? FilePath => _settings.FilePath;
 
     /// <summary>今開いている設定ファイルの名前（表示用）</summary>
-    public string FileName => Path.GetFileName(_settings.FilePath);
+    public string FileName => _settings.FilePath is { } path ? Path.GetFileName(path) : "（未保存）";
 
-    /// <summary>保存：今のファイルに上書き。変更があり、エラーがないときだけ押せる</summary>
+    /// <summary>
+    /// 保存：今のファイルに上書き。まだ保存先が決まっていなければ、保存先を聞く。
+    /// （変更がある、または保存先が未定）かつ エラーがないときだけ押せる
+    /// </summary>
     [RelayCommand(CanExecute = nameof(CanSave))]
-    private void Save()
-    {
-        if (!_settings.Save())
-            _dialogs.ShowError($"設定を保存できませんでした。\n{_settings.FilePath}");
-    }
-    private bool CanSave() => _settings.IsDirty && !HasErrors;
+    private void Save() => _settings.SaveInteractive(_dialogs);
+    private bool CanSave() => (_settings.IsDirty || _settings.FilePath is null) && !HasErrors;
 
     /// <summary>名前を付けて保存：保存先を選ぶ。エラーがないときだけ押せる</summary>
     [RelayCommand(CanExecute = nameof(CanSaveAs))]
-    private void SaveAs()
-    {
-        var path = _dialogs.ShowSaveFile("設定を名前を付けて保存", FileFilter, _settings.FilePath);
-        if (path is null) return;   // キャンセル
-
-        if (!_settings.SaveAs(path))
-            _dialogs.ShowError($"設定を保存できませんでした。\n{path}");
-    }
+    private void SaveAs() => _settings.SaveInteractive(_dialogs, askPath: true);
     private bool CanSaveAs() => !HasErrors;
 
     /// <summary>開く：別の設定ファイルを読み込む</summary>
@@ -234,7 +225,7 @@ public partial class SettingsViewModel : PaneViewModel
             !_dialogs.Confirm("保存していない変更は失われます。別の設定ファイルを開きますか？"))
             return;
 
-        var path = _dialogs.ShowOpenFile("設定ファイルを開く", FileFilter, _settings.FilePath);
+        var path = _dialogs.ShowOpenFile("設定ファイルを開く", SettingsSaveFlow.FileFilter, _settings.FilePath);
         if (path is null) return;   // キャンセル
 
         if (!_settings.Open(path))

@@ -8,7 +8,8 @@ namespace DockSample;
 public partial class MainWindow : Window
 {
     // コンストラクタインジェクション
-    public MainWindow(MainViewModel viewModel, DockLayoutStore layoutStore, ISettingsService settings)
+    public MainWindow(MainViewModel viewModel, DockLayoutStore layoutStore,
+                      ISettingsService settings, IDialogService dialogs)
     {
         InitializeComponent();
         DataContext = viewModel;
@@ -19,6 +20,7 @@ public partial class MainWindow : Window
         Closing += (_, e) =>
         {
             // 未保存の設定があれば確認する（「いいえ」なら保存せずに終了 → 次回は前回保存した値で起動）
+            // 「はい」で保存先が未定なら保存先を聞く。そこでキャンセル・失敗したら終了を取りやめる
             if (settings.IsDirty)
             {
                 var result = MessageBox.Show(this,
@@ -26,7 +28,11 @@ public partial class MainWindow : Window
                     "DockSample", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
 
                 if (result == MessageBoxResult.Cancel) { e.Cancel = true; return; }
-                if (result == MessageBoxResult.Yes) settings.Save();
+                if (result == MessageBoxResult.Yes && !settings.SaveInteractive(dialogs))
+                {
+                    e.Cancel = true;
+                    return;
+                }
             }
 
             layoutStore.Save(DockManager);
