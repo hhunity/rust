@@ -11,50 +11,29 @@ namespace DockSample.ViewModels;
 /// <summary>
 /// 設定ペインの左タブ1ページ分の基底。
 /// ObservableValidator なので INotifyDataErrorInfo（HasErrors / GetErrors）付き。
-/// BindSettings で設定クラスと結び付けると、同じ名前のプロパティが自動で読み書きされる。
+///
+/// 設定（AppSettings）との対応付けは各ページで手書きする：
+///   ・設定 → 画面 : LoadFrom（起動時と「元に戻す」のときに呼ばれる）
+///   ・画面 → 設定 : 各プロパティの OnXxxChanged で Write(...) を呼ぶ
+/// 項目を追加したら [ObservableProperty]・OnXxxChanged・LoadFrom の3か所を書くこと。
 /// </summary>
 public abstract class SettingsPageViewModel : ObservableValidator
 {
-    private ISettingsService? _service;
-    private object? _settings;
+    private bool _loading;
 
-    /// <summary>
-    /// このページが読み書きする設定クラスを登録し、保存されていた値を読み込む。
-    /// 以降、ViewModel のプロパティが変わるたびに、同じ名前の設定にも書き写される。
-    /// 「元に戻す」されたときは、設定から値を読み直す。
-    /// </summary>
-    protected void BindSettings(ISettingsService service, object settings)
-    {
-        PropertyCopier.CopyAll(settings, this);   // 設定 → ViewModel（同じ名前のものだけ）
-        _service = service;
-        _settings = settings;                     // 読み込みが終わってから書き写しを有効にする
-        service.Reverted += (_, _) => ReloadFromSettings();
-    }
-
-    private void ReloadFromSettings()
-    {
-        if (_settings is not { } settings) return;
-        _settings = null;                         // 読み直している間は書き写さない
-        PropertyCopier.CopyAll(settings, this);
-        _settings = settings;
-    }
-
-    protected override void OnPropertyChanged(PropertyChangedEventArgs e)
-    {
-        base.OnPropertyChanged(e);
-        if (_settings is null) return;
-
-        // ViewModel → 設定（設定クラスに同じ名前がないプロパティは無視される）
-        PropertyCopier.CopyOne(this, _settings, e.PropertyName);
-        _service?.NotifyChanged();                // 未保存の変更があるかを更新
-    }
-
-    protected SettingsPageViewModel(string header)
+    protected SettingsPageViewModel(string header, ISettingsService settings)
     {
         Header = header;
+        SettingsService = settings;
+
         // エラーが増減したら、ツールチップ用の文字列も更新する
         ErrorsChanged += (_, _) => OnPropertyChanged(nameof(ErrorSummary));
+
+        // 「元に戻す」されたら、設定から読み直す
+        settings.Reverted += (_, _) => Load();
     }
+
+    protected ISettingsService SettingsService { get; }
 
     /// <summary>タブに表示する名前（\n で改行できる）</summary>
     public string Header { get; }
@@ -63,25 +42,73 @@ public abstract class SettingsPageViewModel : ObservableValidator
     public string? ErrorSummary => HasErrors
         ? string.Join("\n", GetErrors().Select(e => e.ErrorMessage))
         : null;
+
+    /// <summary>設定 → 画面。各ページで、設定の値を ViewModel のプロパティに入れる</summary>
+    protected abstract void LoadFrom(AppSettings s);
+
+    /// <summary>
+    /// 設定を読み込む。派生クラスのコンストラクタの最後で呼ぶこと
+    /// （基底のコンストラクタから呼ぶと、派生クラスのフィールドがまだ準備できていない）
+    /// </summary>
+    protected void Load()
+    {
+        _loading = true;   // 読み込み中は Write で書き戻さない
+        try { LoadFrom(SettingsService.Current); }
+        finally { _loading = false; }
+    }
+
+    /// <summary>画面 → 設定。OnXxxChanged から呼び、設定に書き写して「未保存の変更」を更新する</summary>
+    protected void Write(Action<AppSettings> write)
+    {
+        if (_loading) return;
+        write(SettingsService.Current);
+        SettingsService.NotifyChanged();
+    }
 }
 
 // ---- 全般 ----
 public partial class GeneralPageViewModel : SettingsPageViewModel
 {
-    public GeneralPageViewModel(ISettingsService settings) : base("全般")
+    public GeneralPageViewModel(ISettingsService settings) : base("全般", settings)
     {
-        BindSettings(settings, settings.Current.General);   // 保存値の読み込み＋以降の自動書き写し
-        ValidateAllProperties();                  // 起動直後から未入力をエラーとして表示する
+        Load();
+        ValidateAllProperties();   // 起動直後から未入力をエラーとして表示する
+        if (!AutoSave) ClearErrors(nameof(AutoSaveInterval));   // 隠れている項目のエラーは出さない
     }
 
+    // 設定 → 画面（プロパティと同じ順に並べておくと、書き忘れに気付きやすい）
+    protected override void LoadFrom(AppSettings s)
+    {
+        UserName         = s.General.UserName;
+        AutoSave         = s.General.AutoSave.Enabled;
+        AutoSaveInterval = s.General.AutoSave.Interval;
+        SaveOnClose      = s.General.AutoSave.OnClose;
+    }
+
+    // ---- ユーザー名 ----
     [ObservableProperty]
     [NotifyDataErrorInfo]
     [Required(ErrorMessage = "ユーザー名は必須です")]
     [MaxLength(20, ErrorMessage = "ユーザー名は20文字以内です")]
     private string _userName = "";
 
-    /// <summary>チェックボックスと、下に出てくる詳細設定の両方がこれを見る</summary>
+    partial void OnUserNameChanged(string value) =>
+        Write(s => s.General.UserName = value);
+
+    // ---- 自動保存（チェックボックスと、下に出てくる詳細設定の両方がこれを見る） ----
     [ObservableProperty] private bool _autoSave = true;
+
+    partial void OnAutoSaveChanged(bool value)
+    {
+        // 構造体の中の項目は直接書き換えられないので、with で作り直して入れる
+        Write(s => s.General.AutoSave = s.General.AutoSave with { Enabled = value });
+
+        // 隠れている項目のエラーでタブに印が出ないよう、OFF ならエラーを消し、ON で検証し直す
+        if (value)
+            ValidateProperty(AutoSaveInterval, nameof(AutoSaveInterval));
+        else
+            ClearErrors(nameof(AutoSaveInterval));
+    }
 
     // ---- 自動保存が ON のときだけ表示される設定 ----
     [ObservableProperty]
@@ -89,16 +116,13 @@ public partial class GeneralPageViewModel : SettingsPageViewModel
     [Range(1, 60, ErrorMessage = "保存間隔は 1～60 分で指定してください")]
     private int _autoSaveInterval = 5;
 
+    partial void OnAutoSaveIntervalChanged(int value) =>
+        Write(s => s.General.AutoSave = s.General.AutoSave with { Interval = value });
+
     [ObservableProperty] private bool _saveOnClose = true;
 
-    // 隠れている項目のエラーでタブに印が出ないよう、OFF ならエラーを消し、ON で検証し直す
-    partial void OnAutoSaveChanged(bool value)
-    {
-        if (value)
-            ValidateProperty(AutoSaveInterval, nameof(AutoSaveInterval));
-        else
-            ClearErrors(nameof(AutoSaveInterval));
-    }
+    partial void OnSaveOnCloseChanged(bool value) =>
+        Write(s => s.General.AutoSave = s.General.AutoSave with { OnClose = value });
 }
 
 // ---- 外観 ----
@@ -107,21 +131,28 @@ public partial class AppearancePageViewModel : SettingsPageViewModel
     private readonly IAppearanceService _appearance;
 
     public AppearancePageViewModel(IAppearanceService appearance, ISettingsService settings)
-        : base("外観と\nフォント設定")
+        : base("外観と\nフォント設定", settings)
     {
         _appearance = appearance;
-        // 保存値の読み込み。FontSize が変われば OnFontSizeChanged が呼ばれ、起動時に文字サイズも反映される
-        BindSettings(settings, settings.Current.Appearance);
+        Load();   // FontSize が変われば OnFontSizeChanged が呼ばれ、起動時に文字サイズも反映される
     }
 
+    protected override void LoadFrom(AppSettings s)
+    {
+        FontSize = s.Appearance.FontSize;
+    }
+
+    // ---- 文字サイズ ----
     [ObservableProperty]
     [NotifyDataErrorInfo]
     [Range(8, 32, ErrorMessage = "フォントサイズは 8～32 で指定してください")]
     private double _fontSize = 12;
 
-    // 範囲内の値になったら、アプリ全体の文字サイズに反映する
     partial void OnFontSizeChanged(double value)
     {
+        Write(s => s.Appearance.FontSize = value);
+
+        // 範囲内の値になったら、アプリ全体の文字サイズに反映する
         if (value is >= 8 and <= 32)
             _appearance.ApplyBaseFontSize(value);
     }

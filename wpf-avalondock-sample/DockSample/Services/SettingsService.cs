@@ -10,7 +10,10 @@ namespace DockSample.Services;
 /// <summary>アプリの設定（AppSettings）の読み込み・保存・元に戻す</summary>
 public interface ISettingsService : INotifyPropertyChanged
 {
-    /// <summary>現在の設定（編集中の値）。各 ViewModel はこれを読み書きする</summary>
+    /// <summary>
+    /// 現在の設定（編集中の値）。各 ViewModel はこれを読み書きする。
+    /// 「元に戻す」で丸ごと差し替わるので、中のオブジェクトを変数に覚えておかず、毎回 Current から辿ること。
+    /// </summary>
     AppSettings Current { get; }
 
     /// <summary>最後に保存（または起動時に読み込み）してから変更があるか</summary>
@@ -58,7 +61,7 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
         _savedJson = Serialize(Current);
     }
 
-    public AppSettings Current { get; }
+    public AppSettings Current { get; private set; }
 
     [ObservableProperty] private bool _isDirty;
 
@@ -85,15 +88,8 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
 
     public void Revert()
     {
-        var saved = JsonSerializer.Deserialize<AppSettings>(_savedJson, Options) ?? new AppSettings();
-
-        // Current のオブジェクトは各 ViewModel が参照しているので、差し替えずに中身だけ書き戻す
-        foreach (var section in typeof(AppSettings).GetProperties())
-        {
-            if (section.GetValue(saved) is { } from && section.GetValue(Current) is { } to)
-                PropertyCopier.CopyAll(from, to);
-        }
-
+        // 最後に保存した内容で丸ごと差し替え、各 ViewModel に読み直してもらう
+        Current = JsonSerializer.Deserialize<AppSettings>(_savedJson, Options) ?? new AppSettings();
         Reverted?.Invoke(this, EventArgs.Empty);
         IsDirty = false;
         _log.Write("設定を元に戻しました");

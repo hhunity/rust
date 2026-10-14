@@ -28,8 +28,9 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - 設定ペイン下の「保存」で `%LocalAppData%\DockSample\settings.json` に保存し、次回起動時に復元（ファイルを消すと初期値）
   - 「元に戻す」で最後に保存した状態に戻る。どちらも変更があるときだけ押せる（保存はエラーがあると押せない）
   - 未保存の変更があるまま終了しようとすると、保存するか確認する
-  - 保存する項目は `Settings/AppSettings.cs` に定義。ViewModel と**同じ名前**のプロパティが自動で読み書きされる（`BindSettings`）
-  - 項目を増やすときは、ViewModel に `[ObservableProperty]` を、`AppSettings` 側に同じ名前のプロパティを足すだけ
+  - 保存する項目は `Settings/AppSettings.cs` に定義（画面と同じ形でなくてよい。例：自動保存の設定は `record struct` でひとまとめ）
+  - 画面との対応付けは各ページで手書き：設定 → 画面は `LoadFrom`、画面 → 設定は各プロパティの `OnXxxChanged` で `Write(...)`
+  - 項目を増やすときは `[ObservableProperty]`・`OnXxxChanged`・`LoadFrom` の3か所と、`AppSettings` 側に追加する
 - 配置を記憶
   - 隠して再表示すると、隠す前の位置に戻る
   - 終了時に `%LocalAppData%\DockSample\layout.xml` へ保存し、次回起動時に復元（ファイルを消すと初期配置に戻る）
@@ -44,7 +45,7 @@ DockSample/
 ├─ Views/                   各ペインの UserControl
 ├─ Controls/                使い回す部品（NumericUpDown）
 ├─ ViewModels/              Main / Pane(基底) / Document / Explorer, Properties, Output
-├─ Settings/                保存する設定のクラス / 名前で自動コピーする道具
+├─ Settings/                保存する設定のクラス
 ├─ Docking/                 LayoutInitializer(初期配置) / DockLayoutStore(保存・復元)
 ├─ Styles/                  文字・コントロールの共通スタイル
 ├─ Converters/              bool → Visibility(Hidden)
