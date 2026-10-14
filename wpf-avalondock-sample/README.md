@@ -28,7 +28,7 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - 設定ペイン下の「保存」で `%LocalAppData%\DockSample\settings.json` に保存し、次回起動時に復元（ファイルを消すと初期値）
   - 「元に戻す」で最後に保存した状態に戻る。どちらも変更があるときだけ押せる（保存はエラーがあると押せない）
   - 未保存の変更があるまま終了しようとすると、保存するか確認する
-  - 保存する項目は `Settings/AppSettings.cs` に定義（画面と同じ形でなくてよい。例：自動保存の設定は `record struct` でひとまとめ）
+  - 保存する項目は `Settings/AppSettings.cs` に定義（画面と同じ形でなくてよい。例：自動保存の設定は入れ子のクラスでひとまとめ）
   - 画面との対応付けは各ページで手書き：設定 → 画面は `LoadFrom`、画面 → 設定は各プロパティの `OnXxxChanged` で `Write(...)`
   - 項目を増やすときは `[ObservableProperty]`・`OnXxxChanged`・`LoadFrom` の3か所と、`AppSettings` 側に追加する
 - 配置を記憶

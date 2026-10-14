@@ -100,8 +100,7 @@ public partial class GeneralPageViewModel : SettingsPageViewModel
 
     partial void OnAutoSaveChanged(bool value)
     {
-        // 構造体の中の項目は直接書き換えられないので、with で作り直して入れる
-        Write(s => s.General.AutoSave = s.General.AutoSave with { Enabled = value });
+        Write(s => s.General.AutoSave.Enabled = value);
 
         // 隠れている項目のエラーでタブに印が出ないよう、OFF ならエラーを消し、ON で検証し直す
         if (value)
@@ -117,12 +116,12 @@ public partial class GeneralPageViewModel : SettingsPageViewModel
     private int _autoSaveInterval = 5;
 
     partial void OnAutoSaveIntervalChanged(int value) =>
-        Write(s => s.General.AutoSave = s.General.AutoSave with { Interval = value });
+        Write(s => s.General.AutoSave.Interval = value);
 
     [ObservableProperty] private bool _saveOnClose = true;
 
     partial void OnSaveOnCloseChanged(bool value) =>
-        Write(s => s.General.AutoSave = s.General.AutoSave with { OnClose = value });
+        Write(s => s.General.AutoSave.OnClose = value);
 }
 
 // ---- 外観 ----
