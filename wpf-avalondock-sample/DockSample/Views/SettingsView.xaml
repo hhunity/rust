@@ -14,20 +14,29 @@
       （標準の TabItem はヘッダー位置を親の TabControl から取るため、TabItem に指定しても効かない）
     -->
     <DockPanel>
-        <!-- 下：保存 / 元に戻す（右寄せ）。左に未保存の表示 -->
+        <!-- 下：今のファイル・未保存の表示と、ファイル操作のボタン -->
         <Border DockPanel.Dock="Bottom" BorderBrush="#CCC" BorderThickness="0,1,0,0" Padding="8,6">
-            <DockPanel LastChildFill="False">
-                <Button DockPanel.Dock="Right" Content="保存"
-                        Command="{Binding SaveCommand}"
-                        Style="{StaticResource Button.Default}" />
-                <Button DockPanel.Dock="Right" Content="元に戻す"
-                        Command="{Binding RevertCommand}"
-                        Style="{StaticResource Button.Default}" Margin="0,0,6,0" />
-
-                <TextBlock DockPanel.Dock="Left" Text="● 保存していない変更があります"
-                           Style="{StaticResource Text.Caption}" VerticalAlignment="Center"
+            <StackPanel>
+                <TextBlock Text="{Binding FileName, StringFormat='設定ファイル: {0}'}"
+                           ToolTip="{Binding FilePath}"
+                           Style="{StaticResource Text.Caption}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="● 保存していない変更があります"
+                           Style="{StaticResource Text.Caption}"
                            Visibility="{Binding IsDirty, Converter={StaticResource BoolToVisible}}" />
-            </DockPanel>
+
+                <!-- ボタンは右寄せ。ペインが狭いときは折り返す -->
+                <WrapPanel HorizontalAlignment="Right" Margin="0,6,0,0">
+                    <WrapPanel.Resources>
+                        <Style TargetType="Button" BasedOn="{StaticResource Button.Default}">
+                            <Setter Property="Margin" Value="6,0,0,4" />
+                        </Style>
+                    </WrapPanel.Resources>
+                    <Button Content="開く..."             Command="{Binding OpenCommand}" />
+                    <Button Content="名前を付けて保存..." Command="{Binding SaveAsCommand}" />
+                    <Button Content="元に戻す"            Command="{Binding RevertCommand}" />
+                    <Button Content="保存"                Command="{Binding SaveCommand}" />
+                </WrapPanel>
+            </StackPanel>
         </Border>
 
         <TabControl ItemsSource="{Binding Pages}"

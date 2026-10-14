@@ -13,7 +13,7 @@ namespace DockSample.ViewModels;
 /// ObservableValidator なので INotifyDataErrorInfo（HasErrors / GetErrors）付き。
 ///
 /// 設定（AppSettings）との対応付けは各ページで手書きする：
-///   ・設定 → 画面 : LoadFrom（起動時と「元に戻す」のときに呼ばれる）
+///   ・設定 → 画面 : LoadFrom（起動時と「元に戻す」「開く」のときに呼ばれる）
 ///   ・画面 → 設定 : 各プロパティの OnXxxChanged で Write(...) を呼ぶ
 /// 項目を追加したら [ObservableProperty]・OnXxxChanged・LoadFrom の3か所を書くこと。
 /// </summary>
@@ -29,8 +29,8 @@ public abstract class SettingsPageViewModel : ObservableValidator
         // エラーが増減したら、ツールチップ用の文字列も更新する
         ErrorsChanged += (_, _) => OnPropertyChanged(nameof(ErrorSummary));
 
-        // 「元に戻す」されたら、設定から読み直す
-        settings.Reverted += (_, _) => Load();
+        // 「元に戻す」「開く」で設定が差し替わったら、読み直す
+        settings.Reloaded += (_, _) => Load();
     }
 
     protected ISettingsService SettingsService { get; }
@@ -160,13 +160,17 @@ public partial class AppearancePageViewModel : SettingsPageViewModel
 // ---- 設定ペイン本体（左にタブ） ----
 public partial class SettingsViewModel : PaneViewModel
 {
+    private const string FileFilter = "設定ファイル (*.json)|*.json|すべてのファイル (*.*)|*.*";
+
     private readonly ISettingsService _settings;
+    private readonly IDialogService _dialogs;
 
     /// <param name="pages">DI に SettingsPageViewModel として登録したページ（登録順にタブが並ぶ）</param>
-    public SettingsViewModel(IEnumerable<SettingsPageViewModel> pages, ISettingsService settings)
+    public SettingsViewModel(IEnumerable<SettingsPageViewModel> pages, ISettingsService settings, IDialogService dialogs)
         : base("Tool_Settings", "設定", DockLocation.Right)
     {
         _settings = settings;
+        _dialogs = dialogs;
         Pages = new ObservableCollection<SettingsPageViewModel>(pages);
         _selectedPage = Pages.FirstOrDefault();
 
@@ -177,20 +181,65 @@ public partial class SettingsViewModel : PaneViewModel
         // 未保存の変更の有無が変わったら、表示とボタンの押せる/押せないを更新する
         _settings.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName != nameof(ISettingsService.IsDirty)) return;
-            OnPropertyChanged(nameof(IsDirty));
-            SaveCommand.NotifyCanExecuteChanged();
-            RevertCommand.NotifyCanExecuteChanged();
+            switch (e.PropertyName)
+            {
+                case nameof(ISettingsService.IsDirty):
+                    OnPropertyChanged(nameof(IsDirty));
+                    SaveCommand.NotifyCanExecuteChanged();
+                    RevertCommand.NotifyCanExecuteChanged();
+                    break;
+                case nameof(ISettingsService.FilePath):
+                    OnPropertyChanged(nameof(FilePath));
+                    OnPropertyChanged(nameof(FileName));
+                    break;
+            }
         };
     }
 
     /// <summary>最後に保存してから変更があるか（「未保存」の表示に使う）</summary>
     public bool IsDirty => _settings.IsDirty;
 
-    /// <summary>保存：変更があり、エラーがないときだけ押せる</summary>
+    /// <summary>今開いている設定ファイル（フルパス。ツールチップ用）</summary>
+    public string FilePath => _settings.FilePath;
+
+    /// <summary>今開いている設定ファイルの名前（表示用）</summary>
+    public string FileName => Path.GetFileName(_settings.FilePath);
+
+    /// <summary>保存：今のファイルに上書き。変更があり、エラーがないときだけ押せる</summary>
     [RelayCommand(CanExecute = nameof(CanSave))]
-    private void Save() => _settings.Save();
+    private void Save()
+    {
+        if (!_settings.Save())
+            _dialogs.ShowError($"設定を保存できませんでした。\n{_settings.FilePath}");
+    }
     private bool CanSave() => _settings.IsDirty && !HasErrors;
+
+    /// <summary>名前を付けて保存：保存先を選ぶ。エラーがないときだけ押せる</summary>
+    [RelayCommand(CanExecute = nameof(CanSaveAs))]
+    private void SaveAs()
+    {
+        var path = _dialogs.ShowSaveFile("設定を名前を付けて保存", FileFilter, _settings.FilePath);
+        if (path is null) return;   // キャンセル
+
+        if (!_settings.SaveAs(path))
+            _dialogs.ShowError($"設定を保存できませんでした。\n{path}");
+    }
+    private bool CanSaveAs() => !HasErrors;
+
+    /// <summary>開く：別の設定ファイルを読み込む</summary>
+    [RelayCommand]
+    private void Open()
+    {
+        if (_settings.IsDirty &&
+            !_dialogs.Confirm("保存していない変更は失われます。別の設定ファイルを開きますか？"))
+            return;
+
+        var path = _dialogs.ShowOpenFile("設定ファイルを開く", FileFilter, _settings.FilePath);
+        if (path is null) return;   // キャンセル
+
+        if (!_settings.Open(path))
+            _dialogs.ShowError($"設定ファイルを読み込めませんでした。\n形式が正しいか確認してください。\n{path}");
+    }
 
     /// <summary>元に戻す：最後に保存した状態に戻す。変更があるときだけ押せる</summary>
     [RelayCommand(CanExecute = nameof(CanRevert))]
@@ -209,7 +258,8 @@ public partial class SettingsViewModel : PaneViewModel
         if (e.PropertyName == nameof(SettingsPageViewModel.HasErrors))
         {
             OnPropertyChanged(nameof(HasErrors));
-            SaveCommand.NotifyCanExecuteChanged();   // エラーがある間は保存できない
+            SaveCommand.NotifyCanExecuteChanged();     // エラーがある間は保存できない
+            SaveAsCommand.NotifyCanExecuteChanged();
         }
     }
 }

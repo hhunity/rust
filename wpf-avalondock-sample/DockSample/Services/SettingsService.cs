@@ -7,41 +7,56 @@ using DockSample.Settings;
 
 namespace DockSample.Services;
 
-/// <summary>アプリの設定（AppSettings）の読み込み・保存・元に戻す</summary>
+/// <summary>アプリの設定（AppSettings）の読み込み・保存・元に戻す・別ファイルを開く</summary>
 public interface ISettingsService : INotifyPropertyChanged
 {
     /// <summary>
     /// 現在の設定（編集中の値）。各 ViewModel はこれを読み書きする。
-    /// 「元に戻す」で丸ごと差し替わるので、中のオブジェクトを変数に覚えておかず、毎回 Current から辿ること。
+    /// 「元に戻す」「開く」で丸ごと差し替わるので、中のオブジェクトを変数に覚えておかず、毎回 Current から辿ること。
     /// </summary>
     AppSettings Current { get; }
 
-    /// <summary>最後に保存（または起動時に読み込み）してから変更があるか</summary>
+    /// <summary>今開いている設定ファイルのパス（「保存」の保存先）</summary>
+    string FilePath { get; }
+
+    /// <summary>最後に保存（または読み込み）してから変更があるか</summary>
     bool IsDirty { get; }
 
-    /// <summary>Current を settings.json に保存する</summary>
-    void Save();
+    /// <summary>今のファイル（FilePath）に保存する。成功したら true</summary>
+    bool Save();
 
-    /// <summary>Current を最後に保存した状態に戻し、Reverted を通知する</summary>
+    /// <summary>指定したファイルに保存し、以降はそのファイルを使う。成功したら true</summary>
+    bool SaveAs(string path);
+
+    /// <summary>指定した設定ファイルを読み込み、以降はそのファイルを使う。成功したら true</summary>
+    bool Open(string path);
+
+    /// <summary>Current を最後に保存（または読み込み）した状態に戻す</summary>
     void Revert();
 
     /// <summary>Current が変わったことを知らせる（IsDirty を再計算する）</summary>
     void NotifyChanged();
 
-    /// <summary>Revert で Current が書き戻された（各 ViewModel は値を読み直す）</summary>
-    event EventHandler? Reverted;
+    /// <summary>「元に戻す」「開く」で Current が差し替わった（各 ViewModel は値を読み直す）</summary>
+    event EventHandler? Reloaded;
 }
 
 /// <summary>
-/// %LocalAppData%\DockSample\settings.json に JSON で保存する。
-/// （ファイルを消すと初期値に戻る）
-/// 最後に保存した内容を JSON 文字列で覚えておき、変更の有無の判定と「元に戻す」に使う。
+/// 設定を JSON ファイルで保存する。
+/// ・既定のファイル：%LocalAppData%\DockSample\settings.json
+/// ・「開く」「名前を付けて保存」で使ったファイルは last-settings.txt に覚えておき、次回起動時にそれを開く
+/// ・最後に保存した内容を JSON 文字列で覚えておき、変更の有無の判定と「元に戻す」に使う
 /// </summary>
 public partial class JsonSettingsService : ObservableObject, ISettingsService
 {
-    private static readonly string FilePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "DockSample", "settings.json");
+    private static readonly string AppDataDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DockSample");
+
+    /// <summary>何も指定していないときの設定ファイル</summary>
+    public static readonly string DefaultFilePath = Path.Combine(AppDataDir, "settings.json");
+
+    /// <summary>最後に使った設定ファイルのパスを覚えておくファイル</summary>
+    private static readonly string LastFileRecord = Path.Combine(AppDataDir, "last-settings.txt");
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -57,58 +72,118 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
     public JsonSettingsService(ILogService log)
     {
         _log = log;
-        Current = Load();
+
+        // 前回「開く」「名前を付けて保存」したファイルがあればそれを、なければ既定のファイルを使う
+        FilePath = ReadLastFilePath() ?? DefaultFilePath;
+        Current = File.Exists(FilePath)
+            ? TryRead(FilePath) ?? new AppSettings()   // 壊れていたら初期値（次の保存で上書きされる）
+            : new AppSettings();
         _savedJson = Serialize(Current);
     }
 
     public AppSettings Current { get; private set; }
 
+    [ObservableProperty] private string _filePath = "";
     [ObservableProperty] private bool _isDirty;
 
-    public event EventHandler? Reverted;
+    public event EventHandler? Reloaded;
 
     public void NotifyChanged() => IsDirty = Serialize(Current) != _savedJson;
 
-    public void Save()
+    public bool Save() => WriteTo(FilePath);
+
+    public bool SaveAs(string path)
     {
-        try
-        {
-            var json = Serialize(Current);
-            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-            File.WriteAllText(FilePath, json);
-            _savedJson = json;
-            IsDirty = false;
-            _log.Write("設定を保存しました");
-        }
-        catch (Exception ex)
-        {
-            _log.Write($"設定の保存に失敗: {ex.Message}");   // 失敗したら IsDirty は true のまま
-        }
+        if (!WriteTo(path)) return false;
+        FilePath = path;
+        RememberFilePath(path);
+        return true;
+    }
+
+    public bool Open(string path)
+    {
+        var loaded = TryRead(path);
+        if (loaded is null) return false;
+
+        Current = loaded;
+        FilePath = path;
+        RememberFilePath(path);
+        _savedJson = Serialize(Current);
+        Reloaded?.Invoke(this, EventArgs.Empty);   // 各ページに読み直してもらう
+        IsDirty = false;
+        return true;
     }
 
     public void Revert()
     {
         // 最後に保存した内容で丸ごと差し替え、各 ViewModel に読み直してもらう
         Current = JsonSerializer.Deserialize<AppSettings>(_savedJson, Options) ?? new AppSettings();
-        Reverted?.Invoke(this, EventArgs.Empty);
+        Reloaded?.Invoke(this, EventArgs.Empty);
         IsDirty = false;
         _log.Write("設定を元に戻しました");
     }
 
-    private AppSettings Load()
+    // ===== ファイル操作 =====
+
+    private bool WriteTo(string path)
     {
         try
         {
-            if (!File.Exists(FilePath)) return new AppSettings();
-            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), Options);
-            _log.Write("設定を読み込みました");
+            var json = Serialize(Current);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, json);
+            _savedJson = json;
+            IsDirty = false;
+            _log.Write($"設定を保存しました: {path}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log.Write($"設定の保存に失敗: {ex.Message}");   // 失敗したら IsDirty はそのまま
+            return false;
+        }
+    }
+
+    private AppSettings? TryRead(string path)
+    {
+        try
+        {
+            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), Options);
+            _log.Write($"設定を読み込みました: {path}");
             return settings ?? new AppSettings();
         }
         catch (Exception ex)
         {
-            // 壊れていたら初期値で起動する（ファイルは次の保存で上書きされる）
-            _log.Write($"設定の読み込みに失敗したため初期値を使います: {ex.Message}");
-            return new AppSettings();
+            _log.Write($"設定の読み込みに失敗: {path} ({ex.Message})");
+            return null;
+        }
+    }
+
+    /// <summary>前回使った設定ファイル。記録がない・ファイルが消えている場合は null</summary>
+    private static string? ReadLastFilePath()
+    {
+        try
+        {
+            if (!File.Exists(LastFileRecord)) return null;
+            var path = File.ReadAllText(LastFileRecord).Trim();
+            return File.Exists(path) ? path : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void RememberFilePath(string path)
+    {
+        try
+        {
+            Directory.CreateDirectory(AppDataDir);
+            File.WriteAllText(LastFileRecord, path);
+        }
+        catch (Exception ex)
+        {
+            _log.Write($"最後に使った設定ファイルの記録に失敗: {ex.Message}");
         }
     }
 

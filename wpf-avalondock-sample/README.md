@@ -25,7 +25,9 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - `Minimum` / `Maximum` の外には出ない（端に達したボタンは無効）。`Increment` で増減幅、`DecimalPlaces` で小数の桁数
   - 使い方: `<controls:NumericUpDown Value="{Binding X}" Minimum="0" Maximum="10" Increment="0.1" DecimalPlaces="1" Style="{StaticResource Input.Numeric}" />`
 - 設定の保存（`Settings/`, `Services/SettingsService.cs`）
-  - 設定ペイン下の「保存」で `%LocalAppData%\DockSample\settings.json` に保存し、次回起動時に復元（ファイルを消すと初期値）
+  - 設定ペイン下の「保存」で今の設定ファイルに保存し、次回起動時に復元（既定は `%LocalAppData%\DockSample\settings.json`）
+  - 「開く...」で好きな設定ファイルを読み込み、「名前を付けて保存...」で保存先を選べる。最後に使ったファイルは次回起動時に自動で開く
+  - ファイル選択やメッセージは `IDialogService` 経由で出す（ViewModel から OpenFileDialog / MessageBox を直接使わない）
   - 「元に戻す」で最後に保存した状態に戻る。どちらも変更があるときだけ押せる（保存はエラーがあると押せない）
   - 未保存の変更があるまま終了しようとすると、保存するか確認する
   - 保存する項目は `Settings/AppSettings.cs` に定義（画面と同じ形でなくてよい。例：自動保存の設定は入れ子のクラスでひとまとめ）
@@ -49,7 +51,7 @@ DockSample/
 ├─ Docking/                 LayoutInitializer(初期配置) / DockLayoutStore(保存・復元)
 ├─ Styles/                  文字・コントロールの共通スタイル
 ├─ Converters/              bool → Visibility(Hidden)
-└─ Services/                ILogService / IAppearanceService(文字サイズの変更) / ISettingsService(設定の保存)
+└─ Services/                ILogService / IAppearanceService(文字サイズの変更) / ISettingsService(設定の保存) / IDialogService(ファイル選択・メッセージ)
 ```
 
 ## 実行
