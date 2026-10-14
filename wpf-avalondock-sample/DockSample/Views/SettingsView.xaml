@@ -13,6 +13,14 @@
       HorizontalContentAlignment は TabControl 側に指定する
       （標準の TabItem はヘッダー位置を親の TabControl から取るため、TabItem に指定しても効かない）
     -->
+    <!-- Ctrl+Z / Ctrl+Y：設定ペインにフォーカスがあるとき有効。
+         文字を入力中の入力欄では、入力欄自身の Ctrl+Z（入力中の文字を戻す）が優先される -->
+    <UserControl.InputBindings>
+        <KeyBinding Modifiers="Ctrl"       Key="Z" Command="{Binding UndoCommand}" />
+        <KeyBinding Modifiers="Ctrl"       Key="Y" Command="{Binding RedoCommand}" />
+        <KeyBinding Modifiers="Ctrl+Shift" Key="Z" Command="{Binding RedoCommand}" />
+    </UserControl.InputBindings>
+
     <DockPanel>
         <!-- 下：今のファイル・未保存の表示と、ファイル操作のボタン -->
         <Border DockPanel.Dock="Bottom" BorderBrush="#CCC" BorderThickness="0,1,0,0" Padding="8,6">
@@ -31,9 +39,11 @@
                             <Setter Property="Margin" Value="6,0,0,4" />
                         </Style>
                     </WrapPanel.Resources>
+                    <Button Content="↶ 元に戻す"         Command="{Binding UndoCommand}" ToolTip="1つ前の状態に戻す (Ctrl+Z)" />
+                    <Button Content="↷ やり直し"         Command="{Binding RedoCommand}" ToolTip="元に戻した操作をやり直す (Ctrl+Y)" />
                     <Button Content="開く..."             Command="{Binding OpenCommand}" />
                     <Button Content="名前を付けて保存..." Command="{Binding SaveAsCommand}" />
-                    <Button Content="元に戻す"            Command="{Binding RevertCommand}" />
+                    <Button Content="保存した状態に戻す"  Command="{Binding RevertCommand}" />
                     <Button Content="保存"                Command="{Binding SaveCommand}" />
                 </WrapPanel>
             </StackPanel>

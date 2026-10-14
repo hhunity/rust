@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
+using System.Runtime.CompilerServices;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DockSample.Services;
@@ -57,10 +58,15 @@ public abstract class SettingsPageViewModel : ObservableValidator
         finally { _loading = false; }
     }
 
-    /// <summary>画面 → 設定。OnXxxChanged から呼び、設定に書き写して「未保存の変更」を更新する</summary>
-    protected void Write(Action<AppSettings> write)
+    /// <summary>
+    /// 画面 → 設定。OnXxxChanged から呼び、設定に書き写して「未保存の変更」を更新する。
+    /// 書き写す前の状態を Undo 用に記録する。key には呼び出し元（OnUserNameChanged など）の名前が
+    /// 自動で入るので、同じ項目の続けての変更（文字入力など）は1回分の Undo にまとまる。
+    /// </summary>
+    protected void Write(Action<AppSettings> write, [CallerMemberName] string key = "")
     {
-        if (_loading) return;
+        if (_loading) return;   // 読み込み中（Undo・開く などで読み直している最中）は書き戻さない
+        SettingsService.RecordUndo(GetType().Name + "." + key);
         write(SettingsService.Current);
         SettingsService.NotifyChanged();
     }
@@ -186,6 +192,12 @@ public partial class SettingsViewModel : PaneViewModel
                     SaveCommand.NotifyCanExecuteChanged();
                     RevertCommand.NotifyCanExecuteChanged();
                     break;
+                case nameof(ISettingsService.CanUndo):
+                    UndoCommand.NotifyCanExecuteChanged();
+                    break;
+                case nameof(ISettingsService.CanRedo):
+                    RedoCommand.NotifyCanExecuteChanged();
+                    break;
                 case nameof(ISettingsService.FilePath):
                     OnPropertyChanged(nameof(FilePath));
                     OnPropertyChanged(nameof(FileName));
@@ -232,7 +244,17 @@ public partial class SettingsViewModel : PaneViewModel
             _dialogs.ShowError($"設定ファイルを読み込めませんでした。\n形式が正しいか確認してください。\n{path}");
     }
 
-    /// <summary>元に戻す：最後に保存した状態に戻す。変更があるときだけ押せる</summary>
+    /// <summary>元に戻す（Ctrl+Z）：1つ前の状態に戻す</summary>
+    [RelayCommand(CanExecute = nameof(CanUndo))]
+    private void Undo() => _settings.Undo();
+    private bool CanUndo() => _settings.CanUndo;
+
+    /// <summary>やり直し（Ctrl+Y）：元に戻した分をやり直す</summary>
+    [RelayCommand(CanExecute = nameof(CanRedo))]
+    private void Redo() => _settings.Redo();
+    private bool CanRedo() => _settings.CanRedo;
+
+    /// <summary>保存した状態に戻す：最後に保存した状態にまとめて戻す。変更があるときだけ押せる</summary>
     [RelayCommand(CanExecute = nameof(CanRevert))]
     private void Revert() => _settings.Revert();
     private bool CanRevert() => _settings.IsDirty;
