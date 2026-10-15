@@ -25,8 +25,8 @@
         <!-- 下：今のファイル・未保存の表示と、ファイル操作のボタン -->
         <Border DockPanel.Dock="Bottom" BorderBrush="#CCC" BorderThickness="0,1,0,0" Padding="8,6">
             <StackPanel>
-                <TextBlock Text="{Binding FileName, StringFormat='設定ファイル: {0}'}"
-                           ToolTip="{Binding FilePath}"
+                <TextBlock Text="{Binding FolderName, StringFormat='設定フォルダ: {0}'}"
+                           ToolTip="{Binding FolderPath}"
                            Style="{StaticResource Text.Caption}" TextTrimming="CharacterEllipsis" />
                 <TextBlock Text="● 保存していない変更があります"
                            Style="{StaticResource Text.Caption}"

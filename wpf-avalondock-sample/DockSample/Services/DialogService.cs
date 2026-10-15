@@ -5,16 +5,13 @@ using Microsoft.Win32;
 namespace DockSample.Services;
 
 /// <summary>
-/// ファイル選択やメッセージのダイアログ。
-/// ViewModel から直接 OpenFileDialog / MessageBox を使わず、このサービス経由で出す（MVVM のため）。
+/// フォルダ選択やメッセージのダイアログ。
+/// ViewModel から直接 OpenFolderDialog / MessageBox を使わず、このサービス経由で出す（MVVM のため）。
 /// </summary>
 public interface IDialogService
 {
-    /// <summary>「開く」ダイアログ。キャンセルなら null</summary>
-    string? ShowOpenFile(string title, string filter, string? initialPath = null);
-
-    /// <summary>「名前を付けて保存」ダイアログ。キャンセルなら null</summary>
-    string? ShowSaveFile(string title, string filter, string? initialPath = null);
+    /// <summary>フォルダを選ぶダイアログ（中で「新しいフォルダー」も作れる）。キャンセルなら null</summary>
+    string? ShowSelectFolder(string title, string? initialFolder = null);
 
     /// <summary>確認（OK / キャンセル）。OK なら true</summary>
     bool Confirm(string message);
@@ -29,25 +26,21 @@ public class DialogService : IDialogService
 
     private static Window? Owner => Application.Current?.MainWindow;
 
-    public string? ShowOpenFile(string title, string filter, string? initialPath = null)
+    public string? ShowSelectFolder(string title, string? initialFolder = null)
     {
-        var dialog = new OpenFileDialog { Title = title, Filter = filter, CheckFileExists = true };
-        SetInitialPath(dialog, initialPath);
-        return Show(dialog) ? dialog.FileName : null;
-    }
+        // .NET 8 以降の WPF 標準のフォルダ選択ダイアログ
+        var dialog = new OpenFolderDialog { Title = title, Multiselect = false };
 
-    public string? ShowSaveFile(string title, string filter, string? initialPath = null)
-    {
-        var dialog = new SaveFileDialog
+        if (!string.IsNullOrEmpty(initialFolder) && Directory.Exists(initialFolder))
         {
-            Title = title,
-            Filter = filter,
-            OverwritePrompt = true,   // 既存のファイルを選んだら上書き確認
-            AddExtension = true,
-            DefaultExt = ".json",
-        };
-        SetInitialPath(dialog, initialPath);
-        return Show(dialog) ? dialog.FileName : null;
+            // 今のフォルダの「親」を開き、今のフォルダを選んだ状態にする
+            var parent = Path.GetDirectoryName(initialFolder.TrimEnd(Path.DirectorySeparatorChar));
+            if (!string.IsNullOrEmpty(parent)) dialog.InitialDirectory = parent;
+            dialog.FolderName = initialFolder;
+        }
+
+        var ok = Owner is { } owner ? dialog.ShowDialog(owner) : dialog.ShowDialog();
+        return ok == true ? dialog.FolderName : null;
     }
 
     public bool Confirm(string message) =>
@@ -62,18 +55,5 @@ public class DialogService : IDialogService
             MessageBox.Show(owner, message, Caption, MessageBoxButton.OK, MessageBoxImage.Error);
         else
             MessageBox.Show(message, Caption, MessageBoxButton.OK, MessageBoxImage.Error);
-    }
-
-    private static bool Show(FileDialog dialog) =>
-        (Owner is { } owner ? dialog.ShowDialog(owner) : dialog.ShowDialog()) == true;
-
-    /// <summary>今のファイルのフォルダ・ファイル名を最初から選んだ状態にする</summary>
-    private static void SetInitialPath(FileDialog dialog, string? path)
-    {
-        if (string.IsNullOrEmpty(path)) return;
-        var dir = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
-            dialog.InitialDirectory = dir;
-        dialog.FileName = Path.GetFileName(path);
     }
 }

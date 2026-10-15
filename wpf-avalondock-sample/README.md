@@ -25,9 +25,13 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - `Minimum` / `Maximum` の外には出ない（端に達したボタンは無効）。`Increment` で増減幅、`DecimalPlaces` で小数の桁数
   - 使い方: `<controls:NumericUpDown Value="{Binding X}" Minimum="0" Maximum="10" Increment="0.1" DecimalPlaces="1" Style="{StaticResource Input.Numeric}" />`
 - 設定の保存（`Settings/`, `Services/SettingsService.cs`）
-  - 設定ペイン下の「保存」で今の設定ファイルに上書き保存。まだ保存先が決まっていない（初回）ときは保存先を聞く
-  - 「開く...」で好きな設定ファイルを読み込み、「名前を付けて保存...」で保存先を選べる。最後に使ったファイルは次回起動時に自動で開く
-  - ファイル選択やメッセージは `IDialogService` 経由で出す（ViewModel から OpenFileDialog / MessageBox を直接使わない）
+  - 設定は**フォルダ**単位で保存する。中にセクションごとの JSON（`general.json`, `appearance.json`）を作る
+    - どのセクションをどのファイルに入れるかは `JsonSettingsService.Sections` の一覧で決める（増やすときは1行足す）
+    - 開くとき、フォルダにないファイルのセクションは初期値になる（後からセクションを増やしても古いフォルダを開ける）
+  - 設定ペイン下の「保存」で今のフォルダに上書き保存。まだ保存先が決まっていない（初回）ときは保存先フォルダを聞く
+  - 「開く...」でフォルダを選んで読み込み、「名前を付けて保存...」で保存先フォルダを選べる。最後に使ったフォルダは次回起動時に自動で開く
+  - 既に設定ファイルがあるフォルダに保存するときは上書きを確認。設定ファイルが1つもないフォルダは開けない
+  - フォルダ選択やメッセージは `IDialogService` 経由で出す（ViewModel から OpenFolderDialog / MessageBox を直接使わない）
   - 「↶ 元に戻す」(Ctrl+Z) / 「↷ やり直し」(Ctrl+Y) で1つずつ戻す・進める。同じ項目の続けての変更（文字入力など）は1回分にまとまる
   - 「保存した状態に戻す」で最後に保存した状態にまとめて戻る（これも Undo で取り消せる）。「開く」で Undo の履歴は消える
   - 未保存の変更があるまま終了しようとすると、保存するか確認する
@@ -52,7 +56,7 @@ DockSample/
 ├─ Docking/                 LayoutInitializer(初期配置) / DockLayoutStore(保存・復元)
 ├─ Styles/                  文字・コントロールの共通スタイル
 ├─ Converters/              bool → Visibility(Hidden)
-└─ Services/                ILogService / IAppearanceService(文字サイズの変更) / ISettingsService(設定の保存) / IDialogService(ファイル選択・メッセージ)
+└─ Services/                ILogService / IAppearanceService(文字サイズの変更) / ISettingsService(設定の保存) / IDialogService(フォルダ選択・メッセージ)
 ```
 
 ## 実行

@@ -6,28 +6,32 @@ namespace DockSample.Services;
 /// </summary>
 public static class SettingsSaveFlow
 {
-    public const string FileFilter = "設定ファイル (*.json)|*.json|すべてのファイル (*.*)|*.*";
-
     /// <summary>
-    /// 保存先が決まっていなければ（または askPath が true なら）保存先を聞いてから保存する。
+    /// 保存先フォルダが決まっていなければ（または askPath が true なら）フォルダを聞いてから保存する。
+    /// 選んだフォルダに既に設定ファイルがあれば、上書きしてよいか確認する。
     /// 保存できたら true。キャンセル・失敗なら false（失敗時はエラーを表示する）。
     /// </summary>
     public static bool SaveInteractive(this ISettingsService settings, IDialogService dialogs, bool askPath = false)
     {
-        if (!askPath && settings.FilePath is not null)
-            return ReportIfFailed(settings.Save(), settings.FilePath, dialogs);
+        if (!askPath && settings.FolderPath is not null)
+            return ReportIfFailed(settings.Save(), settings.FolderPath, dialogs);
 
-        var path = dialogs.ShowSaveFile(
-            "設定を名前を付けて保存", FileFilter,
-            settings.FilePath ?? JsonSettingsService.DefaultFilePath);   // 最初に提案する場所・名前
-        if (path is null) return false;   // キャンセル
+        var folder = dialogs.ShowSelectFolder(
+            "設定の保存先フォルダを選択（中に設定ファイルを作成します）", settings.FolderPath);
+        if (folder is null) return false;   // キャンセル
 
-        return ReportIfFailed(settings.SaveAs(path), path, dialogs);
+        // 今のフォルダ以外で、既に設定ファイルがあるなら上書き確認
+        var isCurrent = string.Equals(folder, settings.FolderPath, StringComparison.OrdinalIgnoreCase);
+        if (!isCurrent && settings.HasSettingsFiles(folder) &&
+            !dialogs.Confirm($"このフォルダには既に設定ファイルがあります。上書きしますか？\n{folder}"))
+            return false;
+
+        return ReportIfFailed(settings.SaveAs(folder), folder, dialogs);
     }
 
-    private static bool ReportIfFailed(bool ok, string path, IDialogService dialogs)
+    private static bool ReportIfFailed(bool ok, string folder, IDialogService dialogs)
     {
-        if (!ok) dialogs.ShowError($"設定を保存できませんでした。\n{path}");
+        if (!ok) dialogs.ShowError($"設定を保存できませんでした。\n{folder}");
         return ok;
     }
 }

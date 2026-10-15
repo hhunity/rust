@@ -198,9 +198,9 @@ public partial class SettingsViewModel : PaneViewModel
                 case nameof(ISettingsService.CanRedo):
                     RedoCommand.NotifyCanExecuteChanged();
                     break;
-                case nameof(ISettingsService.FilePath):
-                    OnPropertyChanged(nameof(FilePath));
-                    OnPropertyChanged(nameof(FileName));
+                case nameof(ISettingsService.FolderPath):
+                    OnPropertyChanged(nameof(FolderPath));
+                    OnPropertyChanged(nameof(FolderName));
                     SaveCommand.NotifyCanExecuteChanged();   // 保存先が決まったかで押せる条件が変わる
                     break;
             }
@@ -210,11 +210,11 @@ public partial class SettingsViewModel : PaneViewModel
     /// <summary>最後に保存してから変更があるか（「未保存」の表示に使う）</summary>
     public bool IsDirty => _settings.IsDirty;
 
-    /// <summary>今開いている設定ファイル（フルパス。ツールチップ用）。未保存なら null</summary>
-    public string? FilePath => _settings.FilePath;
+    /// <summary>今開いている設定フォルダ（フルパス。ツールチップ用）。未保存なら null</summary>
+    public string? FolderPath => _settings.FolderPath;
 
-    /// <summary>今開いている設定ファイルの名前（表示用）</summary>
-    public string FileName => _settings.FilePath is { } path ? Path.GetFileName(path) : "（未保存）";
+    /// <summary>今開いている設定フォルダの名前（表示用）</summary>
+    public string FolderName => _settings.FolderPath is { } folder ? new DirectoryInfo(folder).Name : "（未保存）";
 
     /// <summary>
     /// 保存：今のファイルに上書き。まだ保存先が決まっていなければ、保存先を聞く。
@@ -222,26 +222,29 @@ public partial class SettingsViewModel : PaneViewModel
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanSave))]
     private void Save() => _settings.SaveInteractive(_dialogs);
-    private bool CanSave() => (_settings.IsDirty || _settings.FilePath is null) && !HasErrors;
+    private bool CanSave() => (_settings.IsDirty || _settings.FolderPath is null) && !HasErrors;
 
     /// <summary>名前を付けて保存：保存先を選ぶ。エラーがないときだけ押せる</summary>
     [RelayCommand(CanExecute = nameof(CanSaveAs))]
     private void SaveAs() => _settings.SaveInteractive(_dialogs, askPath: true);
     private bool CanSaveAs() => !HasErrors;
 
-    /// <summary>開く：別の設定ファイルを読み込む</summary>
+    /// <summary>開く：別の設定フォルダを読み込む</summary>
     [RelayCommand]
     private void Open()
     {
         if (_settings.IsDirty &&
-            !_dialogs.Confirm("保存していない変更は失われます。別の設定ファイルを開きますか？"))
+            !_dialogs.Confirm("保存していない変更は失われます。別の設定フォルダを開きますか？"))
             return;
 
-        var path = _dialogs.ShowOpenFile("設定ファイルを開く", SettingsSaveFlow.FileFilter, _settings.FilePath);
-        if (path is null) return;   // キャンセル
+        var folder = _dialogs.ShowSelectFolder("開く設定フォルダを選択", _settings.FolderPath);
+        if (folder is null) return;   // キャンセル
 
-        if (!_settings.Open(path))
-            _dialogs.ShowError($"設定ファイルを読み込めませんでした。\n形式が正しいか確認してください。\n{path}");
+        if (!_settings.Open(folder))
+            _dialogs.ShowError(
+                "設定フォルダとして読み込めませんでした。\n" +
+                "設定ファイル（general.json など）が入ったフォルダを選んでください。\n" +
+                "（ファイルの形式が壊れている場合も読み込めません）\n" + folder);
     }
 
     /// <summary>元に戻す（Ctrl+Z）：1つ前の状態に戻す</summary>

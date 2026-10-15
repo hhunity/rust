@@ -17,22 +17,28 @@ public interface ISettingsService : INotifyPropertyChanged
     AppSettings Current { get; }
 
     /// <summary>
-    /// 今開いている設定ファイルのパス（「保存」の保存先）。
+    /// 今開いている設定フォルダのパス（「保存」の保存先）。中にセクションごとの JSON が入る。
     /// まだ一度も保存していない（保存先が決まっていない）ときは null。
     /// </summary>
-    string? FilePath { get; }
+    string? FolderPath { get; }
 
     /// <summary>最後に保存（または読み込み）してから変更があるか</summary>
     bool IsDirty { get; }
 
-    /// <summary>今のファイル（FilePath）に上書き保存する。保存先が決まっていない・失敗したら false</summary>
+    /// <summary>今のフォルダ（FolderPath）に上書き保存する。保存先が決まっていない・失敗したら false</summary>
     bool Save();
 
-    /// <summary>指定したファイルに保存し、以降はそのファイルを使う。成功したら true</summary>
-    bool SaveAs(string path);
+    /// <summary>指定したフォルダに保存し（なければ作る）、以降はそのフォルダを使う。成功したら true</summary>
+    bool SaveAs(string folder);
 
-    /// <summary>指定した設定ファイルを読み込み、以降はそのファイルを使う。成功したら true</summary>
-    bool Open(string path);
+    /// <summary>
+    /// 指定したフォルダの設定を読み込み、以降はそのフォルダを使う。
+    /// 設定ファイルが1つもない・読めないファイルがあるときは false（今の設定はそのまま）
+    /// </summary>
+    bool Open(string folder);
+
+    /// <summary>フォルダに、このアプリの設定ファイルが1つでもあるか（上書き確認に使う）</summary>
+    bool HasSettingsFiles(string folder);
 
     /// <summary>Current を最後に保存（または読み込み）した状態に戻す（これも Undo で取り消せる）</summary>
     void Revert();
@@ -59,27 +65,57 @@ public interface ISettingsService : INotifyPropertyChanged
 }
 
 /// <summary>
-/// 設定を JSON ファイルで保存する。
-/// ・「開く」「名前を付けて保存」で使ったファイルは last-settings.txt に覚えておき、次回起動時にそれを開く
-/// ・覚えているファイルがなければ、保存先が決まっていない状態（FilePath = null）で初期値から始める
-///   （以前の版で使っていた %LocalAppData%\DockSample\settings.json があれば、それを開く）
-/// ・最後に保存した内容を JSON 文字列で覚えておき、変更の有無の判定と「元に戻す」に使う
+/// 設定を「フォルダ＋セクションごとの JSON ファイル」で保存する。
+///
+///   MyProject/
+///   ├─ general.json      ← AppSettings.General
+///   └─ appearance.json   ← AppSettings.Appearance
+///
+/// ・どのセクションをどのファイルに入れるかは Sections の一覧で決める（増やすときは1行足す）
+/// ・読み込み時、フォルダにないファイルのセクションは初期値になる（後からセクションを増やしても古いフォルダを開ける）
+/// ・メモリ上では1つの AppSettings として扱う（Undo・変更の有無の判定は設定全体の JSON で行う）
+/// ・「開く」「名前を付けて保存」で使ったフォルダは last-folder.txt に覚えておき、次回起動時にそれを開く
+/// ・覚えているフォルダがなければ、保存先が決まっていない状態（FolderPath = null）で初期値から始める
+///   （以前の版の %LocalAppData%\DockSample\settings.json があれば、その内容を読み込む。保存先は未定のまま）
 /// </summary>
 public partial class JsonSettingsService : ObservableObject, ISettingsService
 {
     private static readonly string AppDataDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DockSample");
 
-    /// <summary>以前の版の保存先。「名前を付けて保存」で最初に提案するファイル名にも使う</summary>
-    public static readonly string DefaultFilePath = Path.Combine(AppDataDir, "settings.json");
+    /// <summary>以前の版の保存先（1ファイルに全部入り）。見つかれば起動時に内容だけ読み込む</summary>
+    private static readonly string LegacyFilePath = Path.Combine(AppDataDir, "settings.json");
 
-    /// <summary>最後に使った設定ファイルのパスを覚えておくファイル</summary>
-    private static readonly string LastFileRecord = Path.Combine(AppDataDir, "last-settings.txt");
+    /// <summary>最後に使った設定フォルダのパスを覚えておくファイル</summary>
+    private static readonly string LastFolderRecord = Path.Combine(AppDataDir, "last-folder.txt");
 
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,                            // 人が読める形で保存
         Converters = { new JsonStringEnumConverter() },  // enum を数字ではなく名前で保存
+    };
+
+    // ===== セクション ⇔ ファイル の対応 =====
+
+    /// <summary>1ファイル分：ファイル名と、そのセクションの書き出し・読み込み方</summary>
+    private sealed record Section(
+        string FileName,
+        Func<AppSettings, string> Write,
+        Action<AppSettings, string> Read);
+
+    private static Section Map<T>(string fileName, Func<AppSettings, T> get, Action<AppSettings, T> set)
+        where T : new() =>
+        new(fileName,
+            s => JsonSerializer.Serialize(get(s), Options),
+            (s, json) => set(s, JsonSerializer.Deserialize<T>(json, Options) ?? new T()));
+
+    /// <summary>
+    /// フォルダに保存するファイルの一覧。セクションを増やしたら、ここに1行足す。
+    /// </summary>
+    private static readonly Section[] Sections =
+    {
+        Map("general.json",    s => s.General,    (s, v) => s.General = v),
+        Map("appearance.json", s => s.Appearance, (s, v) => s.Appearance = v),
     };
 
     private readonly ILogService _log;
@@ -102,17 +138,17 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
     {
         _log = log;
 
-        // 前回使ったファイル → 以前の版の既定ファイル → どちらもなければ保存先なし（初期値）
-        FilePath = ReadLastFilePath() ?? (File.Exists(DefaultFilePath) ? DefaultFilePath : null);
-        Current = FilePath is not null
-            ? TryRead(FilePath) ?? new AppSettings()   // 壊れていたら初期値（次の保存で上書きされる）
-            : new AppSettings();
+        // 前回使ったフォルダ → なければ保存先なし（以前の版のファイルがあれば内容だけ読み込む）
+        FolderPath = ReadLastFolder();
+        Current = FolderPath is not null
+            ? TryReadFolder(FolderPath) ?? new AppSettings()   // 読めなければ初期値（次の保存で上書きされる）
+            : TryReadLegacyFile() ?? new AppSettings();
         _savedJson = Serialize(Current);
     }
 
     public AppSettings Current { get; private set; }
 
-    [ObservableProperty] private string? _filePath;
+    [ObservableProperty] private string? _folderPath;
     [ObservableProperty] private bool _isDirty;
     [ObservableProperty] private bool _canUndo;
     [ObservableProperty] private bool _canRedo;
@@ -194,26 +230,26 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
         CanRedo = _redo.Count > 0;
     }
 
-    public bool Save() => FilePath is not null && WriteTo(FilePath);
+    public bool Save() => FolderPath is not null && WriteFolder(FolderPath);
 
-    public bool SaveAs(string path)
+    public bool SaveAs(string folder)
     {
-        if (!WriteTo(path)) return false;
-        FilePath = path;
-        RememberFilePath(path);
+        if (!WriteFolder(folder)) return false;
+        FolderPath = folder;
+        RememberFolder(folder);
         return true;
     }
 
-    public bool Open(string path)
+    public bool Open(string folder)
     {
-        var loaded = TryRead(path);
+        var loaded = TryReadFolder(folder);
         if (loaded is null) return false;
 
         Current = loaded;
-        FilePath = path;
-        RememberFilePath(path);
+        FolderPath = folder;
+        RememberFolder(folder);
         _savedJson = Serialize(Current);
-        ClearHistory();                            // 別のファイルの状態には戻れないようにする
+        ClearHistory();                            // 別のフォルダの状態には戻れないようにする
         Reloaded?.Invoke(this, EventArgs.Empty);   // 各ページに読み直してもらう
         IsDirty = false;
         return true;
@@ -229,18 +265,22 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
         _log.Write("設定を保存した状態に戻しました");
     }
 
-    // ===== ファイル操作 =====
+    // ===== フォルダ・ファイル操作 =====
 
-    private bool WriteTo(string path)
+    public bool HasSettingsFiles(string folder) =>
+        Directory.Exists(folder) && Sections.Any(sec => File.Exists(Path.Combine(folder, sec.FileName)));
+
+    private bool WriteFolder(string folder)
     {
         try
         {
-            var json = Serialize(Current);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, json);
-            _savedJson = json;
+            Directory.CreateDirectory(folder);
+            foreach (var sec in Sections)
+                File.WriteAllText(Path.Combine(folder, sec.FileName), sec.Write(Current));
+
+            _savedJson = Serialize(Current);
             IsDirty = false;
-            _log.Write($"設定を保存しました: {path}");
+            _log.Write($"設定を保存しました: {folder}");
             return true;
         }
         catch (Exception ex)
@@ -250,29 +290,49 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
         }
     }
 
-    private AppSettings? TryRead(string path)
+    /// <summary>
+    /// フォルダの中のファイルを読み、1つの AppSettings にまとめる。
+    /// ないファイルのセクションは初期値。設定ファイルが1つもない・読めないファイルがあれば null。
+    /// </summary>
+    private AppSettings? TryReadFolder(string folder)
     {
         try
         {
-            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), Options);
-            _log.Write($"設定を読み込みました: {path}");
-            return settings ?? new AppSettings();
+            var settings = new AppSettings();
+            var found = 0;
+            foreach (var sec in Sections)
+            {
+                var path = Path.Combine(folder, sec.FileName);
+                if (!File.Exists(path)) continue;   // このセクションは初期値のまま
+                sec.Read(settings, File.ReadAllText(path));
+                found++;
+            }
+
+            if (found == 0)
+            {
+                _log.Write($"設定ファイルが見つかりません: {folder}");
+                return null;
+            }
+
+            _log.Write($"設定を読み込みました: {folder}（{found}/{Sections.Length} ファイル）");
+            return settings;
         }
         catch (Exception ex)
         {
-            _log.Write($"設定の読み込みに失敗: {path} ({ex.Message})");
+            _log.Write($"設定の読み込みに失敗: {folder} ({ex.Message})");
             return null;
         }
     }
 
-    /// <summary>前回使った設定ファイル。記録がない・ファイルが消えている場合は null</summary>
-    private static string? ReadLastFilePath()
+    /// <summary>以前の版の1ファイル形式の設定。なければ・読めなければ null</summary>
+    private AppSettings? TryReadLegacyFile()
     {
         try
         {
-            if (!File.Exists(LastFileRecord)) return null;
-            var path = File.ReadAllText(LastFileRecord).Trim();
-            return File.Exists(path) ? path : null;
+            if (!File.Exists(LegacyFilePath)) return null;
+            var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(LegacyFilePath), Options);
+            _log.Write("以前の版の設定を読み込みました（保存するとフォルダ形式で保存されます）");
+            return settings;
         }
         catch
         {
@@ -280,16 +340,31 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
         }
     }
 
-    private void RememberFilePath(string path)
+    /// <summary>前回使った設定フォルダ。記録がない・フォルダが消えている場合は null</summary>
+    private static string? ReadLastFolder()
+    {
+        try
+        {
+            if (!File.Exists(LastFolderRecord)) return null;
+            var folder = File.ReadAllText(LastFolderRecord).Trim();
+            return Directory.Exists(folder) ? folder : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void RememberFolder(string folder)
     {
         try
         {
             Directory.CreateDirectory(AppDataDir);
-            File.WriteAllText(LastFileRecord, path);
+            File.WriteAllText(LastFolderRecord, folder);
         }
         catch (Exception ex)
         {
-            _log.Write($"最後に使った設定ファイルの記録に失敗: {ex.Message}");
+            _log.Write($"最後に使った設定フォルダの記録に失敗: {ex.Message}");
         }
     }
 

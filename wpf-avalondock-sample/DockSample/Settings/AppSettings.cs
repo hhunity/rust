@@ -1,7 +1,8 @@
 namespace DockSample.Settings;
 
 /// <summary>
-/// settings.json に保存する設定（ただのデータ）。
+/// 保存する設定（ただのデータ）。設定フォルダの中に、セクションごとのファイルとして保存される
+/// （General → general.json、Appearance → appearance.json。対応は JsonSettingsService.Sections）。
 /// ・ここに書いた初期値が、設定ファイルがまだないとき / 項目が足りないときの値になる
 /// ・画面（ViewModel）と同じ形にする必要はない。ViewModel 側の LoadFrom / OnXxxChanged で対応付ける
 /// </summary>
