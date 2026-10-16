@@ -38,6 +38,11 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - 保存する項目は `Settings/AppSettings.cs` に定義（画面と同じ形でなくてよい。例：自動保存の設定は入れ子のクラスでひとまとめ）
   - 画面との対応付けは各ページで手書き：設定 → 画面は `LoadFrom`、画面 → 設定は各プロパティの `OnXxxChanged` で `Write(...)`
   - 項目を増やすときは `[ObservableProperty]`・`OnXxxChanged`・`LoadFrom` の3か所と、`AppSettings` 側に追加する
+- 押すと一覧が開くボタンの部品（`Controls/DropDownButton`）
+  - 一覧は `MaxDropDownHeight`（既定 250）を超えるとスクロール。検索欄で絞り込み（`IsSearchEnabled="False"` で非表示）
+  - ↑↓で移動・Enter で決定・Esc で閉じる。選んだ項目は `Command` の引数として渡される
+  - 使い方: `<controls:DropDownButton Header="定型文" ItemsSource="{Binding Snippets}" DisplayMemberPath="Name" Command="{Binding InsertSnippetCommand}" Style="{StaticResource Input.DropDown}" />`
+  - 例：ドキュメントの「定型文 ▾」で、選んだ定型文を末尾に追加する
 - 配置を記憶
   - 隠して再表示すると、隠す前の位置に戻る
   - 終了時に `%LocalAppData%\DockSample\layout.xml` へ保存し、次回起動時に復元（ファイルを消すと初期配置に戻る）
@@ -50,7 +55,7 @@ DockSample/
 ├─ App.xaml(.cs)            DI 設定 / ViewModel→View の DataTemplate
 ├─ MainWindow.xaml(.cs)     ボタン + DockingManager / レイアウト保存・復元の呼び出し
 ├─ Views/                   各ペインの UserControl
-├─ Controls/                使い回す部品（NumericUpDown）
+├─ Controls/                使い回す部品（NumericUpDown / DropDownButton）
 ├─ ViewModels/              Main / Pane(基底) / Document / Explorer, Properties, Output
 ├─ Settings/                保存する設定のクラス
 ├─ Docking/                 LayoutInitializer(初期配置) / DockLayoutStore(保存・復元)

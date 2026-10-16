@@ -4,10 +4,22 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:DockSample.ViewModels"
+             xmlns:controls="clr-namespace:DockSample.Controls"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:DocumentViewModel}"
              d:DesignWidth="300" d:DesignHeight="200">
     <!-- DataContext は DataTemplate から DocumentViewModel が自動で入る（ここで設定しない） -->
-    <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"
-             Style="{StaticResource Input.Code}" />
+    <DockPanel>
+        <!-- 上：定型文の挿入ボタン（押すと一覧。検索で絞り込み、選ぶと末尾に追加） -->
+        <Border DockPanel.Dock="Top" BorderBrush="#DDDDDD" BorderThickness="0,0,0,1" Padding="4">
+            <controls:DropDownButton Header="定型文"
+                                     ItemsSource="{Binding Snippets}"
+                                     DisplayMemberPath="Name"
+                                     Command="{Binding InsertSnippetCommand}"
+                                     Style="{StaticResource Input.DropDown}" />
+        </Border>
+
+        <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"
+                 Style="{StaticResource Input.Code}" />
+    </DockPanel>
 </UserControl>

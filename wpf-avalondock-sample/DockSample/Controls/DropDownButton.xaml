@@ -1,0 +1,66 @@
+<!--
+  押すと一覧が開き、選ぶとコマンドを実行するボタン（検索で絞り込み可）。
+  使い方:
+    <controls:DropDownButton Header="定型文"
+                             ItemsSource="{Binding Snippets}" DisplayMemberPath="Name"
+                             Command="{Binding InsertSnippetCommand}"
+                             Style="{StaticResource Input.DropDown}" />
+  ・選んだ項目が Command の引数（CommandParameter）として渡される
+  ・DisplayMemberPath と ItemTemplate は同時に指定しないこと（WPF の ListBox の制約）
+
+  ※ 中で DataContext を設定しないこと（使う側の {Binding} が効かなくなる）。
+     中の部品の更新はコードビハインドで行っている。
+-->
+<UserControl x:Class="DockSample.Controls.DropDownButton"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="False">
+
+    <UserControl.Resources>
+        <!-- 一覧の1項目。クリックで選択を確定する -->
+        <Style x:Key="ItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="8,3" />
+            <EventSetter Event="PreviewMouseLeftButtonUp" Handler="OnItemClick" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <!-- ボタン本体：見出し＋▼ -->
+        <ToggleButton x:Name="PART_Toggle" Padding="10,4">
+            <StackPanel Orientation="Horizontal">
+                <ContentPresenter x:Name="PART_Header" VerticalAlignment="Center" />
+                <Path Data="M 0,0 L 8,0 L 4,4 Z" Fill="#444444"
+                      Margin="8,0,0,0" VerticalAlignment="Center" />
+            </StackPanel>
+        </ToggleButton>
+
+        <!-- 一覧：ボタンの真下に出す。外をクリックすると閉じる -->
+        <Popup x:Name="PART_Popup"
+               PlacementTarget="{Binding ElementName=PART_Toggle}"
+               Placement="Bottom" StaysOpen="False"
+               IsOpen="{Binding IsChecked, ElementName=PART_Toggle, Mode=TwoWay}"
+               AllowsTransparency="True" PopupAnimation="Fade">
+            <Border x:Name="PART_Border" Margin="0,2,0,0" Padding="4"
+                    Background="White" BorderBrush="#ABADB3" BorderThickness="1">
+                <DockPanel>
+                    <!-- 検索欄（IsSearchEnabled="False" で隠せる） -->
+                    <Grid x:Name="PART_SearchArea" DockPanel.Dock="Top" Margin="0,0,0,4">
+                        <TextBox x:Name="PART_Search" Padding="3,2" />
+                        <TextBlock x:Name="PART_Placeholder" Text="検索..." Foreground="#999999"
+                                   Margin="6,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False" />
+                    </Grid>
+
+                    <!-- 絞り込みの結果が0件のとき -->
+                    <TextBlock x:Name="PART_Empty" DockPanel.Dock="Top" Text="該当する項目はありません"
+                               Foreground="#999999" Margin="6,4" Visibility="Collapsed" />
+
+                    <!-- 一覧。MaxDropDownHeight を超えたら普通のスクロールバーが出る -->
+                    <ListBox x:Name="PART_List" BorderThickness="0"
+                             ItemContainerStyle="{StaticResource ItemStyle}"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+                </DockPanel>
+            </Border>
+        </Popup>
+    </Grid>
+</UserControl>

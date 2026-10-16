@@ -37,6 +37,13 @@
         <Setter Property="Validation.ErrorTemplate" Value="{StaticResource Validation.WithMessage}" />
     </Style>
 
+    <!-- 押すと一覧が開くボタン（Controls/DropDownButton） -->
+    <Style x:Key="Input.DropDown" TargetType="{x:Type controls:DropDownButton}">
+        <Setter Property="FontFamily" Value="{StaticResource Font.Base}" />
+        <Setter Property="FontSize"   Value="{DynamicResource FontSize.Body}" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+    </Style>
+
     <!-- 等幅のエディタ（ドキュメント用） -->
     <Style x:Key="Input.Code" TargetType="TextBox">
         <Setter Property="FontFamily" Value="{StaticResource Font.Mono}" />
