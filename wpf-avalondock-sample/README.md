@@ -42,6 +42,10 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - 「追加 ▾」（DropDownButton）で種類を選ぶと、表（DataGrid）に1行追加
   - 列：名前・種類・備考・有効（チェックボックス）・編集（追加後に変更したら ●）・削除ボタン
   - 上に「◯件（編集済み ◯件）」を表示。無効にした行は文字が薄くなる
+  - 表の右に、選んだ行の詳細パネル（間のつまみで幅を変更可）。名前・備考・有効と、種類の分類ごとの詳細設定を編集できる
+    - 詳細設定は分類ごとにクラスが違う（`ViewModels/ItemDetailsViewModels.cs`：センサ / アクチュエータ / 通信 / その他）
+    - 表示は型ごとの DataTemplate（`ItemListView.xaml` の Resources）で自動で切り替わる
+    - 詳細設定を変えた場合も、その行の「編集」の ● が付く
 - 押すと一覧が開くボタンの部品（`Controls/DropDownButton`）
   - 一覧は `MaxDropDownHeight`（既定 250）を超えるとスクロール。検索欄で絞り込み（`IsSearchEnabled="False"` で非表示）
   - ↑↓で移動・Enter で決定・Esc で閉じる。選んだ項目は `Command` の引数として渡される

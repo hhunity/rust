@@ -54,6 +54,12 @@
         <Setter Property="Margin" Value="0,0,0,4" />
     </Style>
 
+    <!-- 入力欄の左に置く項目名（Grid の左の列などで使う） -->
+    <Style x:Key="Text.FieldLabel" TargetType="TextBlock" BasedOn="{StaticResource Text.Body}">
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Margin" Value="0,0,8,6" />
+    </Style>
+
     <!-- 補足説明・小さい項目名 -->
     <Style x:Key="Text.Caption" TargetType="TextBlock" BasedOn="{StaticResource Text.Body}">
         <Setter Property="FontSize"   Value="{DynamicResource FontSize.Caption}" />

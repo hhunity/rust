@@ -4,7 +4,8 @@
 -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:controls="clr-namespace:DockSample.Controls">
+                    xmlns:controls="clr-namespace:DockSample.Controls"
+                    xmlns:conv="clr-namespace:DockSample.Converters">
 
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="Typography.xaml" />
@@ -57,6 +58,10 @@
     <!-- true → Visible / false → Collapsed（WPF標準）。チェックONで項目を出す、などに使う。
          ※ Converters/BoolToVisibilityConverter（Hidden を返す）は AvalonDock のペイン専用 -->
     <BooleanToVisibilityConverter x:Key="BoolToVisible" />
+
+    <!-- null なら表示 / null でなければ表示（「未選択なら案内を出す」など） -->
+    <conv:NullToVisibilityConverter x:Key="NullToVisible" />
+    <conv:NullToVisibilityConverter x:Key="NotNullToVisible" Invert="True" />
 
     <Style x:Key="Input.CheckBox" TargetType="CheckBox">
         <Setter Property="FontFamily" Value="{StaticResource Font.Base}" />

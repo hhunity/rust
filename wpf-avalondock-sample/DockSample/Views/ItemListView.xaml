@@ -9,6 +9,142 @@
              d:DataContext="{d:DesignInstance Type=vm:ItemListViewModel}"
              d:DesignWidth="600" d:DesignHeight="300">
     <!-- DataContext は DataTemplate から ItemListViewModel が自動で入る -->
+
+    <UserControl.Resources>
+        <!-- 詳細パネルの入力欄の共通の見た目（このペインの中だけ） -->
+        <Style x:Key="DetailNumeric" TargetType="{x:Type controls:NumericUpDown}" BasedOn="{StaticResource Input.Numeric}">
+            <Setter Property="Width" Value="110" />
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+        <Style x:Key="DetailText" TargetType="TextBox" BasedOn="{StaticResource Input.TextBox}">
+            <Setter Property="Margin" Value="0,0,0,6" />
+        </Style>
+        <Style x:Key="DetailCheck" TargetType="CheckBox" BasedOn="{StaticResource Input.CheckBox}">
+            <Setter Property="Margin" Value="0,0,0,6" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <!--
+          詳細設定の中身：Details の型ごとに表示を切り替える（ContentControl が型を見て選ぶ）。
+          どれも「左：項目名 / 右：入力欄」の2列の Grid。
+        -->
+        <DataTemplate DataType="{x:Type vm:SensorDetails}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="チャンネル" Style="{StaticResource Text.FieldLabel}" />
+                <controls:NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding Channel}"
+                                        Minimum="1" Maximum="64" Increment="1" DecimalPlaces="0"
+                                        Style="{StaticResource DetailNumeric}" />
+
+                <TextBlock Grid.Row="1" Text="計測間隔 (ms)" Style="{StaticResource Text.FieldLabel}" />
+                <controls:NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding SamplingIntervalMs}"
+                                        Minimum="10" Maximum="60000" Increment="100" DecimalPlaces="0"
+                                        Style="{StaticResource DetailNumeric}" />
+
+                <TextBlock Grid.Row="2" Text="単位" Style="{StaticResource Text.FieldLabel}" />
+                <!-- 候補から選ぶか、直接入力 -->
+                <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding Units}"
+                          Text="{Binding Unit, UpdateSourceTrigger=PropertyChanged}" IsEditable="True"
+                          Width="110" HorizontalAlignment="Left" Margin="0,0,0,6" />
+
+                <TextBlock Grid.Row="3" Text="下限" Style="{StaticResource Text.FieldLabel}" />
+                <controls:NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding LowerLimit}"
+                                        Minimum="-10000" Maximum="10000" Increment="1" DecimalPlaces="1"
+                                        Style="{StaticResource DetailNumeric}" />
+
+                <TextBlock Grid.Row="4" Text="上限" Style="{StaticResource Text.FieldLabel}" />
+                <controls:NumericUpDown Grid.Row="4" Grid.Column="1" Value="{Binding UpperLimit}"
+                                        Minimum="-10000" Maximum="10000" Increment="1" DecimalPlaces="1"
+                                        Style="{StaticResource DetailNumeric}" />
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type vm:ActuatorDetails}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="チャンネル" Style="{StaticResource Text.FieldLabel}" />
+                <controls:NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding Channel}"
+                                        Minimum="1" Maximum="64" Increment="1" DecimalPlaces="0"
+                                        Style="{StaticResource DetailNumeric}" />
+
+                <TextBlock Grid.Row="1" Text="最大出力 (%)" Style="{StaticResource Text.FieldLabel}" />
+                <controls:NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding MaxOutputPercent}"
+                                        Minimum="0" Maximum="100" Increment="5" DecimalPlaces="0"
+                                        Style="{StaticResource DetailNumeric}" />
+
+                <TextBlock Grid.Row="2" Text="起動時に ON" Style="{StaticResource Text.FieldLabel}" />
+                <CheckBox Grid.Row="2" Grid.Column="1" IsChecked="{Binding OnAtStartup}"
+                          Style="{StaticResource DetailCheck}" />
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type vm:CommunicationDetails}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="ホスト" Style="{StaticResource Text.FieldLabel}" />
+                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Host, UpdateSourceTrigger=PropertyChanged}"
+                         Style="{StaticResource DetailText}" />
+
+                <TextBlock Grid.Row="1" Text="ポート" Style="{StaticResource Text.FieldLabel}" />
+                <controls:NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding Port}"
+                                        Minimum="1" Maximum="65535" Increment="1" DecimalPlaces="0"
+                                        Style="{StaticResource DetailNumeric}" />
+
+                <TextBlock Grid.Row="2" Text="タイムアウト (ms)" Style="{StaticResource Text.FieldLabel}" />
+                <controls:NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding TimeoutMs}"
+                                        Minimum="100" Maximum="60000" Increment="100" DecimalPlaces="0"
+                                        Style="{StaticResource DetailNumeric}" />
+
+                <TextBlock Grid.Row="3" Text="TLS を使う" Style="{StaticResource Text.FieldLabel}" />
+                <CheckBox Grid.Row="3" Grid.Column="1" IsChecked="{Binding UseTls}"
+                          Style="{StaticResource DetailCheck}" />
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate DataType="{x:Type vm:GeneralDetails}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="アドレス" Style="{StaticResource Text.FieldLabel}" />
+                <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Address, UpdateSourceTrigger=PropertyChanged}"
+                         Style="{StaticResource DetailText}" />
+
+                <TextBlock Grid.Row="1" Text="チャンネル" Style="{StaticResource Text.FieldLabel}" />
+                <controls:NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding Channel}"
+                                        Minimum="1" Maximum="64" Increment="1" DecimalPlaces="0"
+                                        Style="{StaticResource DetailNumeric}" />
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
     <DockPanel>
         <!-- 上：追加ボタン（種類を選ぶと1行追加）と件数 -->
         <Border DockPanel.Dock="Top" BorderBrush="#DDDDDD" BorderThickness="0,0,0,1" Padding="4">
@@ -35,78 +171,145 @@
             </DockPanel>
         </Border>
 
-        <!-- 表 -->
-        <DataGrid x:Name="ItemsGrid"
-                  ItemsSource="{Binding Items}"
-                  SelectedItem="{Binding SelectedItem}"
-                  AutoGenerateColumns="False"
-                  CanUserAddRows="False" CanUserDeleteRows="False"
-                  SelectionMode="Single"
-                  HeadersVisibility="Column"
-                  GridLinesVisibility="Horizontal"
-                  HorizontalGridLinesBrush="#EEEEEE"
-                  BorderThickness="0"
-                  FontFamily="{StaticResource Font.Base}"
-                  FontSize="{DynamicResource FontSize.Body}">
+        <!-- 左：表 / 右：選んだ行の詳細（間のつまみで幅を変えられる） -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="200" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="300" MinWidth="200" />
+            </Grid.ColumnDefinitions>
 
-            <!-- 無効にした行は文字を薄くする -->
-            <DataGrid.RowStyle>
-                <Style TargetType="DataGridRow">
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding Enabled}" Value="False">
-                            <Setter Property="Foreground" Value="{StaticResource Brush.TextSub}" />
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </DataGrid.RowStyle>
+            <!-- 表 -->
+            <DataGrid x:Name="ItemsGrid" Grid.Column="0"
+                      ItemsSource="{Binding Items}"
+                      SelectedItem="{Binding SelectedItem}"
+                      AutoGenerateColumns="False"
+                      CanUserAddRows="False" CanUserDeleteRows="False"
+                      SelectionMode="Single"
+                      HeadersVisibility="Column"
+                      GridLinesVisibility="Horizontal"
+                      HorizontalGridLinesBrush="#EEEEEE"
+                      BorderThickness="0"
+                      FontFamily="{StaticResource Font.Base}"
+                      FontSize="{DynamicResource FontSize.Body}">
 
-            <DataGrid.Columns>
-                <!-- 名前（ダブルクリック / F2 / そのまま入力 で編集。打つたびに「編集」の印に反映） -->
-                <DataGridTextColumn Header="名前" Width="2*"
-                                    Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                <!-- 無効にした行は文字を薄くする -->
+                <DataGrid.RowStyle>
+                    <Style TargetType="DataGridRow">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Enabled}" Value="False">
+                                <Setter Property="Foreground" Value="{StaticResource Brush.TextSub}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </DataGrid.RowStyle>
 
-                <!-- 種類（追加時に決まる。編集不可） -->
-                <DataGridTextColumn Header="種類" Width="*" IsReadOnly="True"
-                                    Binding="{Binding Type.Name}" />
+                <DataGrid.Columns>
+                    <!-- 名前（ダブルクリック / F2 / そのまま入力 で編集。打つたびに「編集」の印に反映） -->
+                    <DataGridTextColumn Header="名前" Width="2*"
+                                        Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
 
-                <!-- 備考 -->
-                <DataGridTextColumn Header="備考" Width="3*"
-                                    Binding="{Binding Notes, UpdateSourceTrigger=PropertyChanged}" />
+                    <!-- 種類（追加時に決まる。編集不可） -->
+                    <DataGridTextColumn Header="種類" Width="*" IsReadOnly="True"
+                                        Binding="{Binding Type.Name}" />
 
-                <!-- 有効：1回のクリックで切り替わるよう、チェックボックスを直接置く
-                     （DataGridCheckBoxColumn は、セルを選ぶクリック＋切り替えるクリックの2回必要） -->
-                <DataGridTemplateColumn Header="有効" Width="Auto">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <CheckBox IsChecked="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}"
-                                      HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
+                    <!-- 備考 -->
+                    <DataGridTextColumn Header="備考" Width="3*"
+                                        Binding="{Binding Notes, UpdateSourceTrigger=PropertyChanged}" />
 
-                <!-- 編集：追加したときから変わっていれば ● -->
-                <DataGridTemplateColumn Header="編集" Width="Auto" IsReadOnly="True">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="●" Foreground="#E67E22" HorizontalAlignment="Center"
-                                       VerticalAlignment="Center" ToolTip="追加したあとに編集されています"
-                                       Visibility="{Binding IsModified, Converter={StaticResource BoolToVisible}}" />
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
+                    <!-- 有効：1回のクリックで切り替わるよう、チェックボックスを直接置く
+                         （DataGridCheckBoxColumn は、セルを選ぶクリック＋切り替えるクリックの2回必要） -->
+                    <DataGridTemplateColumn Header="有効" Width="Auto">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <CheckBox IsChecked="{Binding Enabled, UpdateSourceTrigger=PropertyChanged}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
 
-                <!-- 削除：行の DataContext は行の ViewModel なので、表（DataGrid）の ViewModel のコマンドを辿って呼ぶ -->
-                <DataGridTemplateColumn Width="Auto" IsReadOnly="True">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <Button Content="削除" Padding="8,1" Margin="2"
-                                    Command="{Binding DataContext.RemoveCommand,
-                                              RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                    CommandParameter="{Binding}" />
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-            </DataGrid.Columns>
-        </DataGrid>
+                    <!-- 編集：追加したときから変わっていれば ● -->
+                    <DataGridTemplateColumn Header="編集" Width="Auto" IsReadOnly="True">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="●" Foreground="#E67E22" HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" ToolTip="追加したあとに編集されています"
+                                           Visibility="{Binding IsModified, Converter={StaticResource BoolToVisible}}" />
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+
+                    <!-- 削除：行の DataContext は行の ViewModel なので、表（DataGrid）の ViewModel のコマンドを辿って呼ぶ -->
+                    <DataGridTemplateColumn Width="Auto" IsReadOnly="True">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <Button Content="削除" Padding="8,1" Margin="2"
+                                        Command="{Binding DataContext.RemoveCommand,
+                                                  RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                        CommandParameter="{Binding}" />
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch"
+                          Background="#EEEEEE" ResizeBehavior="PreviousAndNext" />
+
+            <!-- 詳細パネル。DataContext を「選ばれた行」にする（中のバインドは行の ViewModel が相手） -->
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto"
+                          DataContext="{Binding SelectedItem}">
+                <Grid Margin="12,8">
+                    <!-- 行を選んでいないとき -->
+                    <TextBlock Text="行を選択すると、ここに詳細が表示されます"
+                               Style="{StaticResource Text.Caption}" TextWrapping="Wrap"
+                               Visibility="{Binding Converter={StaticResource NullToVisible}, FallbackValue=Visible}" />
+
+                    <!-- 行を選んでいるとき -->
+                    <StackPanel Visibility="{Binding Converter={StaticResource NotNullToVisible}, FallbackValue=Collapsed}">
+                        <TextBlock Text="{Binding Name}" Style="{StaticResource Text.Title}" />
+                        <TextBlock Style="{StaticResource Text.Caption}" Margin="0,-6,0,10">
+                            <Run Text="{Binding Type.Name, Mode=OneWay}" />
+                            <Run Text="（" /><Run Text="{Binding Type.Category, Mode=OneWay}" /><Run Text="）" />
+                        </TextBlock>
+
+                        <!-- 共通の項目（表の列と同じ値。どちらで編集しても両方に反映される） -->
+                        <TextBlock Text="基本" Style="{StaticResource Text.Heading}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Text="名前" Style="{StaticResource Text.FieldLabel}" />
+                            <TextBox Grid.Row="0" Grid.Column="1"
+                                     Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource DetailText}" />
+
+                            <TextBlock Grid.Row="1" Text="備考" Style="{StaticResource Text.FieldLabel}" VerticalAlignment="Top" Margin="0,3,8,6" />
+                            <TextBox Grid.Row="1" Grid.Column="1"
+                                     Text="{Binding Notes, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource DetailText}"
+                                     AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48" />
+
+                            <TextBlock Grid.Row="2" Text="有効" Style="{StaticResource Text.FieldLabel}" />
+                            <CheckBox Grid.Row="2" Grid.Column="1" IsChecked="{Binding Enabled}"
+                                      Style="{StaticResource DetailCheck}" />
+                        </Grid>
+
+                        <!-- 種類ごとの詳細設定（Details の型に合わせて、上の DataTemplate が選ばれる） -->
+                        <TextBlock Text="{Binding Details.Title}" Style="{StaticResource Text.Heading}" />
+                        <ContentControl Content="{Binding Details}" Focusable="False" />
+
+                        <TextBlock Text="● 追加したあとに編集されています" Foreground="#E67E22"
+                                   Style="{StaticResource Text.Caption}" Margin="0,10,0,0"
+                                   Visibility="{Binding IsModified, Converter={StaticResource BoolToVisible}}" />
+                    </StackPanel>
+                </Grid>
+            </ScrollViewer>
+        </Grid>
     </DockPanel>
 </UserControl>

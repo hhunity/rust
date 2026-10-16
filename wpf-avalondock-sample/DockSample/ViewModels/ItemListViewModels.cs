@@ -29,10 +29,21 @@ public partial class ItemRowViewModel : ObservableObject
         _name = _originalName = name;
         _notes = _originalNotes = "";
         _enabled = _originalEnabled = true;
+
+        // 種類に応じた詳細設定。詳細が編集されたら、この行の「編集」の印も更新する
+        Details = ItemDetailsBase.Create(type);
+        Details.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ItemDetailsBase.IsModified))
+                OnPropertyChanged(nameof(IsModified));
+        };
     }
 
     /// <summary>種類（追加時に決まり、変えられない）</summary>
     public ItemType Type { get; }
+
+    /// <summary>詳細設定（右側の詳細パネルに表示する。中身は種類の分類によって違う）</summary>
+    public ItemDetailsBase Details { get; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsModified))]
@@ -46,9 +57,10 @@ public partial class ItemRowViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsModified))]
     private bool _enabled;
 
-    /// <summary>追加したときから値が変わっているか（元の値に戻せば false に戻る）</summary>
+    /// <summary>追加したときから値（詳細設定を含む）が変わっているか（元の値に戻せば false に戻る）</summary>
     public bool IsModified =>
-        Name != _originalName || Notes != _originalNotes || Enabled != _originalEnabled;
+        Name != _originalName || Notes != _originalNotes || Enabled != _originalEnabled
+        || Details.IsModified;
 
     /// <summary>今の値を「元の値」にする（保存したときなどに呼ぶ想定）</summary>
     public void AcceptChanges()
@@ -56,6 +68,7 @@ public partial class ItemRowViewModel : ObservableObject
         _originalName = Name;
         _originalNotes = Notes;
         _originalEnabled = Enabled;
+        Details.AcceptChanges();
         OnPropertyChanged(nameof(IsModified));
     }
 }
@@ -63,6 +76,7 @@ public partial class ItemRowViewModel : ObservableObject
 /// <summary>
 /// 「一覧」ペイン。上の「追加 ▾」（DropDownButton）で種類を選ぶと、表に1行追加される。
 /// 各行：名前・種類・備考・有効・編集の印・削除ボタン
+/// 選んだ行の詳細は、表の右側の詳細パネルに表示・編集できる（SelectedItem をそのまま表示）
 /// </summary>
 public partial class ItemListViewModel : PaneViewModel
 {
