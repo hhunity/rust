@@ -36,7 +36,7 @@
         </Border>
 
         <!-- 表 -->
-        <DataGrid x:Name="Grid"
+        <DataGrid x:Name="ItemsGrid"
                   ItemsSource="{Binding Items}"
                   SelectedItem="{Binding SelectedItem}"
                   AutoGenerateColumns="False"
