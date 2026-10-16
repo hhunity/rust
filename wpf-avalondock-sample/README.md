@@ -38,6 +38,10 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - 保存する項目は `Settings/AppSettings.cs` に定義（画面と同じ形でなくてよい。例：自動保存の設定は入れ子のクラスでひとまとめ）
   - 画面との対応付けは各ページで手書き：設定 → 画面は `LoadFrom`、画面 → 設定は各プロパティの `OnXxxChanged` で `Write(...)`
   - 項目を増やすときは `[ObservableProperty]`・`OnXxxChanged`・`LoadFrom` の3か所と、`AppSettings` 側に追加する
+- 「一覧」ペイン（`ItemListViewModel` / `Views/ItemListView.xaml`）
+  - 「追加 ▾」（DropDownButton）で種類を選ぶと、表（DataGrid）に1行追加
+  - 列：名前・種類・備考・有効（チェックボックス）・編集（追加後に変更したら ●）・削除ボタン
+  - 上に「◯件（編集済み ◯件）」を表示。無効にした行は文字が薄くなる
 - 押すと一覧が開くボタンの部品（`Controls/DropDownButton`）
   - 一覧は `MaxDropDownHeight`（既定 250）を超えるとスクロール。検索欄で絞り込み（`IsSearchEnabled="False"` で非表示）
   - ↑↓で移動・Enter で決定・Esc で閉じる。選んだ項目は `Command` の引数として渡される

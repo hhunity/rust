@@ -30,6 +30,7 @@ public partial class App : Application
         // 第2引数 = タブ/フローティングのタイトル、buttonText = 上部ボタンの表示（省略時はタイトルと同じ）
         services.AddSingleton<PaneViewModel>(_ => new DocumentViewModel("Document_1", "メモ.txt", buttonText: "メモ"));
         services.AddSingleton<PaneViewModel>(_ => new DocumentViewModel("Document_2", "ドキュメント2"));
+        services.AddSingleton<PaneViewModel, ItemListViewModel>();
         services.AddSingleton<PaneViewModel, ExplorerViewModel>();
         services.AddSingleton<PaneViewModel, PropertiesViewModel>();
         services.AddSingleton<PaneViewModel, OutputViewModel>();

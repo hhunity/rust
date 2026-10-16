@@ -20,6 +20,10 @@
                 <views:DocumentView />
             </DataTemplate>
 
+            <DataTemplate DataType="{x:Type vm:ItemListViewModel}">
+                <views:ItemListView />
+            </DataTemplate>
+
             <DataTemplate DataType="{x:Type vm:ExplorerViewModel}">
                 <views:ExplorerView />
             </DataTemplate>
