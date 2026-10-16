@@ -7,6 +7,8 @@
                              Style="{StaticResource Input.DropDown}" />
   ・選んだ項目が Command の引数（CommandParameter）として渡される
   ・DisplayMemberPath と ItemTemplate は同時に指定しないこと（WPF の ListBox の制約）
+  ・一覧を出す方向は DropDownPlacement="Bottom|Top|Right|Left"（既定は Bottom）。
+    画面に入りきらないときは、WPF が自動で反対側に出す
 
   ※ 中で DataContext を設定しないこと（使う側の {Binding} が効かなくなる）。
      中の部品の更新はコードビハインドで行っている。
@@ -34,13 +36,13 @@
             </StackPanel>
         </ToggleButton>
 
-        <!-- 一覧：ボタンの真下に出す。外をクリックすると閉じる -->
+        <!-- 一覧：既定はボタンの真下（向きと、すき間はコードビハインドの ApplyPlacement で設定）。外をクリックすると閉じる -->
         <Popup x:Name="PART_Popup"
                PlacementTarget="{Binding ElementName=PART_Toggle}"
-               Placement="Bottom" StaysOpen="False"
+               StaysOpen="False"
                IsOpen="{Binding IsChecked, ElementName=PART_Toggle, Mode=TwoWay}"
                AllowsTransparency="True" PopupAnimation="Fade">
-            <Border x:Name="PART_Border" Margin="0,2,0,0" Padding="4"
+            <Border x:Name="PART_Border" Padding="4"
                     Background="White" BorderBrush="#ABADB3" BorderThickness="1">
                 <DockPanel>
                     <!-- 検索欄（IsSearchEnabled="False" で隠せる） -->

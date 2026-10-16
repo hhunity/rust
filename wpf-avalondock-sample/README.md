@@ -41,6 +41,7 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
 - 押すと一覧が開くボタンの部品（`Controls/DropDownButton`）
   - 一覧は `MaxDropDownHeight`（既定 250）を超えるとスクロール。検索欄で絞り込み（`IsSearchEnabled="False"` で非表示）
   - ↑↓で移動・Enter で決定・Esc で閉じる。選んだ項目は `Command` の引数として渡される
+  - 一覧を出す方向は `DropDownPlacement="Bottom|Top|Right|Left"`（既定は下）。画面に入りきらなければ自動で反対側に出る
   - 使い方: `<controls:DropDownButton Header="定型文" ItemsSource="{Binding Snippets}" DisplayMemberPath="Name" Command="{Binding InsertSnippetCommand}" Style="{StaticResource Input.DropDown}" />`
   - 例：ドキュメントの「定型文 ▾」で、選んだ定型文を末尾に追加する
 - 配置を記憶

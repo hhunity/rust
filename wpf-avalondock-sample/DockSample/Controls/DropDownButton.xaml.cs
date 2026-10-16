@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -13,6 +14,7 @@ namespace DockSample.Controls;
 /// ・検索欄に文字を打つと、表示名（DisplayMemberPath、なければ ToString()）に含むものだけに絞り込む
 /// ・キーボード：↑↓で移動、Enter で決定、Esc で閉じる。マウスはクリックで決定
 /// ・選んだ項目は Command の引数として渡され、ItemSelected イベントも発生する
+/// ・一覧を出す方向は DropDownPlacement（既定は下）。画面に入りきらなければ WPF が反対側に反転する
 /// </summary>
 public partial class DropDownButton : UserControl
 {
@@ -35,6 +37,7 @@ public partial class DropDownButton : UserControl
 
         ApplySearchVisibility();
         ApplyDropDownSize();
+        ApplyPlacement();
     }
 
     /// <summary>項目が選ばれた（Command とは別に、コードビハインドで受け取りたいとき用）</summary>
@@ -115,6 +118,19 @@ public partial class DropDownButton : UserControl
     public static readonly DependencyProperty MinDropDownWidthProperty = DependencyProperty.Register(
         nameof(MinDropDownWidth), typeof(double), typeof(DropDownButton),
         new PropertyMetadata(200.0, (d, _) => ((DropDownButton)d).ApplyDropDownSize()));
+
+    /// <summary>
+    /// 一覧を出す方向：Bottom（既定）/ Top / Right / Left。
+    /// 画面に入りきらないときは、WPF が自動で反対側に出す。
+    /// </summary>
+    public PlacementMode DropDownPlacement
+    {
+        get => (PlacementMode)GetValue(DropDownPlacementProperty);
+        set => SetValue(DropDownPlacementProperty, value);
+    }
+    public static readonly DependencyProperty DropDownPlacementProperty = DependencyProperty.Register(
+        nameof(DropDownPlacement), typeof(PlacementMode), typeof(DropDownButton),
+        new PropertyMetadata(PlacementMode.Bottom, (d, _) => ((DropDownButton)d).ApplyPlacement()));
 
     /// <summary>検索欄を出すか</summary>
     public bool IsSearchEnabled
@@ -234,5 +250,19 @@ public partial class DropDownButton : UserControl
     {
         PART_List.MaxHeight = MaxDropDownHeight;
         PART_Border.MinWidth = MinDropDownWidth;
+    }
+
+    private void ApplyPlacement()
+    {
+        PART_Popup.Placement = DropDownPlacement;
+
+        // ボタンと一覧の間に少しすき間を空ける（出す方向の側に）
+        PART_Border.Margin = DropDownPlacement switch
+        {
+            PlacementMode.Top   => new Thickness(0, 0, 0, 2),
+            PlacementMode.Right => new Thickness(2, 0, 0, 0),
+            PlacementMode.Left  => new Thickness(0, 0, 2, 0),
+            _                   => new Thickness(0, 2, 0, 0),
+        };
     }
 }
