@@ -25,7 +25,7 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - `Minimum` / `Maximum` の外には出ない（端に達したボタンは無効）。`Increment` で増減幅、`DecimalPlaces` で小数の桁数
   - 使い方: `<controls:NumericUpDown Value="{Binding X}" Minimum="0" Maximum="10" Increment="0.1" DecimalPlaces="1" Style="{StaticResource Input.Numeric}" />`
 - 設定の保存（`Settings/`, `Services/SettingsService.cs`）
-  - 設定は**フォルダ**単位で保存する。中にセクションごとの JSON（`general.json`, `appearance.json`）を作る
+  - 設定は**フォルダ**単位で保存する。中にセクションごとの JSON（`general.json`, `appearance.json`, `items.json`）を作る
     - どのセクションをどのファイルに入れるかは `JsonSettingsService.Sections` の一覧で決める（増やすときは1行足す）
     - 開くとき、フォルダにないファイルのセクションは初期値になる（後からセクションを増やしても古いフォルダを開ける）
   - 設定ペイン下の「保存」で今のフォルダに上書き保存。まだ保存先が決まっていない（初回）ときは保存先フォルダを聞く
@@ -40,12 +40,19 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - 項目を増やすときは `[ObservableProperty]`・`OnXxxChanged`・`LoadFrom` の3か所と、`AppSettings` 側に追加する
 - 「一覧」ペイン（`ItemListViewModel` / `Views/ItemListView.xaml`）
   - 「追加 ▾」（DropDownButton）で種類を選ぶと、表（DataGrid）に1行追加
-  - 列：名前・種類・備考・有効（チェックボックス）・編集（追加後に変更したら ●）・削除ボタン
-  - 上に「◯件（編集済み ◯件）」を表示。無効にした行は文字が薄くなる
+  - 列：名前・種類・備考・有効（チェックボックス）・状態・削除ボタン
+    - 状態：「新」= 追加してまだ保存していない / 「●」= 保存したあとに編集した（元の値に戻せば消える）
+  - 上に「◯件（未保存：新規 ◯ / 編集 ◯ / 削除 ◯）」を表示。無効にした行は文字が薄くなる
+  - 行（詳細設定を含む）は設定の一部として、設定フォルダの `items.json` に保存され、次回起動時に復元される
+    - 保存データは `Settings/ItemSettings.cs`（`ItemData` と、分類ごとの詳細 `SensorData` など）
+    - 詳細設定は型が分類ごとに違うので、JSON に `"kind": "sensor"` のような目印を付けて保存（`[JsonPolymorphic]` / `[JsonDerivedType]`）
+    - 追加・削除・編集のたびに全行を設定に書き写すので、設定ペインの「保存」「保存した状態に戻す」、終了時の確認がそのまま効く
+    - 「↶」「↷」(Ctrl+Z / Ctrl+Y) で元に戻す・やり直し（設定ペインと同じ履歴）
   - 表の右に、選んだ行の詳細パネル（間のつまみで幅を変更可）。名前・備考・有効と、種類の分類ごとの詳細設定を編集できる
     - 詳細設定は分類ごとにクラスが違う（`ViewModels/ItemDetailsViewModels.cs`：センサ / アクチュエータ / 通信 / その他）
     - 表示は型ごとの DataTemplate（`ItemListView.xaml` の Resources）で自動で切り替わる
-    - 詳細設定を変えた場合も、その行の「編集」の ● が付く
+    - 詳細設定を変えた場合も、その行の「状態」に ● が付く
+    - 項目を増やすときは `[ObservableProperty]`・`ToData`・`Load` と、`ItemSettings.cs` の record に追加する
 - 押すと一覧が開くボタンの部品（`Controls/DropDownButton`）
   - 一覧は `MaxDropDownHeight`（既定 250）を超えるとスクロール。検索欄で絞り込み（`IsSearchEnabled="False"` で非表示）
   - ↑↓で移動・Enter で決定・Esc で閉じる。選んだ項目は `Command` の引数として渡される

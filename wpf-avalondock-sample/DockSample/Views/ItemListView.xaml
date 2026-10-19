@@ -10,7 +10,31 @@
              d:DesignWidth="600" d:DesignHeight="300">
     <!-- DataContext は DataTemplate から ItemListViewModel が自動で入る -->
 
+    <!-- 元に戻す / やり直し（設定ペインと同じ履歴） -->
+    <UserControl.InputBindings>
+        <KeyBinding Modifiers="Ctrl"       Key="Z" Command="{Binding UndoCommand}" />
+        <KeyBinding Modifiers="Ctrl"       Key="Y" Command="{Binding RedoCommand}" />
+        <KeyBinding Modifiers="Ctrl+Shift" Key="Z" Command="{Binding RedoCommand}" />
+    </UserControl.InputBindings>
+
     <UserControl.Resources>
+        <!-- 「状態」の印の色：新 = 緑 / ● = オレンジ -->
+        <Style x:Key="StatusText" TargetType="TextBlock">
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Status}" Value="新">
+                    <Setter Property="Foreground" Value="#27AE60" />
+                    <Setter Property="FontWeight" Value="Bold" />
+                    <Setter Property="ToolTip" Value="追加したあと、まだ保存していません" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Status}" Value="●">
+                    <Setter Property="Foreground" Value="#E67E22" />
+                    <Setter Property="ToolTip" Value="保存したあとに編集されています" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
         <!-- 詳細パネルの入力欄の共通の見た目（このペインの中だけ） -->
         <Style x:Key="DetailNumeric" TargetType="{x:Type controls:NumericUpDown}" BasedOn="{StaticResource Input.Numeric}">
             <Setter Property="Width" Value="110" />
@@ -166,6 +190,11 @@
                     </controls:DropDownButton.ItemTemplate>
                 </controls:DropDownButton>
 
+                <Button Content="↶" Command="{Binding UndoCommand}" ToolTip="元に戻す (Ctrl+Z)"
+                        Padding="8,1" Margin="6,0,0,0" />
+                <Button Content="↷" Command="{Binding RedoCommand}" ToolTip="やり直し (Ctrl+Y)"
+                        Padding="8,1" Margin="2,0,0,0" />
+
                 <TextBlock Text="{Binding Summary}" Style="{StaticResource Text.Caption}"
                            VerticalAlignment="Center" HorizontalAlignment="Right" />
             </DockPanel>
@@ -228,13 +257,11 @@
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
 
-                    <!-- 編集：追加したときから変わっていれば ● -->
-                    <DataGridTemplateColumn Header="編集" Width="Auto" IsReadOnly="True">
+                    <!-- 状態：新 = 追加して未保存 / ● = 保存したあとに編集した -->
+                    <DataGridTemplateColumn Header="状態" Width="Auto" IsReadOnly="True">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <TextBlock Text="●" Foreground="#E67E22" HorizontalAlignment="Center"
-                                           VerticalAlignment="Center" ToolTip="追加したあとに編集されています"
-                                           Visibility="{Binding IsModified, Converter={StaticResource BoolToVisible}}" />
+                                <TextBlock Text="{Binding Status}" Style="{StaticResource StatusText}" />
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
@@ -304,7 +331,10 @@
                         <TextBlock Text="{Binding Details.Title}" Style="{StaticResource Text.Heading}" />
                         <ContentControl Content="{Binding Details}" Focusable="False" />
 
-                        <TextBlock Text="● 追加したあとに編集されています" Foreground="#E67E22"
+                        <TextBlock Text="新 追加したあと、まだ保存していません" Foreground="#27AE60"
+                                   Style="{StaticResource Text.Caption}" Margin="0,10,0,0"
+                                   Visibility="{Binding IsNew, Converter={StaticResource BoolToVisible}}" />
+                        <TextBlock Text="● 保存したあとに編集されています" Foreground="#E67E22"
                                    Style="{StaticResource Text.Caption}" Margin="0,10,0,0"
                                    Visibility="{Binding IsModified, Converter={StaticResource BoolToVisible}}" />
                     </StackPanel>

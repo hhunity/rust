@@ -62,6 +62,12 @@ public interface ISettingsService : INotifyPropertyChanged
 
     /// <summary>「保存した状態に戻す」「開く」「Undo/Redo」で Current が差し替わった（各 ViewModel は値を読み直す）</summary>
     event EventHandler? Reloaded;
+
+    /// <summary>保存に成功した（「保存した状態」が今の内容になった）</summary>
+    event EventHandler? Saved;
+
+    /// <summary>最後に保存（または読み込み）した状態のコピー（「新規」「編集済み」の判定に使う）</summary>
+    AppSettings GetSaved();
 }
 
 /// <summary>
@@ -69,7 +75,8 @@ public interface ISettingsService : INotifyPropertyChanged
 ///
 ///   MyProject/
 ///   ├─ general.json      ← AppSettings.General
-///   └─ appearance.json   ← AppSettings.Appearance
+///   ├─ appearance.json   ← AppSettings.Appearance
+///   └─ items.json        ← AppSettings.Items（「一覧」ペインの行）
 ///
 /// ・どのセクションをどのファイルに入れるかは Sections の一覧で決める（増やすときは1行足す）
 /// ・読み込み時、フォルダにないファイルのセクションは初期値になる（後からセクションを増やしても古いフォルダを開ける）
@@ -116,6 +123,7 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
     {
         Map("general.json",    s => s.General,    (s, v) => s.General = v),
         Map("appearance.json", s => s.Appearance, (s, v) => s.Appearance = v),
+        Map("items.json",      s => s.Items,      (s, v) => s.Items = v),
     };
 
     private readonly ILogService _log;
@@ -154,6 +162,10 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
     [ObservableProperty] private bool _canRedo;
 
     public event EventHandler? Reloaded;
+    public event EventHandler? Saved;
+
+    public AppSettings GetSaved() =>
+        JsonSerializer.Deserialize<AppSettings>(_savedJson, Options) ?? new AppSettings();
 
     public void NotifyChanged()
     {
@@ -280,6 +292,7 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
 
             _savedJson = Serialize(Current);
             IsDirty = false;
+            Saved?.Invoke(this, EventArgs.Empty);
             _log.Write($"設定を保存しました: {folder}");
             return true;
         }
