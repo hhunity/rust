@@ -13,6 +13,8 @@ exe に渡す引数は、設定ファイルの program.command に {名前} の�
     {folder}     画像フォルダのフルパス（unit: folder のとき。フォルダごとに1回呼ぶ）
     {out}        exe に書き出してほしい結果ファイルのパス
     {out_dir}    結果フォルダのパス
+    {run_dir}    呼び出しごとの出力フォルダ（exe が CSV 以外のファイルを書く場所）
+    {stem}       画像ファイル名（拡張子なし）
     {label}      設定の名前
     そのほか     runs の params / sweep に書いた値（例：{spec_sigma}）
 
@@ -25,6 +27,7 @@ exe に渡す引数は、設定ファイルの program.command に {名前} の�
     results/summary.csv
     results/<画像フォルダ名>/
         raw/<画像名>__<設定>.csv   exe が出したそのままの結果
+        files/<画像名>__<設定>/    exe が {run_dir} に書いたファイル（差分画像など）
         logs/<画像名>__<設定>.log  exe の標準出力・エラー出力・終了コード・かかった時間
         measurements.csv          raw をまとめ、列名をそろえたもの
         stats.csv, conditions.csv, figs/
@@ -286,7 +289,7 @@ def resolve_paths(cfg: dict, base: Path):
             cfg["paths"][key] = absolute(v)
 
     prog = cfg["program"]
-    if prog.get("cwd"):
+    if prog.get("cwd") and "{" not in str(prog["cwd"]):
         prog["cwd"] = absolute(prog["cwd"])
     # {python}：run_exe.py を動かしているのと同じ Python（仮想環境もそのまま）
     prog["command"] = [sys.executable if str(a) == "{python}" else a for a in prog["command"]]
@@ -348,24 +351,33 @@ def build_jobs(cfg: dict, folders, exp: Path) -> list[dict]:
         for r in runs:
             for keys, name, refname in items:
                 stem = Path(name).stem if name != "(folder)" else "folder"
-                out = rdir / "raw" / f"{stem}__{r['label']}.csv"
-                log = rdir / "logs" / f"{stem}__{r['label']}.log"
-                values = dict(r["params"], **keys, out=str(out), out_dir=str(rdir), label=r["label"])
-                cmd = [str(a).format(**values) for a in cfg["program"]["command"]]
+                tag = f"{stem}__{r['label']}"
+                out = rdir / "raw" / f"{tag}.csv"
+                run_dir = rdir / "files" / tag              # exe が CSV 以外のファイルを書く場所（呼び出しごとに別）
+                log = rdir / "logs" / f"{tag}.log"
+                values = dict(r["params"], **keys, out=str(out), out_dir=str(rdir), run_dir=str(run_dir),
+                              stem=stem, label=r["label"])
+                prog = cfg["program"]
+                cmd = [str(a).format(**values) for a in prog["command"]]
+                # 集計に使う CSV：既定は {out}。exe が決まった名前で書く場合は result_csv で場所を指定
+                result = Path(str(prog.get("result_csv", "{out}")).format(**values))
+                cwd = str(prog["cwd"]).format(**values) if prog.get("cwd") else None
                 jobs.append({"folder": rel, "rdir": rdir, "image": name, "ref_image": refname,
-                             "label": r["label"], "params": r["params"], "cmd": cmd, "out": out, "log": log})
+                             "label": r["label"], "params": r["params"], "cmd": cmd, "out": out,
+                             "result": result, "run_dir": run_dir, "cwd": cwd, "log": log})
     return jobs
 
 
 def run_job(job: dict, prog: dict) -> dict:
     job["out"].parent.mkdir(parents=True, exist_ok=True)
     job["log"].parent.mkdir(parents=True, exist_ok=True)
-    if prog.get("skip_existing", False) and job["out"].exists():
-        return dict(job, returncode=0, seconds=0.0, skipped=True)
+    job["run_dir"].mkdir(parents=True, exist_ok=True)
+    if prog.get("skip_existing", False) and job["result"].exists():
+        return dict(job, returncode=0, seconds=0.0, skipped=True, n_files=None)
     t0 = time.perf_counter()
     try:
         cp = subprocess.run(job["cmd"], capture_output=True, text=True, errors="replace",
-                            timeout=prog.get("timeout_s"), cwd=prog.get("cwd"))
+                            timeout=prog.get("timeout_s"), cwd=job["cwd"])
         rc, so, se = cp.returncode, cp.stdout, cp.stderr
     except subprocess.TimeoutExpired as e:
         rc, so, se = -9, e.stdout or "", f"タイムアウト（{prog.get('timeout_s')} 秒）"
@@ -374,17 +386,18 @@ def run_job(job: dict, prog: dict) -> dict:
     sec = time.perf_counter() - t0
     if prog.get("output", "file") == "stdout" and rc == 0:
         job["out"].write_text(so, encoding="utf-8")
-    job["log"].write_text(f"command: {shlex.join(job['cmd'])}\nreturncode: {rc}\nseconds: {sec:.3f}\n"
-                          f"--- stdout ---\n{so}\n--- stderr ---\n{se}\n", encoding="utf-8")
-    return dict(job, returncode=rc, seconds=sec, skipped=False)
+    files = [p for p in job["run_dir"].rglob("*") if p.is_file()]
+    job["log"].write_text(f"command: {shlex.join(job['cmd'])}\ncwd: {job['cwd']}\nreturncode: {rc}\nseconds: {sec:.3f}\n"
+                          f"files: {len(files)}\n--- stdout ---\n{so}\n--- stderr ---\n{se}\n", encoding="utf-8")
+    return dict(job, returncode=rc, seconds=sec, skipped=False, n_files=len(files))
 
 
 # ================================================================ 結果の読み込み
 def read_output(job: dict, prog: dict) -> pd.DataFrame | None:
-    if not job["out"].exists():
+    if not job["result"].exists():
         return None
     csv = prog.get("csv", {}) or {}
-    text = job["out"].read_text(encoding=csv.get("encoding", "utf-8-sig"), errors="replace")
+    text = job["result"].read_text(encoding=csv.get("encoding", "utf-8-sig"), errors="replace")
     if not text.strip():
         return None
     df = pd.read_csv(io.StringIO(text), sep=csv.get("sep", ","), header=0 if csv.get("header", True) else None,
@@ -477,9 +490,19 @@ def main():
             print(f"  [{i}/{len(jobs)}] {res['folder']}/{res['image']} {res['label']}: {mark} {res['seconds']:.1f}s")
             done.append(res)
 
+    # 空のフォルダを消す（CSV しか出さない exe のとき、空の files/ が並ばないように）。並列実行が終わってから行う
+    for rel, _ in folders:
+        fdir = exp / "results" / rel / "files"
+        if fdir.is_dir():
+            for d in sorted((p for p in fdir.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
+                if not any(d.iterdir()):
+                    d.rmdir()
+            if not any(fdir.iterdir()):
+                fdir.rmdir()
+
     # 実行の一覧（失敗も含めて）
     pd.DataFrame([{k: (shlex.join(v) if k == "cmd" else v) for k, v in d.items()
-                   if k in ("folder", "image", "label", "returncode", "seconds", "skipped", "cmd")}
+                   if k in ("folder", "image", "label", "returncode", "seconds", "skipped", "n_files", "cmd")}
                   for d in done]).to_csv(exp / "results" / "runs.csv", index=False, encoding="utf-8-sig")
 
     all_stats = []
