@@ -39,27 +39,22 @@ import time
 from pathlib import Path
 
 import pandas as pd
-import json
-
 import yaml
 
-from common import (expand_methods, find_image_folders, make_experiment_dir, save_plots,
+from common import (expand_settings, find_image_folders, make_experiment_dir, save_plots,
                             stats_for, write_readme_template, write_run_info)
 
 
 # ================================================================ 設定
 def load_config(path: Path, args) -> dict:
     with open(path, encoding="utf-8") as fp:
-        # 拡張子が .json なら JSON、それ以外は YAML として読む
-        cfg = json.load(fp) if path.suffix.lower() == ".json" else yaml.safe_load(fp)
+        cfg = yaml.safe_load(fp)
     if args.image_root:
         cfg["paths"]["image_root"] = args.image_root
     if args.work_dir:
         cfg["paths"]["work_dir"] = args.work_dir
     if args.folders:
         cfg["images"]["folders"] = args.folders
-    # run_experiment の expand_methods をそのまま使えるよう、runs を methods の形にする
-    cfg["methods"] = [dict(r, name=r.get("name", "exe")) for r in cfg["runs"]]
     return cfg
 
 
@@ -76,7 +71,7 @@ def exe_fingerprint(cmd0: str) -> str:
 # ================================================================ 1回の呼び出し
 def build_jobs(cfg: dict, folders, exp: Path) -> list[dict]:
     unit = cfg["program"].get("unit", "image")
-    runs = expand_methods(cfg)
+    runs = expand_settings(cfg["runs"])
     jobs = []
     for rel, imgs in folders:
         rdir = exp / "results" / rel
@@ -192,10 +187,10 @@ def main():
     exp = make_experiment_dir(cfg, args.out)
     print(f"出力先：{exp}")
     with open(exp / "config.yaml", "w", encoding="utf-8") as fp:
-        yaml.safe_dump({k: v for k, v in cfg.items() if k != "methods"}, fp, allow_unicode=True, sort_keys=False)
+        yaml.safe_dump(cfg, fp, allow_unicode=True, sort_keys=False)
     (exp / "images.txt").write_text("\n".join(str(p) for _, imgs in folders for p in imgs) + "\n", encoding="utf-8")
     write_readme_template(exp, cfg)
-    write_run_info(exp, {k: v for k, v in cfg.items() if k != "methods"}, folders, args)
+    write_run_info(exp, cfg, folders, args)
     with open(exp / "run_info.md", "a", encoding="utf-8") as fp:
         fp.write(f"\n## 使ったプログラム\n- {exe_fingerprint(str(prog['command'][0]))}\n")
         if prog.get("version_command"):
