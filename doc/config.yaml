@@ -1,0 +1,55 @@
+# コンパイル済みプログラムを呼び出す実験の設定（叩き台）
+# 実行：python run_exe.py config_exe_example.yaml --dry-run   ← まずコマンドが正しいか確認
+
+experiment:
+  name: specSigmaの比較
+  purpose: |
+    位相限定＋specSigma の値で、ばらつきと波がどう変わるかを比べる。
+
+paths:
+  image_root: D:/images              # 画像の保存場所（何も書き込まない）
+  work_dir: D:/work/experiments      # 結果の置き場所
+
+images:
+  folders: ["*"]                     # image_root からの相対パス（ワイルドカード可）
+  recursive: false
+  patterns: ["*.png", "*.tif", "*.tiff", "*.bmp"]
+  exclude: []
+
+program:
+  # 呼び出すコマンド。1要素目が exe、2要素目以降が引数。{名前} はその都度置き換わる
+  command: ["D:/tools/measure.exe", "--image", "{image}", "--out", "{out}",
+            "--method", "{method}", "--sigma", "{spec_sigma}"]
+  unit: image                        # image：画像1枚ごと / pair：基準画像と比較画像の2枚 / folder：フォルダごとに1回
+  ref_image: null                    # unit: pair のときの基準画像（null ならフォルダ内の1枚目）
+  output: file                       # file：exe が {out} に CSV を書く / stdout：exe の標準出力を CSV として保存
+  csv:
+    sep: ","
+    header: true                     # 1行目が列名か。false なら names に列名を並べる
+    # names: [x, y, dx, dy, score]
+    encoding: utf-8-sig
+  columns:                           # exe の出力の列名 → 標準の列名（集計とグラフに使う）
+    block_x: x
+    block_y: y
+    dx: dx
+    dy: dy
+    score: score
+  parallel: 4                        # 同時に走らせる数（CPU のコア数くらいまで）
+  timeout_s: 3600                    # 1回あたりの制限時間（秒）
+  skip_existing: false               # true：結果ファイルがすでにあれば実行しない（途中から再開するとき）
+  cwd: null                          # exe を実行するときの作業フォルダ
+  version_command: null              # 例：["D:/tools/measure.exe", "--version"]（記録用）
+
+runs:                                # 試す設定。params / sweep の値は command の {名前} に入る
+  - label: normal
+    params: {method: updft, spec_sigma: 0}
+  - label: "phase_s{spec_sigma:.2f}"
+    params: {method: updft_phase}
+    sweep: {spec_sigma: [0.05, 0.10, 0.15]}
+  - label: icgn
+    params: {method: icgn, spec_sigma: 0}
+
+stats:
+  fail_score: null
+
+plots: true
