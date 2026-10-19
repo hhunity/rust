@@ -17,7 +17,11 @@ exe に渡す引数は、設定ファイルの program.command に {名前} の�
     そのほか     runs の params / sweep に書いた値（例：{spec_sigma}）
 
 出力（work_dir/日付_実験名/）：
-    README.md, run_info.md, config.yaml, images.txt      （run_experiment.py と同じ）
+    README.md         目的・条件・結果・結論のひな形（初回だけ作る。手で書き足す）
+    run_info.md       実行日時、コマンド、exe の版、設定（毎回上書き）
+    config.yaml       実行時の設定のコピー
+    images.txt        使った画像のフルパス
+    results/runs.csv  全呼び出しの一覧（失敗も含む）
     results/summary.csv
     results/<画像フォルダ名>/
         raw/<画像名>__<設定>.csv   exe が出したそのままの結果
@@ -42,7 +46,8 @@ import pandas as pd
 import yaml
 
 from common import (expand_settings, find_image_folders, make_experiment_dir, save_plots,
-                            stats_for, write_readme_template, write_run_info)
+                    stats_for, write_readme_template, write_run_info)
+
 
 
 # ================================================================ 設定
