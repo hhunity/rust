@@ -39,16 +39,19 @@ import time
 from pathlib import Path
 
 import pandas as pd
+import json
+
 import yaml
 
-from run_experiment import (expand_methods, find_image_folders, make_experiment_dir, save_plots,
+from common import (expand_methods, find_image_folders, make_experiment_dir, save_plots,
                             stats_for, write_readme_template, write_run_info)
 
 
 # ================================================================ 設定
 def load_config(path: Path, args) -> dict:
     with open(path, encoding="utf-8") as fp:
-        cfg = yaml.safe_load(fp)
+        # 拡張子が .json なら JSON、それ以外は YAML として読む
+        cfg = json.load(fp) if path.suffix.lower() == ".json" else yaml.safe_load(fp)
     if args.image_root:
         cfg["paths"]["image_root"] = args.image_root
     if args.work_dir:
@@ -153,7 +156,8 @@ def main():
     ap.add_argument("--work-dir")
     ap.add_argument("--folders", nargs="+")
     ap.add_argument("--out", help="出力フォルダを直接指定（既存なら追記）")
-    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--dry-run", action="store_true", help="実行せず、対象フォルダとコマンドを表示するだけ")
+    ap.add_argument("--show-all", action="store_true", help="--dry-run のとき、全部のコマンドを表示する")
     args = ap.parse_args()
 
     cfg = load_config(Path(args.config), args)
@@ -167,9 +171,22 @@ def main():
 
     if args.dry_run:
         jobs = build_jobs(cfg, folders, Path(cfg["paths"]["work_dir"]) / "(dry-run)")
-        print(f"\n呼び出し回数：{len(jobs)} 回。最初のコマンドの例：")
-        for j in jobs[:3]:
-            print("  " + shlex.join(j["cmd"]))
+        print(f"\n呼び出し回数：合計 {len(jobs)} 回")
+        # 設定（runs を sweep で展開したもの）ごとに、回数とコマンドの例を1つずつ表示する
+        by_label = {}
+        for j in jobs:
+            by_label.setdefault(j["label"], []).append(j)
+        print(f"設定 {len(by_label)} 通り：")
+        for label, js in by_label.items():
+            params = ", ".join(f"{k}={v}" for k, v in js[0]["params"].items())
+            print(f"\n  [{label}]  {params}  → {len(js)} 回")
+            print("    例：" + shlex.join(js[0]["cmd"]))
+        if args.show_all:
+            print("\n全コマンド：")
+            for j in jobs:
+                print("  " + shlex.join(j["cmd"]))
+        else:
+            print("\n（全部のコマンドを見るには --show-all を付ける）")
         return
 
     exp = make_experiment_dir(cfg, args.out)
