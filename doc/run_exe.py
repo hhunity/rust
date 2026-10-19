@@ -40,6 +40,7 @@ import datetime as dt
 import hashlib
 import io
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -257,23 +258,74 @@ def write_run_info(exp: Path, cfg: dict, folders, args):
 def load_config(path: Path, args) -> dict:
     with open(path, encoding="utf-8") as fp:
         cfg = yaml.safe_load(fp)
+    cfg["_cli"] = {}
     if args.image_root:
-        cfg["paths"]["image_root"] = args.image_root
+        cfg["paths"]["image_root"] = str(Path(args.image_root).resolve())
+        cfg["_cli"]["image_root"] = True
     if args.work_dir:
-        cfg["paths"]["work_dir"] = args.work_dir
+        cfg["paths"]["work_dir"] = str(Path(args.work_dir).resolve())
+        cfg["_cli"]["work_dir"] = True
     if args.folders:
         cfg["images"]["folders"] = args.folders
+    resolve_paths(cfg, path.resolve().parent)
+    cfg.pop("_cli")
     return cfg
 
 
-def exe_fingerprint(cmd0: str) -> str:
-    """exe の版の記録：更新日時と SHA-256 の先頭（同じ exe で計算したかを後から確認できる）"""
-    p = Path(cmd0)
-    if not p.is_file():
-        return f"{cmd0}（ファイルとしては見つからない。PATH 上のコマンドの可能性）"
-    h = hashlib.sha256(p.read_bytes()).hexdigest()[:16]
-    t = dt.datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds")
-    return f"{p}（更新 {t}、SHA-256 {h}…）"
+def resolve_paths(cfg: dict, base: Path):
+    """設定ファイルの中の相対パスを、設定ファイルの場所を基準にした絶対パスに直す。
+    （どこから python を実行しても、同じ exe・同じフォルダを指すようにするため）
+    コマンドラインで指定したパスは、実行した場所（カレントディレクトリ）基準のまま。"""
+    def absolute(p: str) -> str:
+        q = Path(p)
+        return str(q if q.is_absolute() else (base / q).resolve())
+
+    for key in ("image_root", "work_dir"):
+        v = cfg["paths"].get(key)
+        if v and not Path(v).is_absolute() and not cfg.get("_cli", {}).get(key):
+            cfg["paths"][key] = absolute(v)
+
+    prog = cfg["program"]
+    if prog.get("cwd"):
+        prog["cwd"] = absolute(prog["cwd"])
+    # {python}：run_exe.py を動かしているのと同じ Python（仮想環境もそのまま）
+    prog["command"] = [sys.executable if str(a) == "{python}" else a for a in prog["command"]]
+    if prog.get("version_command"):
+        prog["version_command"] = [sys.executable if str(a) == "{python}" else a for a in prog["version_command"]]
+    # 2要素目以降で、{...} を含まず、設定ファイルの場所から見てファイルとして存在するもの（例：tools/measure.py）も絶対パスにする
+    for i in range(1, len(prog["command"])):
+        a = str(prog["command"][i])
+        if "{" not in a and not a.startswith("-") and not Path(a).is_absolute() and (base / a).is_file():
+            prog["command"][i] = str((base / a).resolve())
+    exe = str(prog["command"][0])
+    if "/" in exe or "\\" in exe:
+        # パスとして書かれている（相対なら設定ファイルの場所基準）
+        prog["command"][0] = absolute(exe)
+        if not Path(prog["command"][0]).is_file():
+            sys.exit(f"exe が見つかりません: {prog['command'][0]}（設定ファイル {base} からの相対パスとして探しました）")
+    else:
+        # 名前だけ（例：measure.exe）なら、設定ファイルと同じフォルダ → PATH の順に探す
+        local = base / exe
+        if local.is_file():
+            prog["command"][0] = str(local)
+        elif shutil.which(exe):
+            prog["command"][0] = shutil.which(exe)
+        else:
+            sys.exit(f"exe が見つかりません: {exe}（設定ファイルと同じフォルダにも PATH にもない）")
+
+
+def exe_fingerprint(command: list) -> str:
+    """使ったプログラムの記録：コマンドに含まれる実在ファイル（exe、Python スクリプトなど）の
+    更新日時と SHA-256 の先頭。同じプログラムで計算したかを後から確認できる"""
+    lines = []
+    for a in command:
+        p = Path(str(a))
+        if "{" in str(a) or not p.is_file():
+            continue
+        h = hashlib.sha256(p.read_bytes()).hexdigest()[:16]
+        t = dt.datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds")
+        lines.append(f"- {p}（更新 {t}、SHA-256 {h}…）")
+    return "\n".join(lines) if lines else f"- {command[0]}（ファイルとしては見つからない）"
 
 
 # ================================================================ 1回の呼び出し
@@ -400,7 +452,7 @@ def main():
     write_readme_template(exp, cfg)
     write_run_info(exp, cfg, folders, args)
     with open(exp / "run_info.md", "a", encoding="utf-8") as fp:
-        fp.write(f"\n## 使ったプログラム\n- {exe_fingerprint(str(prog['command'][0]))}\n")
+        fp.write(f"\n## 使ったプログラム\n{exe_fingerprint(prog['command'])}\n")
         if prog.get("version_command"):
             try:
                 v = subprocess.run(prog["version_command"], capture_output=True, text=True, timeout=10)
