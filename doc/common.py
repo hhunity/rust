@@ -63,18 +63,20 @@ def read_image(path: Path) -> np.ndarray:
     return img
 
 
-def expand_methods(cfg: dict) -> list[dict]:
+def expand_settings(items: list[dict]) -> list[dict]:
+    """設定のリスト（run_exe.py の runs、run_experiment.py の methods）を、sweep の組み合わせに展開する。
+    戻り値の各要素：{"name": 手法名（runs では "exe"）, "label": 設定の名前, "params": 値の辞書}"""
     out = []
-    for m in cfg["methods"]:
+    for m in items:
         base = dict(m.get("params", {}) or {})
         sweep = m.get("sweep", {}) or {}
         keys = list(sweep)
         for values in itertools.product(*[sweep[k] for k in keys]) if keys else [()]:
             params = dict(base, **dict(zip(keys, values)))
-            label = m.get("label", m["name"]).format(**params)
-            out.append({"name": m["name"], "label": label, "params": params})
+            name = m.get("name", "exe")
+            label = m.get("label", name).format(**params)
+            out.append({"name": name, "label": label, "params": params})
     return out
-
 
 def robust_sigma_2nd(v: np.ndarray) -> float:
     """2階差分法（外れ値に強い版）：1.4826 × 中央値(|Δ²v|) ÷ √6"""
