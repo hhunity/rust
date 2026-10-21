@@ -18,8 +18,8 @@ exe に渡す引数は、設定ファイルの program.command に {名前} の�
     {label}      設定の名前
     そのほか     runs の params / sweep に書いた値（例：{spec_sigma}）
                  と、画像フォルダの params.yaml に書いた画像ごとの値（例：{ref_x}）
-    配列の値     "{名前}" → 1 つの引数に sep（program.list_sep、既定 ","）でつなぐ（例：12000,12500,30000,30200）
-                 "{名前*}"（引数がちょうどこれだけのとき）→ 要素ごとに別々の引数（例：12000 12500 30000 30200）
+    配列の値     "{名前*}"（引数がちょうどこれだけのとき）→ 要素ごとに別々の引数（例：--ex 12000 12500）
+                 "{名前}" → カンマでつないだ 1 つの引数（例：--ex 12000,12500）
 
 画像ごとのパラメータ（画像フォルダの params.yaml。ファイル名は images.params_file で変えられる）：
     default:              # フォルダ内の全画像に共通
@@ -398,8 +398,6 @@ def build_jobs(cfg: dict, folders, exp: Path) -> list[dict]:
             raise ValueError(f"program.unit が不正です: {unit}")
         img_params = load_image_params(imgs[0].parent, imgs, cfg["images"].get("params_file", "params.yaml"))
         prog = cfg["program"]
-        sep = prog.get("list_sep")
-        sep = "," if sep is None else str(sep)   # YAML で「list_sep:」と空にすると None になるので、そのときは既定のカンマ
         for r in runs:
             for keys, name, refname in items:
                 stem = Path(name).stem if name != "(folder)" else "folder"
@@ -416,10 +414,10 @@ def build_jobs(cfg: dict, folders, exp: Path) -> list[dict]:
                 values = dict(params, **keys, out=str(out), out_dir=str(rdir), run_dir=str(run_dir),
                               stem=stem, label=r["label"])
                 where = f"{rel}/{name}（設定 {r['label']}）"
-                cmd = expand_command(prog["command"], values, sep, where)
+                cmd = expand_command(prog["command"], values, where)
                 # 集計に使う CSV：既定は {out}。exe が決まった名前で書く場合は result_csv で場所を指定
-                result = Path(fill(str(prog.get("result_csv", "{out}")), values, sep, where))
-                cwd = fill(str(prog["cwd"]), values, sep, where) if prog.get("cwd") else None
+                result = Path(fill(str(prog.get("result_csv", "{out}")), values, where))
+                cwd = fill(str(prog["cwd"]), values, where) if prog.get("cwd") else None
                 jobs.append({"folder": rel, "rdir": rdir, "image": name, "ref_image": refname,
                              "label": r["label"], "params": params, "cmd": cmd, "out": out,
                              "result": result, "run_dir": run_dir, "cwd": cwd, "log": log})
@@ -463,16 +461,16 @@ def flatten(v) -> list:
     return [v]
 
 
-def fill(s: str, values: dict, sep: str, where: str) -> str:
-    """{名前} を置き換える。配列は sep でつないだ 1 つの文字列にする（例：12000,12500,30000,30200）"""
-    v2 = {k: (sep.join(str(x) for x in flatten(v)) if isinstance(v, (list, tuple)) else v) for k, v in values.items()}
+def fill(s: str, values: dict, where: str) -> str:
+    """{名前} を置き換える。配列はカンマでつないだ 1 つの文字列にする（例：12000,12500,30000,30200）"""
+    v2 = {k: (",".join(str(x) for x in flatten(v)) if isinstance(v, (list, tuple)) else v) for k, v in values.items()}
     try:
         return s.format(**v2)
     except KeyError as e:
         sys.exit(f"{where}：{{{e.args[0]}}} の値がありません。runs の params / sweep か、画像フォルダの params.yaml に書いてください")
 
 
-def expand_command(command: list, values: dict, sep: str, where: str) -> list[str]:
+def expand_command(command: list, values: dict, where: str) -> list[str]:
     """コマンドの各引数の {名前} を置き換える。
     引数がちょうど "{名前*}" のときは、配列を要素ごとの別々の引数に展開する（例："{xs*}" → "1000" "3000" "5000"）。
     空の配列なら、その引数は消える。"""
@@ -485,7 +483,7 @@ def expand_command(command: list, values: dict, sep: str, where: str) -> list[st
                 sys.exit(f"{where}：{{{m[1]}*}} の値がありません。runs の params / sweep か、画像フォルダの params.yaml に書いてください")
             out.extend(str(x) for x in flatten(values[m[1]]))
         else:
-            out.append(fill(s, values, sep, where))
+            out.append(fill(s, values, where))
     return out
 
 
