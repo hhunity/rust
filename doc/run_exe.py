@@ -398,7 +398,8 @@ def build_jobs(cfg: dict, folders, exp: Path) -> list[dict]:
             raise ValueError(f"program.unit が不正です: {unit}")
         img_params = load_image_params(imgs[0].parent, imgs, cfg["images"].get("params_file", "params.yaml"))
         prog = cfg["program"]
-        sep = str(prog.get("list_sep", ","))
+        sep = prog.get("list_sep")
+        sep = "," if sep is None else str(sep)   # YAML で「list_sep:」と空にすると None になるので、そのときは既定のカンマ
         for r in runs:
             for keys, name, refname in items:
                 stem = Path(name).stem if name != "(folder)" else "folder"
