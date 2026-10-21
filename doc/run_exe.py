@@ -17,6 +17,17 @@ exe に渡す引数は、設定ファイルの program.command に {名前} の�
     {stem}       画像ファイル名（拡張子なし）
     {label}      設定の名前
     そのほか     runs の params / sweep に書いた値（例：{spec_sigma}）
+                 と、画像フォルダの params.yaml に書いた画像ごとの値（例：{ref_x}）
+    配列の値     "{名前}" → 1 つの引数に sep（program.list_sep、既定 ","）でつなぐ（例：12000,12500,30000,30200）
+                 "{名前*}"（引数がちょうどこれだけのとき）→ 要素ごとに別々の引数（例：12000 12500 30000 30200）
+
+画像ごとのパラメータ（画像フォルダの params.yaml。ファイル名は images.params_file で変えられる）：
+    default:              # フォルダ内の全画像に共通
+      ref_x: 1000
+    img003.png:           # この画像だけ上書き
+      target_x: 5100
+    runs と同じ名前があるとエラーで止める（比べたい設定が気づかずに上書きされるのを防ぐ）
+    使った params.yaml は results/<フォルダ>/ にコピーし、値は measurements.csv の param_<名前> 列に残る
 
 出力（work_dir/日付_実験名/）：
     README.md         目的・条件・結果・結論のひな形（初回だけ作る。手で書き足す）
@@ -30,6 +41,7 @@ exe に渡す引数は、設定ファイルの program.command に {名前} の�
         files/<画像名>__<設定>/    exe が {run_dir} に書いたファイル（差分画像など）
         logs/<画像名>__<設定>.log  exe の標準出力・エラー出力・終了コード・かかった時間
         measurements.csv          raw をまとめ、列名をそろえたもの
+        measurements_<名前>.csv   stats.series に書いた「まとめた値」を 1 グループ 1 行にしたもの
         stats.csv, conditions.csv, figs/
 """
 from __future__ import annotations
@@ -42,6 +54,7 @@ import concurrent.futures as cf
 import datetime as dt
 import hashlib
 import io
+import re
 import shlex
 import shutil
 import subprocess
@@ -95,11 +108,21 @@ def expand_settings(items: list[dict]) -> list[dict]:
     for m in items:
         base = dict(m.get("params", {}) or {})
         sweep = m.get("sweep", {}) or {}
+        for k, v in sweep.items():
+            # 文字列のまま product に渡すと、1文字ずつ別の設定になってしまう（"0.05, 0.10" → 10 通り）
+            if not isinstance(v, list):
+                sys.exit(f"runs の sweep の値はリストで書いてください：{k}: {v!r}\n"
+                         f"  正しい例：sweep: {{{k}: [0.05, 0.10]}}  または\n"
+                         f"    sweep:\n      {k}: [0.05, 0.10]")
         keys = list(sweep)
         for values in itertools.product(*[sweep[k] for k in keys]) if keys else [()]:
             params = dict(base, **dict(zip(keys, values)))
             label = m.get("label", "run").format(**params)
             out.append({"label": label, "params": params})
+    # label が重なると、結果ファイルが上書きされる
+    dup = sorted({o["label"] for o in out if [x["label"] for x in out].count(o["label"]) > 1})
+    if dup:
+        sys.exit(f"runs の label が重なっています：{dup}。sweep を使うときは label に値を入れてください（例：\"s{{spec_sigma}}\"）")
     return out
 
 def robust_sigma_2nd(v: np.ndarray) -> float:
@@ -160,6 +183,31 @@ def stats_for(df: pd.DataFrame, fail_score) -> pd.DataFrame:
                         "repeat_std_dy": float(np.nanmedian(p["dy"].std(axis=1)))})
         st = pd.concat([st, pd.DataFrame(rep)], ignore_index=True)
     return st
+
+
+def derive_series(df: pd.DataFrame, cx: str, cy: str, group_col: str | None) -> pd.DataFrame:
+    """exe が同じ CSV に書いた「まとめた値」（例：100 ブロックごとの平均 ave_dx, ave_dy）を、1グループ 1 行の表にする
+    ・group_col があれば、その列が同じ行を 1 グループとみなす
+    ・なければ、(cx, cy) の値が前の行と同じあいだを 1 グループとみなす
+      （全行に同じ値をくり返す書き方でも、グループの先頭行にだけ書く書き方でもよい。空の行は捨てる）
+    block_y はグループに含まれるブロックの y の平均（グループの中心）"""
+    out = []
+    for (img, label), g in df.groupby(["image", "label"], sort=False):
+        g = g.sort_values(["block_x", "block_y"])
+        if group_col:
+            key = g[group_col]
+        else:
+            v = g[[cx, cy]].ffill()   # 先頭行にだけ書く形 → 下の空の行を同じグループで埋める
+            key = (v != v.shift()).any(axis=1).cumsum()
+        g = g.assign(_k=key.values)
+        g[[cx, cy]] = g.groupby("_k")[[cx, cy]].transform("first")
+        a = g.groupby("_k", sort=False).agg(block_x=("block_x", "first"), block_y=("block_y", "mean"),
+                                            dx=(cx, "first"), dy=(cy, "first"), score=("score", "median"),
+                                            n_in_group=("block_y", "size"))
+        a = a.dropna(subset=["dx", "dy"], how="all")
+        a["block_y"] = a["block_y"].round(3)   # 画像間でグループ位置を突き合わせるため（repeat_std）
+        out.append(a.assign(image=img, label=label, method=g["method"].iloc[0]).reset_index(drop=True))
+    return pd.concat(out, ignore_index=True) if out else pd.DataFrame()
 
 
 def save_plots(df: pd.DataFrame, figdir: Path):
@@ -348,6 +396,9 @@ def build_jobs(cfg: dict, folders, exp: Path) -> list[dict]:
             items = [({"folder": str(imgs[0].parent)}, "(folder)", "")]
         else:
             raise ValueError(f"program.unit が不正です: {unit}")
+        img_params = load_image_params(imgs[0].parent, imgs, cfg["images"].get("params_file", "params.yaml"))
+        prog = cfg["program"]
+        sep = str(prog.get("list_sep", ","))
         for r in runs:
             for keys, name, refname in items:
                 stem = Path(name).stem if name != "(folder)" else "folder"
@@ -355,17 +406,86 @@ def build_jobs(cfg: dict, folders, exp: Path) -> list[dict]:
                 out = rdir / "raw" / f"{tag}.csv"
                 run_dir = rdir / "files" / tag              # exe が CSV 以外のファイルを書く場所（呼び出しごとに別）
                 log = rdir / "logs" / f"{tag}.log"
-                values = dict(r["params"], **keys, out=str(out), out_dir=str(rdir), run_dir=str(run_dir),
+                ip = img_params.get(name, img_params.get("default", {}))
+                both = sorted(set(ip) & set(r["params"]))
+                if both:
+                    sys.exit(f"{rel}/{name}：{both} が画像ごとのパラメータ（{cfg['images'].get('params_file', 'params.yaml')}）と"
+                             f" runs の両方にあります。\n  比べたい設定が気づかずに上書きされるのを防ぐため、どちらか一方にしてください。")
+                params = dict(ip, **r["params"])
+                values = dict(params, **keys, out=str(out), out_dir=str(rdir), run_dir=str(run_dir),
                               stem=stem, label=r["label"])
-                prog = cfg["program"]
-                cmd = [str(a).format(**values) for a in prog["command"]]
+                where = f"{rel}/{name}（設定 {r['label']}）"
+                cmd = expand_command(prog["command"], values, sep, where)
                 # 集計に使う CSV：既定は {out}。exe が決まった名前で書く場合は result_csv で場所を指定
-                result = Path(str(prog.get("result_csv", "{out}")).format(**values))
-                cwd = str(prog["cwd"]).format(**values) if prog.get("cwd") else None
+                result = Path(fill(str(prog.get("result_csv", "{out}")), values, sep, where))
+                cwd = fill(str(prog["cwd"]), values, sep, where) if prog.get("cwd") else None
                 jobs.append({"folder": rel, "rdir": rdir, "image": name, "ref_image": refname,
-                             "label": r["label"], "params": r["params"], "cmd": cmd, "out": out,
+                             "label": r["label"], "params": params, "cmd": cmd, "out": out,
                              "result": result, "run_dir": run_dir, "cwd": cwd, "log": log})
     return jobs
+
+
+# ================================================================ 画像ごとのパラメータ
+def load_image_params(folder: Path, imgs: list[Path], fname: str) -> dict:
+    """画像フォルダの params.yaml を読み、{画像名: そのパラメータ, "default": 共通} を返す。
+    画像名の項目は default に上書きした結果。ファイルがなければ空。
+
+    params.yaml の書き方：
+        default:              # フォルダ内の全画像に共通
+          ref_x: 1000
+          exclude_rows: [[12000, 12500], [30000, 30200]]
+        img003.png:           # この画像だけ上書き（書いたキーだけ。ほかは default のまま）
+          target_x: 5100
+    """
+    p = folder / fname
+    if not p.is_file():
+        return {}
+    with open(p, encoding="utf-8") as fp:
+        raw = yaml.safe_load(fp) or {}
+    if not isinstance(raw, dict):
+        sys.exit(f"{p}：中身は「default: ...」「画像名: ...」の形で書いてください")
+    default = raw.get("default", {}) or {}
+    names = {q.name for q in imgs}
+    unknown = sorted(k for k in raw if k != "default" and k not in names)
+    if unknown:   # 画像名の書き間違いは、黙って default が使われるので知らせる
+        print(f"  注意：{p} に、フォルダにない画像名があります：{unknown}")
+    out = {"default": dict(default)}
+    for n in names:
+        out[n] = dict(default, **(raw.get(n, {}) or {}))
+    return out
+
+
+def flatten(v) -> list:
+    """[[12000, 12500], [30000, 30200]] → [12000, 12500, 30000, 30200]"""
+    if isinstance(v, (list, tuple)):
+        return [x for e in v for x in flatten(e)]
+    return [v]
+
+
+def fill(s: str, values: dict, sep: str, where: str) -> str:
+    """{名前} を置き換える。配列は sep でつないだ 1 つの文字列にする（例：12000,12500,30000,30200）"""
+    v2 = {k: (sep.join(str(x) for x in flatten(v)) if isinstance(v, (list, tuple)) else v) for k, v in values.items()}
+    try:
+        return s.format(**v2)
+    except KeyError as e:
+        sys.exit(f"{where}：{{{e.args[0]}}} の値がありません。runs の params / sweep か、画像フォルダの params.yaml に書いてください")
+
+
+def expand_command(command: list, values: dict, sep: str, where: str) -> list[str]:
+    """コマンドの各引数の {名前} を置き換える。
+    引数がちょうど "{名前*}" のときは、配列を要素ごとの別々の引数に展開する（例："{xs*}" → "1000" "3000" "5000"）。
+    空の配列なら、その引数は消える。"""
+    out = []
+    for a in command:
+        s = str(a)
+        m = re.fullmatch(r"\{(\w+)\*\}", s)
+        if m:
+            if m[1] not in values:
+                sys.exit(f"{where}：{{{m[1]}*}} の値がありません。runs の params / sweep か、画像フォルダの params.yaml に書いてください")
+            out.extend(str(x) for x in flatten(values[m[1]]))
+        else:
+            out.append(fill(s, values, sep, where))
+    return out
 
 
 def run_job(job: dict, prog: dict) -> dict:
@@ -412,7 +532,8 @@ def read_output(job: dict, prog: dict) -> pd.DataFrame | None:
     df["label"] = job["label"]
     df["method"] = "exe"
     for k, v in job["params"].items():
-        df[f"param_{k}"] = v
+        # 配列は 1 つのセルに入るよう文字列にする（例：[[12000, 12500], [30000, 30200]] → "[[12000, 12500], [30000, 30200]]"）
+        df[f"param_{k}"] = str(v) if isinstance(v, (list, tuple, dict)) else v
     return df
 
 
@@ -430,6 +551,11 @@ def main():
 
     cfg = load_config(Path(args.config), args)
     prog = cfg["program"]
+    root = Path(cfg["paths"]["image_root"]).resolve()
+    work = Path(cfg["paths"]["work_dir"]).resolve()
+    if work == root or root in work.parents:
+        sys.exit(f"work_dir（{work}）が image_root（{root}）の中にあります。\n"
+                 f"  結果のグラフや出力画像を、次の実行で画像として拾ってしまうので、image_root の外にしてください。")
     folders = find_image_folders(cfg)
     print(f"対象フォルダ {len(folders)} 個：")
     for rel, imgs in folders:
@@ -449,6 +575,14 @@ def main():
             params = ", ".join(f"{k}={v}" for k, v in js[0]["params"].items())
             print(f"\n  [{label}]  {params}  → {len(js)} 回")
             print("    例：" + shlex.join(js[0]["cmd"]))
+        # 画像ごとのパラメータ（params.yaml）がある場合、画像ごとに使う値を表示する
+        pfn = cfg["images"].get("params_file", "params.yaml")
+        for rel, imgs in folders:
+            ip = load_image_params(imgs[0].parent, imgs, pfn)
+            if ip:
+                print(f"\n  画像ごとのパラメータ（{rel}/{pfn}）：")
+                for p in imgs:
+                    print(f"    {p.name}: " + ", ".join(f"{k}={v}" for k, v in ip[p.name].items()))
         if args.show_all:
             print("\n全コマンド：")
             for j in jobs:
@@ -476,6 +610,9 @@ def main():
     for rel, imgs in folders:
         rdir = exp / "results" / rel
         rdir.mkdir(parents=True, exist_ok=True)
+        pf = imgs[0].parent / cfg["images"].get("params_file", "params.yaml")
+        if pf.is_file():   # 画像ごとのパラメータを、使った時点のまま残す（あとで params.yaml を書き換えても分かるように）
+            shutil.copy2(pf, rdir / pf.name)
         cond = rdir / "conditions.csv"
         if not cond.exists():
             pd.DataFrame({"image": [p.name for p in imgs], "exposure_us": "", "F": "", "focus": "",
@@ -508,9 +645,18 @@ def main():
     all_stats = []
     for rel, _ in folders:
         rdir = exp / "results" / rel
-        dfs = [read_output(d, prog) for d in done if d["folder"] == rel and d["returncode"] == 0]
+        mine = [d for d in done if d["folder"] == rel]
+        failed = [d for d in mine if d["returncode"] != 0]
+        missing = [d for d in mine if d["returncode"] == 0 and not d["result"].exists()]
+        dfs = [read_output(d, prog) for d in mine if d["returncode"] == 0]
         dfs = [d for d in dfs if d is not None and len(d)]
+        # measurements.csv ができない理由を表示する
+        if failed:
+            print(f"  [{rel}] 終了コードが 0 以外：{len(failed)} 回（例：{failed[0]['log']}）")
+        if missing:
+            print(f"  [{rel}] 結果 CSV が見つからない：{len(missing)} 回（探した場所の例：{missing[0]['result']}）")
         if not dfs:
+            print(f"  [{rel}] 読める結果が 0 件なので measurements.csv を作りません")
             continue
         df = pd.concat(dfs, ignore_index=True)
         df.to_csv(rdir / "measurements.csv", index=False, encoding="utf-8-sig")
@@ -520,7 +666,19 @@ def main():
                 df["block_x"] = 0
             if "score" not in df.columns:
                 df["score"] = float("nan")
-            st = stats_for(df, cfg.get("stats", {}).get("fail_score"))
+            scfg = cfg.get("stats", {}) or {}
+            st = stats_for(df, scfg.get("fail_score")).assign(series="block")
+            # exe が同じ CSV に書いた「まとめた値」も同じ指標で集計する（stats.series）
+            for name, spec in (scfg.get("series") or {}).items():
+                cx, cy = spec["dx"], spec["dy"]
+                if cx not in df.columns or cy not in df.columns:
+                    print(f"  [{rel}] stats.series.{name}：列 {cx}, {cy} が CSV にないので省略")
+                    continue
+                ds = derive_series(df, cx, cy, spec.get("group"))
+                if len(ds):
+                    ds.to_csv(rdir / f"measurements_{name}.csv", index=False, encoding="utf-8-sig")
+                    st = pd.concat([st, stats_for(ds, None).assign(series=name)], ignore_index=True)
+            st = st[["series"] + [c for c in st.columns if c != "series"]]
             st.to_csv(rdir / "stats.csv", index=False, encoding="utf-8-sig")
             if cfg.get("plots", True):
                 save_plots(df, rdir / "figs")
