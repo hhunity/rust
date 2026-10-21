@@ -1,5 +1,6 @@
 # コンパイル済みプログラムを呼び出す実験の設定（叩き台）
 # 実行：python run_exe.py config_exe_example.yaml --dry-run   ← まずコマンドが正しいか確認
+# 相対パスは、この設定ファイルの場所が基準（例：tools/measure.exe、../images）
 
 experiment:
   name: specSigmaの比較
@@ -15,11 +16,19 @@ images:
   recursive: false
   patterns: ["*.png", "*.tif", "*.tiff", "*.bmp"]
   exclude: []
+  params_file: params.yaml           # 画像フォルダに置く、画像ごとのパラメータ（なければ使わない。見本：params_example.yaml）
 
 program:
   # 呼び出すコマンド。1要素目が exe、2要素目以降が引数。{名前} はその都度置き換わる
+  # Python スクリプトを呼ぶ場合：["{python}", "tools/measure.py", "--image", "{image}", ...]
+  # {ref_x} {target_x} {exclude_rows} は画像フォルダの params.yaml から（画像ごとに違う値）
+  # 配列 exclude_rows の渡し方は2通り：
+  #   "{exclude_rows}"  → 1 つの引数にカンマでつなぐ：--exclude-rows 12000,12500,30000,30200
+  #   "{exclude_rows*}" → 要素ごとに別の引数：      --exclude-rows 12000 12500 30000 30200
   command: ["D:/tools/measure.exe", "--image", "{image}", "--out", "{out}",
-            "--method", "{method}", "--sigma", "{spec_sigma}"]
+            "--method", "{method}", "--sigma", "{spec_sigma}",
+            "--ref-x", "{ref_x}", "--target-x", "{target_x}",
+            "--exclude-rows", "{exclude_rows}"]
   unit: image                        # image：画像1枚ごと / pair：基準画像と比較画像の2枚 / folder：フォルダごとに1回
   ref_image: null                    # unit: pair のときの基準画像（null ならフォルダ内の1枚目）
   output: file                       # file：exe が {out} に CSV を書く / stdout：exe の標準出力を CSV として保存
@@ -28,7 +37,7 @@ program:
     header: true                     # 1行目が列名か。false なら names に列名を並べる
     # names: [x, y, dx, dy, score]
     encoding: utf-8-sig
-  columns:                           # exe の出力の列名 → 標準の列名（集計とグラフに使う）
+  columns:                           # 「標準の列名: exe の出力の列名」（左が集計とグラフで使う名前、右が exe の CSV の列名）
     block_x: x
     block_y: y
     dx: dx
@@ -37,8 +46,10 @@ program:
   parallel: 4                        # 同時に走らせる数（CPU のコア数くらいまで）
   timeout_s: 3600                    # 1回あたりの制限時間（秒）
   skip_existing: false               # true：結果ファイルがすでにあれば実行しない（途中から再開するとき）
-  cwd: null                          # exe を実行するときの作業フォルダ
-  version_command: null              # 例：["D:/tools/measure.exe", "--version"]（記録用）
+  cwd: null                          # exe を実行するときの作業フォルダ。"{run_dir}" にすると、exe がカレントに書くファイルが呼び出しごとのフォルダに入る
+  result_csv: "{out}"                # 集計に使う CSV の場所。exe が決まった名前で書くなら "{run_dir}/result.csv" など
+  list_sep: ","                      # 配列を "{名前}" で 1 つの引数にするときの区切り
+  version_command: null             # 例：["D:/tools/measure.exe", "--version"]（記録用）
 
 runs:                                # 試す設定。params / sweep の値は command の {名前} に入る
   - label: normal
@@ -51,5 +62,34 @@ runs:                                # 試す設定。params / sweep の値は c
 
 stats:
   fail_score: null
+  # exe が同じ CSV に「まとめた値」を書いている場合、それも同じ指標で集計する（stats.csv の series 列で区別）
+  # 列名は exe の CSV の列名。group を書くと、その列が同じ行を 1 グループとみなす
+  # group がなければ、値が前の行と同じあいだを 1 グループとみなす（全行にくり返す書き方・先頭行だけに書く書き方のどちらでもよい）
+  series:
+    ave: {dx: ave_dx, dy: ave_dy}          # 例：{dx: ave_dx, dy: ave_dy, group: group_id}
 
 plots: true
+
+# 画像ごとのパラメータの見本。画像フォルダに params.yaml という名前で置く
+#   D:/images/lot1/img001.png
+#   D:/images/lot1/img002.png
+#   D:/images/lot1/params.yaml   ← これ
+#
+# ・default はフォルダ内の全画像に共通
+# ・画像名の項目は、書いたキーだけ default を上書き（書かなかったキーは default のまま）
+# ・値は exe のコマンドの {ref_x} などに入る。runs と同じ名前があるとエラーで止める
+# ・使ったファイルは実験フォルダの results/<フォルダ>/ にコピーされる
+
+default:
+  ref_x: 1000                 # 左（基準）ブロックの x [画素]
+  target_x: 5000              # 右（比較）ブロックの x [画素]
+  exclude_rows:               # 計測から外す行の範囲 [開始, 終了]（マーク、傷、継ぎ目など）。配列
+    - [12000, 12500]
+    - [30000, 30200]
+
+img003.png:
+  target_x: 5100              # この画像だけ右ブロックの位置が違う
+
+img005.png:
+  exclude_rows: []            # この画像は外す範囲なし（"{exclude_rows*}" なら引数が消える）
+
