@@ -178,9 +178,13 @@ def stats_for(df: pd.DataFrame, fail_score) -> pd.DataFrame:
         rep = []
         for label, g in df.groupby("label", sort=False):
             p = g.pivot_table(index=["block_x", "block_y"], columns="image", values=["dx", "dy"])
-            rep.append({"image": "(画像間の繰り返し)", "label": label, "method": g["method"].iloc[0],
-                        "repeat_std_dx": float(np.nanmedian(p["dx"].std(axis=1))),
-                        "repeat_std_dy": float(np.nanmedian(p["dy"].std(axis=1)))})
+            # repeat_std：プールした標準偏差 = √(ブロックごとの画像間の分散の平均)。繰り返し標準偏差の標準的な定義
+            # repeat_std_median：ブロックごとの標準偏差の中央値（外れ値に強い。repeat_std と大きく違えば一部のブロックに外れ値）
+            row = {"image": "(画像間の繰り返し)", "label": label, "method": g["method"].iloc[0]}
+            for ax in ("dx", "dy"):
+                row[f"repeat_std_{ax}"] = float(np.sqrt(np.nanmean(p[ax].var(axis=1))))
+                row[f"repeat_std_median_{ax}"] = float(np.nanmedian(p[ax].std(axis=1)))
+            rep.append(row)
         st = pd.concat([st, pd.DataFrame(rep)], ignore_index=True)
     return st
 
