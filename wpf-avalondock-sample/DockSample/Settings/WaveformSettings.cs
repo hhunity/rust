@@ -99,6 +99,9 @@ public static class DeviceTypes
         ["DcSource"] = typeof(DcSourceData),
     };
 
+    /// <summary>表にあるデバイス名（グラフペインの「追加 ▾」の一覧に出す）</summary>
+    public static IReadOnlyCollection<string> Names => Table.Keys;
+
     /// <summary>このデバイス名の中身の型（表にない名前なら UnknownDeviceData＝中身をそのまま保持）</summary>
     public static Type For(string deviceName) =>
         Table.GetValueOrDefault(deviceName, typeof(UnknownDeviceData));

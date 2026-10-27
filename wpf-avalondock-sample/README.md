@@ -66,6 +66,12 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
     - データ → 線（`Series`）の変換は機種ごとのクラス（`Graphs/SeriesConverters.cs`、DI に `ISeriesConverter` として登録）
     - 機種を増やすときは：`DeviceData` の派生クラス・`DeviceTypes` の表・変換クラスと DI の登録。グラフ側は変えなくてよい
     - ViewModel は描く線だけを持ち、描くのは View のコードビハインド
+  - 上の「追加 ▾」で機種を選ぶと、その機種の波形（新しい uuid）を1つ追加。「削除」で選んでいる波形を削除。「名前」で表示名を変更
+  - 下の編集欄（`ViewModels/WaveformEditors.cs`）で中身を編集。機種ごとに編集欄の ViewModel と DataTemplate（`GraphView.xaml`）がある
+    - パルスを持つ機種：左にパルスの一覧（追加・削除）、右に選んだパルスの名前とセグメントの表（追加・削除・値の編集）
+    - 電圧源：電圧と電流制限
+    - 編集欄は値を自分で持たず、get / set で毎回 `Current` を読み書きする（`GraphViewModel.Data<T>()` / `Write<T>()`）
+    - 追加・削除・編集はどれも元に戻すで取り消せる。グラフも編集のたびに描き直す
     - 選んだものはデータそのものではなく場所（デバイス名・uuid）で覚え、使うたびに `Current` から探し直す
     - セグメント → 点 の変換（`WaveformSeriesConverter.AddSegment`）は仮の解釈（0V 開始、SlewRate の傾きで変化し Duration まで保持。次のパルスは前のパルスの終わりの時刻・電圧から続ける）
 - 押すと一覧が開くボタンの部品（`Controls/DropDownButton`）

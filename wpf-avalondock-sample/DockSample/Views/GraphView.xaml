@@ -4,23 +4,145 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:DockSample.ViewModels"
+             xmlns:controls="clr-namespace:DockSample.Controls"
              xmlns:ScottPlot="clr-namespace:ScottPlot.WPF;assembly=ScottPlot.WPF"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:GraphViewModel}"
-             d:DesignWidth="600" d:DesignHeight="300">
+             d:DesignWidth="700" d:DesignHeight="500">
     <!-- DataContext は DataTemplate から GraphViewModel が自動で入る。グラフはコードビハインドで描く -->
+
+    <UserControl.Resources>
+        <!--
+          下の編集欄：Editor の型ごとに表示を切り替える（ContentControl が型を見て選ぶ）。
+          機種を増やして編集欄も作ったら、ここに DataTemplate を足す。
+        -->
+
+        <!-- パルスを持つ機種：左にパルスの一覧、右に選んだパルスのセグメントの表 -->
+        <DataTemplate DataType="{x:Type vm:WaveformEditorViewModel}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="200" MinWidth="120" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" MinWidth="200" />
+                </Grid.ColumnDefinitions>
+
+                <!-- 左：パルスの一覧 -->
+                <DockPanel Grid.Column="0" Margin="4">
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                        <Button DockPanel.Dock="Right" Content="＋ 追加" Padding="8,1"
+                                Command="{Binding AddPulseCommand}" />
+                        <TextBlock Text="パルス" Style="{StaticResource Text.Label}" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <ListBox ItemsSource="{Binding Pulses}" SelectedItem="{Binding SelectedPulse}"
+                             HorizontalContentAlignment="Stretch">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel>
+                                    <!-- 行の DataContext はパルスの行なので、一覧（ListBox）の ViewModel のコマンドを辿って呼ぶ -->
+                                    <Button DockPanel.Dock="Right" Content="削除" Padding="6,0" Margin="4,0,0,0"
+                                            Command="{Binding DataContext.RemovePulseCommand,
+                                                      RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                            CommandParameter="{Binding}" />
+                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" />
+                                </DockPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+
+                <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Stretch"
+                              Background="#EEEEEE" ResizeBehavior="PreviousAndNext" />
+
+                <!-- 右：選んだパルスの名前とセグメント -->
+                <DockPanel Grid.Column="2" Margin="4">
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                        <Button DockPanel.Dock="Right" Content="＋ セグメント追加" Padding="8,1" Margin="8,0,0,0"
+                                Command="{Binding AddSegmentCommand}" />
+                        <TextBlock Text="パルス名" Style="{StaticResource Text.Label}" VerticalAlignment="Center"
+                                   Margin="0,0,8,0" />
+                        <TextBox Text="{Binding SelectedPulse.Name, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource Input.TextBox}" />
+                    </DockPanel>
+
+                    <DataGrid ItemsSource="{Binding SelectedPulse.Segments}"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False"
+                              SelectionMode="Single" HeadersVisibility="Column"
+                              GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EEEEEE">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="#" Binding="{Binding Number, Mode=OneWay}" IsReadOnly="True" Width="Auto" />
+                            <DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="2*" />
+                            <!-- 数値の列はセルの編集を終えたとき（Enter・別のセルへ移動）に反映される -->
+                            <DataGridTextColumn Header="目標電圧" Binding="{Binding TargetVoltage}" Width="*" />
+                            <DataGridTextColumn Header="スルーレート" Binding="{Binding SlewRate}" Width="*" />
+                            <DataGridTextColumn Header="時間" Binding="{Binding Duration}" Width="*" />
+                            <DataGridTemplateColumn Width="Auto" IsReadOnly="True">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Button Content="削除" Padding="8,1" Margin="2"
+                                                Command="{Binding DataContext.RemoveSegmentCommand,
+                                                          RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                CommandParameter="{Binding}" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!-- 電圧源 -->
+        <DataTemplate DataType="{x:Type vm:DcSourceEditorViewModel}">
+            <Grid Margin="8" VerticalAlignment="Top" HorizontalAlignment="Left">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Text="電圧 (V)" Style="{StaticResource Text.FieldLabel}" />
+                <controls:NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding Voltage}"
+                                        Minimum="-1000" Maximum="1000" Increment="0.1" DecimalPlaces="2"
+                                        Width="120" Margin="0,0,0,6" Style="{StaticResource Input.Numeric}" />
+
+                <TextBlock Grid.Row="1" Text="電流制限 (A)" Style="{StaticResource Text.FieldLabel}" />
+                <controls:NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding LimitCurrent}"
+                                        Minimum="0" Maximum="100" Increment="0.01" DecimalPlaces="3"
+                                        Width="120" Margin="0,0,0,6" Style="{StaticResource Input.Numeric}" />
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+
     <DockPanel>
-        <!-- 上：デバイス / uuid の選択（選ぶと、その中身が全部1つのグラフに出る） -->
+        <!-- 上：デバイス / uuid の選択・追加・削除・名前 -->
         <Border DockPanel.Dock="Top" BorderBrush="#DDDDDD" BorderThickness="0,0,0,1" Padding="4">
-            <StackPanel Orientation="Horizontal">
+            <WrapPanel>
                 <TextBlock Text="デバイス" Style="{StaticResource Text.Label}" VerticalAlignment="Center" Margin="0,0,8,0" />
-                <ComboBox ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}" MinWidth="250" />
-            </StackPanel>
+                <!-- Display は名前を変えるとすぐ変わる（ToString だと表示が更新されない） -->
+                <ComboBox ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}"
+                          DisplayMemberPath="Display" MinWidth="250" />
+
+                <!-- 追加：機種を選ぶと、その機種の波形を1つ足す -->
+                <controls:DropDownButton Header="追加" Margin="8,0,0,0"
+                                         ItemsSource="{Binding DeviceNames}"
+                                         Command="{Binding AddWaveformCommand}"
+                                         IsSearchEnabled="False"
+                                         Style="{StaticResource Input.DropDown}" />
+                <Button Content="削除" Padding="8,1" Margin="4,0,0,0" Command="{Binding RemoveWaveformCommand}" />
+
+                <TextBlock Text="名前" Style="{StaticResource Text.Label}" VerticalAlignment="Center" Margin="16,0,8,0" />
+                <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" MinWidth="160"
+                         Style="{StaticResource Input.TextBox}" />
+            </WrapPanel>
         </Border>
 
         <!-- 波形がないとき -->
         <TextBlock DockPanel.Dock="Top" Margin="8" TextWrapping="Wrap"
-                   Text="波形がありません。設定フォルダに waveforms.json を置いて、設定ペインの「開く...」で読み込んでください。">
+                   Text="波形がありません。「追加」で機種を選ぶか、設定フォルダに waveforms.json を置いて、設定ペインの「開く...」で読み込んでください。">
             <TextBlock.Style>
                 <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Caption}">
                     <Setter Property="Visibility" Value="Collapsed" />
@@ -39,6 +161,21 @@
                    Style="{StaticResource Text.Caption}"
                    Visibility="{Binding HasNoSeries, Converter={StaticResource BoolToVisible}}" />
 
-        <ScottPlot:WpfPlot x:Name="Chart" />
+        <!-- 上：グラフ / 下：編集欄（間のつまみで高さを変えられる） -->
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" MinHeight="100" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="240" MinHeight="80" />
+            </Grid.RowDefinitions>
+
+            <ScottPlot:WpfPlot x:Name="Chart" Grid.Row="0" />
+
+            <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
+                          Background="#EEEEEE" ResizeBehavior="PreviousAndNext" />
+
+            <!-- Editor の型（機種）に合わせて、上の DataTemplate が選ばれる。編集欄のない機種では空 -->
+            <ContentControl Grid.Row="2" Content="{Binding Editor}" Focusable="False" />
+        </Grid>
     </DockPanel>
 </UserControl>
