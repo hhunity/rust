@@ -50,8 +50,13 @@ public partial class GraphView : UserControl
         if (_vm is null) return;
         var plot = Chart.Plot;
         plot.Clear();
-        if (_vm.Xs.Length > 0)
-            plot.Add.Scatter(_vm.Xs, _vm.Ys);
+        foreach (var s in _vm.Lines)   // 選んだ uuid の線（パルスなど）を全部重ねる
+        {
+            var line = plot.Add.Scatter(s.Xs, s.Ys);
+            line.LegendText = s.Name;   // 凡例に出す名前
+        }
+        if (_vm.Lines.Count > 0) plot.ShowLegend();
+        else plot.HideLegend();
         plot.XLabel("時間");
         plot.YLabel(_vm.YLabel);
         plot.Axes.AutoScale();

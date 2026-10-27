@@ -60,9 +60,12 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
     - デバイス名ごとに型を選んで読み書きするのは `DeviceTableConverter`
     - クラスに書いていない項目も `[JsonExtensionData]` で保持し、保存時にそのまま書き戻す
     - 既存のファイルは、設定フォルダに `waveforms.json` という名前で置けば読み込める
-  - パルスを選ぶと波形を表示。ViewModel は描くデータ（Xs / Ys）だけを持ち、描くのは View のコードビハインド
-    - パルスはデータそのものではなく場所（デバイス名・uuid・番号）で覚え、使うたびに `Current` から探し直す
-    - セグメント → 点 の変換（`ToPoints`）は仮の解釈（0V 開始、SlewRate の傾きで変化し Duration まで保持）
+  - デバイス / uuid を選ぶと、その中身を1つのグラフに描く（パルスを持つ機種なら、パルスが全部重なって出る。凡例付き）
+    - データ → 線（`Series`）の変換は機種ごとのクラス（`Graphs/SeriesConverters.cs`、DI に `ISeriesConverter` として登録）
+    - 機種を増やすときは：`DeviceData` の派生クラス・`DeviceTypes` の表・変換クラスと DI の登録。グラフ側は変えなくてよい
+    - ViewModel は描く線だけを持ち、描くのは View のコードビハインド
+    - 選んだものはデータそのものではなく場所（デバイス名・uuid）で覚え、使うたびに `Current` から探し直す
+    - セグメント → 点 の変換（`WaveformSeriesConverter.ToPoints`）は仮の解釈（0V 開始、SlewRate の傾きで変化し Duration まで保持）
 - 押すと一覧が開くボタンの部品（`Controls/DropDownButton`）
   - 一覧は `MaxDropDownHeight`（既定 250）を超えるとスクロール。検索欄で絞り込み（`IsSearchEnabled="False"` で非表示）
   - ↑↓で移動・Enter で決定・Esc で閉じる。選んだ項目は `Command` の引数として渡される
@@ -84,6 +87,7 @@ DockSample/
 ├─ Controls/                使い回す部品（NumericUpDown / DropDownButton）
 ├─ ViewModels/              Main / Pane(基底) / Document / Explorer, Properties, Output
 ├─ Settings/                保存する設定のクラス
+├─ Graphs/                  機種のデータ → グラフの線 の変換
 ├─ Docking/                 LayoutInitializer(初期配置) / DockLayoutStore(保存・復元)
 ├─ Styles/                  文字・コントロールの共通スタイル
 ├─ Converters/              bool → Visibility(Hidden)

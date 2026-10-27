@@ -1,6 +1,7 @@
 using System.Windows;
 using CommunityToolkit.Mvvm.Messaging;
 using DockSample.Docking;
+using DockSample.Graphs;
 using DockSample.Services;
 using DockSample.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,6 +25,10 @@ public partial class App : Application
         services.AddSingleton<IAppearanceService, AppearanceService>();
         services.AddSingleton<ISettingsService, JsonSettingsService>();
         services.AddSingleton<IDialogService, DialogService>();
+
+        // グラフ：機種のデータ → 線 の変換（機種を増やしたら1行足す）
+        services.AddSingleton<ISeriesConverter, WaveformSeriesConverter>();
+        services.AddSingleton<ISeriesConverter, DcSourceSeriesConverter>();
 
         // ドッキングペイン。PaneViewModel として登録した順にトグルボタンが並ぶ。
         // ペインを増やすときはここに1行足して、App.xaml に DataTemplate を足すだけ。
