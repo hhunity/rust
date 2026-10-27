@@ -182,11 +182,19 @@ public partial class GraphViewModel : PaneViewModel
 
     // ===== エクスポート・インポート =====
     //
-    // ファイルの形は waveforms.json と同じ（"waveforms" → デバイス名 → uuid → 中身）。
+    // ファイルの形は waveforms.json の "waveforms" の中身と同じ（デバイス名 → uuid → 中身）。
+    //   { "PulseGen": { "1234-abcd": { "name": "出力1", "pulseCollection": [ ... ] } } }
     // エクスポートはその中に選んでいる1つだけを入れる。デバイス名も入るので、読み込むときに中身の型が決まる。
-    // インポートは、ファイルに入っているものを全部足す（waveforms.json そのものも読み込める）。
+    // インポートは、ファイルに入っているものを全部足す。waveforms.json そのもの（"waveforms" で包まれた形）も読み込める。
 
     private const string JsonFilter = "JSON ファイル (*.json)|*.json|すべてのファイル (*.*)|*.*";
+
+    /// <summary>
+    /// 設定ファイルと同じ書き方＋「デバイス名 → uuid → 中身」の辞書を読み書きするコンバータ。
+    /// （WaveformFile の中ではプロパティに付けた [JsonConverter] で使われるが、辞書だけを直接読み書きするときは自分で渡す）
+    /// </summary>
+    private static readonly JsonSerializerOptions DeviceTableOptions =
+        new(JsonSettingsService.JsonOptions) { Converters = { new DeviceTableConverter() } };
 
     /// <summary>エクスポート：選んでいる波形1つを、別の JSON ファイルに書き出す</summary>
     [RelayCommand(CanExecute = nameof(CanRemoveWaveform))]
@@ -199,11 +207,13 @@ public partial class GraphViewModel : PaneViewModel
         var path = _dialogs.ShowSaveFile("波形のエクスポート", JsonFilter, fileName);
         if (path is null) return;
 
-        var file = new WaveformFile();
-        file.Waveforms[e.Device] = new Dictionary<string, DeviceData> { [e.Uuid] = data };
+        var table = new Dictionary<string, Dictionary<string, DeviceData>>
+        {
+            [e.Device] = new() { [e.Uuid] = data },
+        };
         try
         {
-            File.WriteAllText(path, JsonSerializer.Serialize(file, JsonSettingsService.JsonOptions));
+            File.WriteAllText(path, JsonSerializer.Serialize(table, DeviceTableOptions));
         }
         catch (Exception ex)
         {
@@ -221,11 +231,14 @@ public partial class GraphViewModel : PaneViewModel
         var path = _dialogs.ShowOpenFile("波形のインポート", JsonFilter);
         if (path is null) return;
 
-        WaveformFile file;
+        Dictionary<string, Dictionary<string, DeviceData>> table;
         try
         {
-            file = JsonSerializer.Deserialize<WaveformFile>(File.ReadAllText(path), JsonSettingsService.JsonOptions)
-                   ?? new WaveformFile();
+            var json = File.ReadAllText(path);
+            using var doc = JsonDocument.Parse(json);
+            table = doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("waveforms", out _)
+                ? (JsonSerializer.Deserialize<WaveformFile>(json, JsonSettingsService.JsonOptions) ?? new()).Waveforms   // waveforms.json そのもの
+                : JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, DeviceData>>>(json, DeviceTableOptions) ?? new();
         }
         catch (Exception ex)
         {
@@ -233,7 +246,7 @@ public partial class GraphViewModel : PaneViewModel
             return;
         }
 
-        var count = file.Waveforms.Sum(d => d.Value.Count);
+        var count = table.Sum(d => d.Value.Count);
         if (count == 0)
         {
             _dialogs.ShowError("ファイルに波形が入っていません。");
@@ -244,7 +257,7 @@ public partial class GraphViewModel : PaneViewModel
         _settings.Edit($"Waveforms.Import.{Guid.NewGuid()}", s =>
         {
             var all = s.Waveforms.Waveforms;
-            foreach (var (device, byUuid) in file.Waveforms)
+            foreach (var (device, byUuid) in table)
             {
                 if (!all.TryGetValue(device, out var target))
                     all[device] = target = new Dictionary<string, DeviceData>();
