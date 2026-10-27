@@ -67,6 +67,9 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
     - 機種を増やすときは：`DeviceData` の派生クラス・`DeviceTypes` の表・変換クラスと DI の登録。グラフ側は変えなくてよい
     - ViewModel は描く線だけを持ち、描くのは View のコードビハインド
   - 上の「追加 ▾」で機種を選ぶと、その機種の波形（新しい uuid）を1つ追加。「削除」で選んでいる波形を削除。「名前」で表示名を変更
+  - 「エクスポート...」で選んでいる波形1つを別の JSON ファイルに書き出し、「インポート...」で JSON ファイルの波形を追加する
+    - ファイルの形は waveforms.json と同じ（中身が1つだけ）。デバイス名も入るので、読み込むときに型が決まる。waveforms.json そのものもインポートできる
+    - インポートで同じ機種に同じ uuid があれば、新しい uuid を付けて別のものとして足す。インポートも元に戻すで取り消せる
   - 下の編集欄（`ViewModels/WaveformEditors.cs`）で中身を編集。機種ごとに編集欄の ViewModel と DataTemplate（`GraphView.xaml`）がある
     - パルスを持つ機種：左にパルスの一覧（追加・削除）、右に選んだパルスの名前とセグメントの表（追加・削除・値の編集）
     - 電圧源：電圧と電流制限

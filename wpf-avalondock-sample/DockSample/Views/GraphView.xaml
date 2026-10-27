@@ -133,6 +133,10 @@
                                          IsSearchEnabled="False"
                                          Style="{StaticResource Input.DropDown}" />
                 <Button Content="削除" Padding="8,1" Margin="4,0,0,0" Command="{Binding RemoveWaveformCommand}" />
+                <Button Content="エクスポート..." Padding="8,1" Margin="4,0,0,0" Command="{Binding ExportWaveformCommand}"
+                        ToolTip="選んでいる波形を、別の JSON ファイルに書き出す" />
+                <Button Content="インポート..." Padding="8,1" Margin="4,0,0,0" Command="{Binding ImportWaveformCommand}"
+                        ToolTip="JSON ファイルの波形を追加する（waveforms.json も読める）" />
 
                 <TextBlock Text="名前" Style="{StaticResource Text.Label}" VerticalAlignment="Center" Margin="16,0,8,0" />
                 <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" MinWidth="160"

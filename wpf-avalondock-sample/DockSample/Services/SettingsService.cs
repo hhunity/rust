@@ -105,6 +105,9 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,       // 日本語を \uXXXX にせず保存
     };
 
+    /// <summary>設定ファイルと同じ JSON の書き方（波形のエクスポート・インポートなど、設定の一部を別ファイルに読み書きするとき用）</summary>
+    public static JsonSerializerOptions JsonOptions => Options;
+
     // ===== セクション ⇔ ファイル の対応 =====
 
     /// <summary>1ファイル分：ファイル名と、そのセクションの書き出し・読み込み方</summary>

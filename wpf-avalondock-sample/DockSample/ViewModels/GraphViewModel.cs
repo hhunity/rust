@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DockSample.Graphs;
@@ -67,6 +69,7 @@ public partial class GraphViewModel : PaneViewModel
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(RemoveWaveformCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ExportWaveformCommand))]
     private DeviceEntry? _selectedEntry;
 
     [ObservableProperty] private string _yLabel = "電圧 (V)";
@@ -176,6 +179,90 @@ public partial class GraphViewModel : PaneViewModel
     }
 
     private bool CanRemoveWaveform() => SelectedEntry is not null;
+
+    // ===== エクスポート・インポート =====
+    //
+    // ファイルの形は waveforms.json と同じ（"waveforms" → デバイス名 → uuid → 中身）。
+    // エクスポートはその中に選んでいる1つだけを入れる。デバイス名も入るので、読み込むときに中身の型が決まる。
+    // インポートは、ファイルに入っているものを全部足す（waveforms.json そのものも読み込める）。
+
+    private const string JsonFilter = "JSON ファイル (*.json)|*.json|すべてのファイル (*.*)|*.*";
+
+    /// <summary>エクスポート：選んでいる波形1つを、別の JSON ファイルに書き出す</summary>
+    [RelayCommand(CanExecute = nameof(CanRemoveWaveform))]
+    private void ExportWaveform()
+    {
+        if (SelectedEntry is not { } e || CurrentData is not { } data) return;
+
+        var fileName = string.Concat((string.IsNullOrEmpty(data.Name) ? e.Uuid : data.Name)
+                                     .Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)) + ".json";
+        var path = _dialogs.ShowSaveFile("波形のエクスポート", JsonFilter, fileName);
+        if (path is null) return;
+
+        var file = new WaveformFile();
+        file.Waveforms[e.Device] = new Dictionary<string, DeviceData> { [e.Uuid] = data };
+        try
+        {
+            File.WriteAllText(path, JsonSerializer.Serialize(file, JsonSettingsService.JsonOptions));
+        }
+        catch (Exception ex)
+        {
+            _dialogs.ShowError($"エクスポートできませんでした。\n{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// インポート：JSON ファイルの波形を全部足す（元に戻すで取り消せる）。
+    /// 同じ機種に同じ uuid がもうあれば、新しい uuid を付けて別のものとして足す。
+    /// </summary>
+    [RelayCommand]
+    private void ImportWaveform()
+    {
+        var path = _dialogs.ShowOpenFile("波形のインポート", JsonFilter);
+        if (path is null) return;
+
+        WaveformFile file;
+        try
+        {
+            file = JsonSerializer.Deserialize<WaveformFile>(File.ReadAllText(path), JsonSettingsService.JsonOptions)
+                   ?? new WaveformFile();
+        }
+        catch (Exception ex)
+        {
+            _dialogs.ShowError($"インポートできませんでした。\n{ex.Message}");
+            return;
+        }
+
+        var count = file.Waveforms.Sum(d => d.Value.Count);
+        if (count == 0)
+        {
+            _dialogs.ShowError("ファイルに波形が入っていません。");
+            return;
+        }
+
+        (string Device, string Uuid)? first = null;
+        _settings.Edit($"Waveforms.Import.{Guid.NewGuid()}", s =>
+        {
+            var all = s.Waveforms.Waveforms;
+            foreach (var (device, byUuid) in file.Waveforms)
+            {
+                if (!all.TryGetValue(device, out var target))
+                    all[device] = target = new Dictionary<string, DeviceData>();
+
+                foreach (var (uuid, data) in byUuid)
+                {
+                    var key = target.ContainsKey(uuid) ? Guid.NewGuid().ToString() : uuid;   // 重なったら別の uuid
+                    target[key] = data;
+                    first ??= (device, key);
+                }
+            }
+        });
+
+        // Edit では Reloaded が出ないので、一覧は自分で作り直し、読み込んだ最初のものを選ぶ
+        Load();
+        if (first is { } f)
+            SelectedEntry = Entries.FirstOrDefault(x => x.Device == f.Device && x.Uuid == f.Uuid);
+    }
 
     // ===== 編集欄から使う =====
 
