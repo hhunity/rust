@@ -37,6 +37,7 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - 未保存の変更があるまま終了しようとすると、保存するか確認する
   - 保存する項目は `Settings/AppSettings.cs` に定義（画面と同じ形でなくてよい。例：自動保存の設定は入れ子のクラスでひとまとめ）
   - 画面との対応付けは各ページで手書き：設定 → 画面は `LoadFrom`、画面 → 設定は各プロパティの `OnXxxChanged` で `Write(...)`
+  - 設定の書き換えは全部 `ISettingsService.Edit(key, s => ...)` を通す（Undo の記録 → 書き換え → 「未保存」の更新をまとめて行う。「元に戻す」「開く」で読み直している最中の書き戻しは無視する）
   - 項目を増やすときは `[ObservableProperty]`・`OnXxxChanged`・`LoadFrom` の3か所と、`AppSettings` 側に追加する
 - 「一覧」ペイン（`ItemListViewModel` / `Views/ItemListView.xaml`）
   - 「追加 ▾」（DropDownButton）で種類を選ぶと、表（DataGrid）に1行追加

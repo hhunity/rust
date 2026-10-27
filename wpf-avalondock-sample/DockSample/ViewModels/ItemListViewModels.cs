@@ -117,9 +117,6 @@ public partial class ItemListViewModel : PaneViewModel
 {
     private readonly ISettingsService _settings;
 
-    /// <summary>設定から読み込み中（このあいだは設定に書き戻さない）</summary>
-    private bool _loading;
-
     /// <summary>最後に保存した時にあった行の Id（「削除した行」の数を出すのに使う）</summary>
     private HashSet<Guid> _savedIds = new();
 
@@ -211,17 +208,13 @@ public partial class ItemListViewModel : PaneViewModel
     /// <summary>設定（Current.Items）から表を作り直す。選んでいた行は、残っていれば選び直す</summary>
     private void Load()
     {
+        // 行は値を入れてから Edited をつなぐので、ここで Write は呼ばれない
         var selectedId = SelectedItem?.Id;
-        _loading = true;
-        try
-        {
-            Items.Clear();
-            foreach (var data in _settings.Current.Items)
-                Items.Add(CreateRow(data, FindType(data)));
-            RefreshSaved();
-            SelectedItem = Items.FirstOrDefault(i => i.Id == selectedId);
-        }
-        finally { _loading = false; }
+        Items.Clear();
+        foreach (var data in _settings.Current.Items)
+            Items.Add(CreateRow(data, FindType(data)));
+        RefreshSaved();
+        SelectedItem = Items.FirstOrDefault(i => i.Id == selectedId);
     }
 
     /// <summary>各行に「保存した時の値」を渡し直す（「新」「●」の印と件数の表示が更新される）</summary>
@@ -240,10 +233,7 @@ public partial class ItemListViewModel : PaneViewModel
     /// </summary>
     private void Write(string key)
     {
-        if (_loading) return;
-        _settings.RecordUndo("Items." + key);
-        _settings.Current.Items = Items.Select(i => i.ToData()).ToList();
-        _settings.NotifyChanged();
+        _settings.Edit("Items." + key, s => s.Items = Items.Select(i => i.ToData()).ToList());
         OnPropertyChanged(nameof(Summary));
     }
 

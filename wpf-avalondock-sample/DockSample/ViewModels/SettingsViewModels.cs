@@ -20,8 +20,6 @@ namespace DockSample.ViewModels;
 /// </summary>
 public abstract class SettingsPageViewModel : ObservableValidator
 {
-    private bool _loading;
-
     protected SettingsPageViewModel(string header, ISettingsService settings)
     {
         Header = header;
@@ -50,26 +48,20 @@ public abstract class SettingsPageViewModel : ObservableValidator
     /// <summary>
     /// 設定を読み込む。派生クラスのコンストラクタの最後で呼ぶこと
     /// （基底のコンストラクタから呼ぶと、派生クラスのフィールドがまだ準備できていない）
+    ///
+    /// 読み込んだ値で OnXxxChanged → Write が呼ばれるが、
+    /// ・「元に戻す」「開く」での読み直し中は、ISettingsService.Edit が無視する
+    /// ・起動時は同じ値を書き戻すだけなので、設定は変わらず、Undo の記録も残らない
     /// </summary>
-    protected void Load()
-    {
-        _loading = true;   // 読み込み中は Write で書き戻さない
-        try { LoadFrom(SettingsService.Current); }
-        finally { _loading = false; }
-    }
+    protected void Load() => LoadFrom(SettingsService.Current);
 
     /// <summary>
-    /// 画面 → 設定。OnXxxChanged から呼び、設定に書き写して「未保存の変更」を更新する。
-    /// 書き写す前の状態を Undo 用に記録する。key には呼び出し元（OnUserNameChanged など）の名前が
-    /// 自動で入るので、同じ項目の続けての変更（文字入力など）は1回分の Undo にまとまる。
+    /// 画面 → 設定。OnXxxChanged から呼び、設定に書き写して「未保存の変更」を更新する（Undo も記録される）。
+    /// key には呼び出し元（OnUserNameChanged など）の名前が自動で入るので、
+    /// 同じ項目の続けての変更（文字入力など）は1回分の Undo にまとまる。
     /// </summary>
-    protected void Write(Action<AppSettings> write, [CallerMemberName] string key = "")
-    {
-        if (_loading) return;   // 読み込み中（Undo・開く などで読み直している最中）は書き戻さない
-        SettingsService.RecordUndo(GetType().Name + "." + key);
-        write(SettingsService.Current);
-        SettingsService.NotifyChanged();
-    }
+    protected void Write(Action<AppSettings> write, [CallerMemberName] string key = "") =>
+        SettingsService.Edit(GetType().Name + "." + key, write);
 }
 
 // ---- 全般 ----

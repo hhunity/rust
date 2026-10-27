@@ -25,7 +25,6 @@ public partial class GraphViewModel : PaneViewModel
 {
     private readonly ISettingsService _settings;
     private readonly IReadOnlyList<ISeriesConverter> _converters;
-    private bool _loading;
 
     public GraphViewModel(ISettingsService settings, IEnumerable<ISeriesConverter> converters)
         : base("Document_Graph", "グラフ", DockLocation.Document, buttonText: "グラフ")
@@ -65,32 +64,24 @@ public partial class GraphViewModel : PaneViewModel
     private void Load()
     {
         var selected = SelectedEntry;
-        _loading = true;
-        try
-        {
-            Entries.Clear();
-            foreach (var (device, byUuid) in _settings.Current.Waveforms.Waveforms)
-                foreach (var uuid in byUuid.Keys)
-                    Entries.Add(new DeviceEntry(device, uuid));
+        Entries.Clear();
+        foreach (var (device, byUuid) in _settings.Current.Waveforms.Waveforms)
+            foreach (var uuid in byUuid.Keys)
+                Entries.Add(new DeviceEntry(device, uuid));
 
-            // 同じ場所があれば選び直す（record なので中身で比べられる）
-            SelectedEntry = Entries.FirstOrDefault(e => e == selected) ?? Entries.FirstOrDefault();
-        }
-        finally { _loading = false; }
+        // 同じ場所があれば選び直す（record なので中身で比べられる）
+        SelectedEntry = Entries.FirstOrDefault(e => e == selected) ?? Entries.FirstOrDefault();
 
         UpdateSeries();   // 選び直した場所が同じでも、中身は変わっているかもしれないので描き直す
     }
 
     /// <summary>
-    /// 画面 → 設定。書き換える前の状態を Undo 用に記録し、Current を書き換えて「未保存」を更新する。
-    /// （設定ページの Write と同じ形。選んでいる uuid の中身が T 型のときだけ書き換える）
+    /// 画面 → 設定。選んでいる uuid の中身が T 型のときだけ書き換える（Undo・「未保存」は ISettingsService.Edit が扱う）
     /// </summary>
     private void Write<T>(Action<T> write, string key) where T : DeviceData
     {
-        if (_loading || CurrentData is not T data) return;
-        _settings.RecordUndo($"Waveforms.{SelectedEntry}.{key}");
-        write(data);
-        _settings.NotifyChanged();
+        if (CurrentData is not T data) return;
+        _settings.Edit($"Waveforms.{SelectedEntry}.{key}", _ => write(data));
         UpdateSeries();
     }
 

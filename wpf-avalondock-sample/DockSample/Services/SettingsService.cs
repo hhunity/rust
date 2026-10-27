@@ -49,17 +49,15 @@ public interface ISettingsService : INotifyPropertyChanged
     bool CanRedo { get; }
 
     /// <summary>
-    /// 変更の直前に呼ぶ。今の状態を Undo 用に記録する。
-    /// 同じ key の変更が短い間に続いた場合（文字入力・数値の連続増減など）は、1回分にまとめる。
+    /// Current を書き換える。書き換える前の状態を Undo 用に記録してから edit を呼び、「未保存の変更」を更新する。
+    /// ・同じ key の変更が短い間に続いた場合（文字入力・数値の連続増減など）は、1回分の Undo にまとめる
+    /// ・Reloaded の最中（各 ViewModel が読み直した値を自分のプロパティに入れているだけ）に来た Edit は無視する
     /// </summary>
-    void RecordUndo(string key);
+    void Edit(string key, Action<AppSettings> edit);
 
     /// <summary>1つ前の状態に戻す / Undo で戻した分をやり直す</summary>
     void Undo();
     void Redo();
-
-    /// <summary>Current が変わったことを知らせる（IsDirty を再計算する）</summary>
-    void NotifyChanged();
 
     /// <summary>「保存した状態に戻す」「開く」「Undo/Redo」で Current が差し替わった（各 ViewModel は値を読み直す）</summary>
     event EventHandler? Reloaded;
@@ -173,7 +171,27 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
     public AppSettings GetSaved() =>
         JsonSerializer.Deserialize<AppSettings>(_savedJson, Options) ?? new AppSettings();
 
-    public void NotifyChanged()
+    /// <summary>Reloaded を出している最中か（このあいだの Edit は無視する）</summary>
+    private bool _reloading;
+
+    public void Edit(string key, Action<AppSettings> edit)
+    {
+        if (_reloading) return;   // 読み直しで値を入れているだけなので、書き戻さない
+        RecordUndo(key);
+        edit(Current);
+        NotifyChanged();
+    }
+
+    /// <summary>Reloaded を出す。各 ViewModel が読み直している間に来た Edit は無視する</summary>
+    private void RaiseReloaded()
+    {
+        _reloading = true;
+        try { Reloaded?.Invoke(this, EventArgs.Empty); }
+        finally { _reloading = false; }
+    }
+
+    /// <summary>Current が変わったあとに呼ぶ（IsDirty を再計算する）</summary>
+    private void NotifyChanged()
     {
         var json = Serialize(Current);
         IsDirty = json != _savedJson;
@@ -188,7 +206,11 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
         }
     }
 
-    public void RecordUndo(string key)
+    /// <summary>
+    /// 変更の直前に呼ぶ。今の状態を Undo 用に記録する。
+    /// 同じ key の変更が短い間に続いた場合は、1回分にまとめる。
+    /// </summary>
+    private void RecordUndo(string key)
     {
         var now = DateTime.Now;
         if (key == _lastKey && now - _lastTime < MergeWindow)
@@ -229,7 +251,7 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
     {
         Current = JsonSerializer.Deserialize<AppSettings>(json, Options) ?? new AppSettings();
         _lastKey = null;   // 戻した直後の変更は、新しい1回分として記録する
-        Reloaded?.Invoke(this, EventArgs.Empty);
+        RaiseReloaded();
         IsDirty = Serialize(Current) != _savedJson;   // 保存した状態まで戻れば「未保存」は消える
         UpdateUndoState();
     }
@@ -268,7 +290,7 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
         RememberFolder(folder);
         _savedJson = Serialize(Current);
         ClearHistory();                            // 別のフォルダの状態には戻れないようにする
-        Reloaded?.Invoke(this, EventArgs.Empty);   // 各ページに読み直してもらう
+        RaiseReloaded();                           // 各ページに読み直してもらう
         IsDirty = false;
         return true;
     }
