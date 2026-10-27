@@ -14,7 +14,7 @@ public record DeviceEntry(string Device, string Uuid)
 
 /// <summary>
 /// 「グラフ」ペイン。設定の waveforms.json にあるデバイス / uuid を選ぶと、その中身を1つのグラフに描く
-/// （パルスを持つ機種なら、パルスが全部重なって出る）。
+/// （パルスを持つ機種なら、パルスを順番につなげた1本の波形になる）。
 ///
 /// ・データ → 線 の変換は機種ごとの ISeriesConverter（Graphs/SeriesConverters.cs）。ここは機種を知らない
 /// ・設定は「元に戻す」「開く」で Current が丸ごと差し替わるので、データそのものは覚えておかず、

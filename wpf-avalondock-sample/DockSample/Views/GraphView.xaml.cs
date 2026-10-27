@@ -50,7 +50,7 @@ public partial class GraphView : UserControl
         if (_vm is null) return;
         var plot = Chart.Plot;
         plot.Clear();
-        foreach (var s in _vm.Lines)   // 選んだ uuid の線（パルスなど）を全部重ねる
+        foreach (var s in _vm.Lines)   // 選んだ uuid の線を全部描く（機種によっては複数本）
         {
             var line = plot.Add.Scatter(s.Xs, s.Ys);
             line.LegendText = s.Name;   // 凡例に出す名前
