@@ -27,13 +27,17 @@
     </UserControl.Resources>
 
     <Grid>
-        <!-- ボタン本体：見出し＋▼ -->
-        <ToggleButton x:Name="PART_Toggle" Padding="10,4">
-            <StackPanel Orientation="Horizontal">
-                <ContentPresenter x:Name="PART_Header" VerticalAlignment="Center" />
-                <Path Data="M 0,0 L 8,0 L 4,4 Z" Fill="#444444"
+        <!--
+          ボタン本体：見出し（左寄せ）＋▼（右端）。
+          中身をボタンの幅いっぱいに広げ（HorizontalContentAlignment="Stretch"）、▼を DockPanel で右端に置く。
+          ボタンを広げたとき（Width 指定・HorizontalAlignment="Stretch"）も、▼はいつも右端に来る
+        -->
+        <ToggleButton x:Name="PART_Toggle" Padding="10,4" HorizontalContentAlignment="Stretch">
+            <DockPanel>
+                <Path DockPanel.Dock="Right" Data="M 0,0 L 8,0 L 4,4 Z" Fill="#444444"
                       Margin="8,0,0,0" VerticalAlignment="Center" />
-            </StackPanel>
+                <ContentPresenter x:Name="PART_Header" VerticalAlignment="Center" HorizontalAlignment="Left" />
+            </DockPanel>
         </ToggleButton>
 
         <!-- 一覧：既定はボタンの真下（向きと、すき間はコードビハインドの ApplyPlacement で設定）。外をクリックすると閉じる -->
