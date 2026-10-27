@@ -6,10 +6,16 @@ using DockSample.Settings;
 
 namespace DockSample.ViewModels;
 
-/// <summary>一覧の1件（デバイス名 / uuid）。データそのものではなく、場所（キー）だけを覚える</summary>
-public record DeviceEntry(string Device, string Uuid)
+/// <summary>
+/// 一覧の1件。データそのものではなく、場所（デバイス名・uuid）と、一覧に出す名前（DeviceData.Name）だけを覚える。
+/// 名前は変わることがあるので、同じものかどうかは IsSameLocation（場所）で比べる。
+/// </summary>
+public record DeviceEntry(string Device, string Uuid, string Name)
 {
-    public override string ToString() => $"{Device} / {Uuid}";
+    public bool IsSameLocation(DeviceEntry? other) => other is not null && other.Device == Device && other.Uuid == Uuid;
+
+    /// <summary>コンボボックスに出す文字（名前が空なら uuid）</summary>
+    public override string ToString() => $"{Device} / {(string.IsNullOrEmpty(Name) ? Uuid : Name)}";
 }
 
 /// <summary>
@@ -66,11 +72,11 @@ public partial class GraphViewModel : PaneViewModel
         var selected = SelectedEntry;
         Entries.Clear();
         foreach (var (device, byUuid) in _settings.Current.Waveforms.Waveforms)
-            foreach (var uuid in byUuid.Keys)
-                Entries.Add(new DeviceEntry(device, uuid));
+            foreach (var (uuid, data) in byUuid)
+                Entries.Add(new DeviceEntry(device, uuid, data.Name));
 
-        // 同じ場所があれば選び直す（record なので中身で比べられる）
-        SelectedEntry = Entries.FirstOrDefault(e => e == selected) ?? Entries.FirstOrDefault();
+        // 同じ場所があれば選び直す（名前が変わっていても、場所が同じなら同じもの）
+        SelectedEntry = Entries.FirstOrDefault(e => e.IsSameLocation(selected)) ?? Entries.FirstOrDefault();
 
         UpdateSeries();   // 選び直した場所が同じでも、中身は変わっているかもしれないので描き直す
     }
@@ -81,7 +87,7 @@ public partial class GraphViewModel : PaneViewModel
     private void Write<T>(Action<T> write, string key) where T : DeviceData
     {
         if (CurrentData is not T data) return;
-        _settings.Edit($"Waveforms.{SelectedEntry}.{key}", _ => write(data));
+        _settings.Edit($"Waveforms.{SelectedEntry!.Device}.{SelectedEntry.Uuid}.{key}", _ => write(data));
         UpdateSeries();
     }
 

@@ -10,6 +10,7 @@ namespace DockSample.Settings;
 ///     "waveforms": {
 ///       "PulseGen": {                     ← デバイス名（これで中身の型が決まる。DeviceTypes の表）
 ///         "1234-abcd": {                  ← uuid
+///           "name": "出力1",              ← 表示名（どの機種にもある。DeviceData.Name）
 ///           "pulseCollection": [ { "name": "パルス0", "segmentCollection": [ ... ] } ]
 ///         }
 ///       }
@@ -29,9 +30,16 @@ public class WaveformFile
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
-/// <summary>uuid 1つ分の中身の親（型は DeviceTypes の表で決まるので、ここには何も付けない）</summary>
+/// <summary>
+/// uuid 1つ分の中身の親（型は DeviceTypes の表で決まるので、ここには型の目印などは付けない）。
+/// どの機種も、共通の項目（Name など）はここに書く。派生クラスには自動で付く。
+/// </summary>
 public abstract class DeviceData
 {
+    /// <summary>表示名（グラフペインの一覧などに出す）。JSON ではいつも先頭に書く</summary>
+    [JsonPropertyName("name"), JsonPropertyOrder(-1)]
+    public string Name { get; set; } = "";
+
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
