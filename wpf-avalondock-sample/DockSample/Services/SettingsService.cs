@@ -141,8 +141,11 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
     /// <summary>同じ項目の変更をこの時間内なら1回分にまとめる</summary>
     private static readonly TimeSpan MergeWindow = TimeSpan.FromSeconds(1.5);
 
-    private readonly Stack<string> _undo = new();
-    private readonly Stack<string> _redo = new();
+    /// <summary>Undo / Redo で戻れる回数の上限（1回分 = 設定全体の JSON 1つ。古いものから捨てる）</summary>
+    private const int MaxHistory = 50;
+
+    private readonly HistoryStack<string> _undo = new(MaxHistory);
+    private readonly HistoryStack<string> _redo = new(MaxHistory);
     private string? _lastKey;
     private DateTime _lastTime;
 
@@ -200,7 +203,7 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
         // 戻しても何も変わらない記録なので捨てる
         if (_undo.TryPeek(out var top) && top == json)
         {
-            _undo.Pop();
+            _undo.TryPop(out _);
             _lastKey = null;
             UpdateUndoState();
         }
