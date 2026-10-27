@@ -15,5 +15,6 @@
     <!-- v5 から XmlLayoutSerializer は別パッケージ -->
     <PackageReference Include="Dirkster.AvalonDock.Serializer.Xml" Version="5.0.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.*" />
+    <PackageReference Include="ScottPlot.WPF" Version="5.*" />
   </ItemGroup>
 </Project>

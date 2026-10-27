@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -76,7 +77,8 @@ public interface ISettingsService : INotifyPropertyChanged
 ///   MyProject/
 ///   ├─ general.json      ← AppSettings.General
 ///   ├─ appearance.json   ← AppSettings.Appearance
-///   └─ items.json        ← AppSettings.Items（「一覧」ペインの行）
+///   ├─ items.json        ← AppSettings.Items（「一覧」ペインの行）
+///   └─ waveforms.json    ← AppSettings.Waveforms（波形）
 ///
 /// ・どのセクションをどのファイルに入れるかは Sections の一覧で決める（増やすときは1行足す）
 /// ・読み込み時、フォルダにないファイルのセクションは初期値になる（後からセクションを増やしても古いフォルダを開ける）
@@ -100,6 +102,9 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
     {
         WriteIndented = true,                            // 人が読める形で保存
         Converters = { new JsonStringEnumConverter() },  // enum を数字ではなく名前で保存
+        PropertyNameCaseInsensitive = true,                          // キーの大文字小文字の違いを許す
+        NumberHandling = JsonNumberHandling.AllowReadingFromString,  // "5" のような文字列の数値も読める
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,       // 日本語を \uXXXX にせず保存
     };
 
     // ===== セクション ⇔ ファイル の対応 =====
@@ -124,6 +129,7 @@ public partial class JsonSettingsService : ObservableObject, ISettingsService
         Map("general.json",    s => s.General,    (s, v) => s.General = v),
         Map("appearance.json", s => s.Appearance, (s, v) => s.Appearance = v),
         Map("items.json",      s => s.Items,      (s, v) => s.Items = v),
+        Map("waveforms.json",  s => s.Waveforms,  (s, v) => s.Waveforms = v),
     };
 
     private readonly ILogService _log;

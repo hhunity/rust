@@ -24,6 +24,10 @@
                 <views:ItemListView />
             </DataTemplate>
 
+            <DataTemplate DataType="{x:Type vm:GraphViewModel}">
+                <views:GraphView />
+            </DataTemplate>
+
             <DataTemplate DataType="{x:Type vm:ExplorerViewModel}">
                 <views:ExplorerView />
             </DataTemplate>

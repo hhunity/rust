@@ -2,7 +2,7 @@ namespace DockSample.Settings;
 
 /// <summary>
 /// 保存する設定（ただのデータ）。設定フォルダの中に、セクションごとのファイルとして保存される
-/// （General → general.json、Appearance → appearance.json、Items → items.json。対応は JsonSettingsService.Sections）。
+/// （General → general.json、Appearance → appearance.json、Items → items.json、Waveforms → waveforms.json。対応は JsonSettingsService.Sections）。
 /// ・ここに書いた初期値が、設定ファイルがまだないとき / 項目が足りないときの値になる
 /// ・画面（ViewModel）と同じ形にする必要はない。ViewModel 側の LoadFrom / OnXxxChanged で対応付ける
 /// </summary>
@@ -13,6 +13,9 @@ public class AppSettings
 
     /// <summary>「一覧」ペインの行（ItemSettings.cs）</summary>
     public List<ItemData> Items { get; set; } = new();
+
+    /// <summary>波形（WaveformSettings.cs）</summary>
+    public WaveformFile Waveforms { get; set; } = new();
 }
 
 /// <summary>設定 → 全般</summary>

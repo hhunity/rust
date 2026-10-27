@@ -31,6 +31,7 @@ public partial class App : Application
         services.AddSingleton<PaneViewModel>(_ => new DocumentViewModel("Document_1", "メモ.txt", buttonText: "メモ"));
         services.AddSingleton<PaneViewModel>(_ => new DocumentViewModel("Document_2", "ドキュメント2"));
         services.AddSingleton<PaneViewModel, ItemListViewModel>();
+        services.AddSingleton<PaneViewModel, GraphViewModel>();
         services.AddSingleton<PaneViewModel, ExplorerViewModel>();
         services.AddSingleton<PaneViewModel, PropertiesViewModel>();
         services.AddSingleton<PaneViewModel, OutputViewModel>();

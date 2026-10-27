@@ -25,7 +25,7 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - `Minimum` / `Maximum` の外には出ない（端に達したボタンは無効）。`Increment` で増減幅、`DecimalPlaces` で小数の桁数
   - 使い方: `<controls:NumericUpDown Value="{Binding X}" Minimum="0" Maximum="10" Increment="0.1" DecimalPlaces="1" Style="{StaticResource Input.Numeric}" />`
 - 設定の保存（`Settings/`, `Services/SettingsService.cs`）
-  - 設定は**フォルダ**単位で保存する。中にセクションごとの JSON（`general.json`, `appearance.json`, `items.json`）を作る
+  - 設定は**フォルダ**単位で保存する。中にセクションごとの JSON（`general.json`, `appearance.json`, `items.json`, `waveforms.json`）を作る
     - どのセクションをどのファイルに入れるかは `JsonSettingsService.Sections` の一覧で決める（増やすときは1行足す）
     - 開くとき、フォルダにないファイルのセクションは初期値になる（後からセクションを増やしても古いフォルダを開ける）
   - 設定ペイン下の「保存」で今のフォルダに上書き保存。まだ保存先が決まっていない（初回）ときは保存先フォルダを聞く
@@ -53,6 +53,16 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
     - 表示は型ごとの DataTemplate（`ItemListView.xaml` の Resources）で自動で切り替わる
     - 詳細設定を変えた場合も、その行の「状態」に ● が付く
     - 項目を増やすときは `[ObservableProperty]`・`ToData`・`Load` と、`ItemSettings.cs` の record に追加する
+- 「グラフ」ペイン（`GraphViewModel` / `Views/GraphView.xaml`、ScottPlot.WPF 5.x）
+  - 波形は設定の一部（`AppSettings.Waveforms` → 設定フォルダの `waveforms.json`）。保存・開く・元に戻すがそのまま効く
+    - 形：`"waveforms"` → デバイス名 → uuid → `pulseCollection` → `segmentCollection`（`Settings/WaveformSettings.cs`）
+    - 中身の型はデバイス名で決まる（`DeviceTypes` の表。表にない名前は `UnknownDeviceData` として中身をそのまま保持）
+    - デバイス名ごとに型を選んで読み書きするのは `DeviceTableConverter`
+    - クラスに書いていない項目も `[JsonExtensionData]` で保持し、保存時にそのまま書き戻す
+    - 既存のファイルは、設定フォルダに `waveforms.json` という名前で置けば読み込める
+  - パルスを選ぶと波形を表示。ViewModel は描くデータ（Xs / Ys）だけを持ち、描くのは View のコードビハインド
+    - パルスはデータそのものではなく場所（デバイス名・uuid・番号）で覚え、使うたびに `Current` から探し直す
+    - セグメント → 点 の変換（`ToPoints`）は仮の解釈（0V 開始、SlewRate の傾きで変化し Duration まで保持）
 - 押すと一覧が開くボタンの部品（`Controls/DropDownButton`）
   - 一覧は `MaxDropDownHeight`（既定 250）を超えるとスクロール。検索欄で絞り込み（`IsSearchEnabled="False"` で非表示）
   - ↑↓で移動・Enter で決定・Esc で閉じる。選んだ項目は `Command` の引数として渡される
