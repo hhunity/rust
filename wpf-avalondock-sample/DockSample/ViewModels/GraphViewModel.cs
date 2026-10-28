@@ -96,6 +96,12 @@ public partial class GraphViewModel : PaneViewModel
     /// <summary>グラフに出す線（選んだ uuid の中身を変換したもの）</summary>
     public IReadOnlyList<Series> Lines { get; private set; } = Array.Empty<Series>();
 
+    /// <summary>グラフ上でマウスで動かせる点（機種ごとの定義が決める。動かせない機種は空）</summary>
+    public IReadOnlyList<Handle> Handles { get; private set; } = Array.Empty<Handle>();
+
+    /// <summary>選んでいる機種のグラフの定義（線・動かせる点・動かしたときの書き換え方）</summary>
+    private ISeriesConverter? _converter;
+
     /// <summary>選んだ uuid に、グラフにできるもの（変換クラスがある機種）がないとき true</summary>
     public bool HasNoSeries => SelectedEntry is not null && Lines.Count == 0;
 
@@ -301,11 +307,25 @@ public partial class GraphViewModel : PaneViewModel
             _            => null,   // 編集欄のない機種（表にない機種など）
         };
 
+    /// <summary>
+    /// グラフ上の点を動かした（マウスを離したときに View から1回だけ呼ばれる。x, y は Snap 済み）。
+    /// 書き換え方は機種ごとの定義（Move）が決める。Undo はドラッグ1回で1回分
+    /// </summary>
+    public void MoveHandle(Handle handle, double x, double y)
+    {
+        if (_converter is not { } converter) return;
+        Write<DeviceData>(d => converter.Move(d, handle, x, y), $"Handle.{handle.Id}");
+
+        // 下の編集欄の値も変わったので作り直す（選んでいたパルスはそのまま）
+        RebuildEditor((Editor as WaveformEditorViewModel)?.SelectedPulse?.Index);
+    }
+
     private void UpdateSeries()
     {
-        Lines = CurrentData is { } data
-            ? _converters.FirstOrDefault(c => c.CanConvert(data))?.Convert(data) ?? Array.Empty<Series>()
-            : Array.Empty<Series>();
+        var data = CurrentData;
+        _converter = data is null ? null : _converters.FirstOrDefault(c => c.CanConvert(data));
+        Lines = data is not null && _converter is not null ? _converter.Convert(data) : Array.Empty<Series>();
+        Handles = data is not null && _converter is not null ? _converter.GetHandles(data) : Array.Empty<Handle>();
         OnPropertyChanged(nameof(HasNoSeries));
         DataChanged?.Invoke(this, EventArgs.Empty);
     }
