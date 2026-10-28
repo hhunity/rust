@@ -65,13 +65,9 @@
                 <!-- 右：選んだパルスの名前とセグメント -->
                 <DockPanel Grid.Column="2" Margin="4">
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                        <!-- 表で選んでいるセグメントの前 / 後ろに追加（選んでいなければ先頭 / 最後） -->
-                        <Button DockPanel.Dock="Right" Content="＋ 後ろに" Padding="8,1" Margin="4,0,0,0"
-                                ToolTip="選んでいるセグメントの後ろに追加（選んでいなければ最後）"
-                                Command="{Binding AddSegmentAfterCommand}" />
-                        <Button DockPanel.Dock="Right" Content="＋ 前に" Padding="8,1" Margin="8,0,0,0"
-                                ToolTip="選んでいるセグメントの前に追加（選んでいなければ先頭）"
-                                Command="{Binding AddSegmentBeforeCommand}" />
+                        <!-- 最後に追加（セグメントが1つもないときもこれで足せる）。途中に入れるのは各行の「↑追加」「↓追加」 -->
+                        <Button DockPanel.Dock="Right" Content="＋ 最後に追加" Padding="8,1" Margin="8,0,0,0"
+                                Command="{Binding AddSegmentCommand}" />
                         <!-- パルスの名前は並び順で自動で付く（Pulse0, Pulse1, ...）ので、表示だけ -->
                         <TextBlock Text="{Binding SelectedPulse.Name}" Style="{StaticResource Text.Label}"
                                    VerticalAlignment="Center" />
@@ -94,11 +90,22 @@
                             <DataGridTextColumn Header="時間 (µs)" Binding="{Binding DurationUs, StringFormat=F2}" Width="*" />
                             <DataGridTemplateColumn Width="Auto" IsReadOnly="True">
                                 <DataGridTemplateColumn.CellTemplate>
+                                    <!-- 行の DataContext はセグメントの行なので、表（DataGrid）の ViewModel のコマンドを辿って呼ぶ -->
                                     <DataTemplate>
-                                        <Button Content="削除" Padding="8,1" Margin="2"
-                                                Command="{Binding DataContext.RemoveSegmentCommand,
-                                                          RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                                CommandParameter="{Binding}" />
+                                        <StackPanel Orientation="Horizontal">
+                                            <Button Content="↑追加" Padding="6,1" Margin="2" ToolTip="この行の前に追加"
+                                                    Command="{Binding DataContext.InsertSegmentBeforeCommand,
+                                                              RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                    CommandParameter="{Binding}" />
+                                            <Button Content="↓追加" Padding="6,1" Margin="2" ToolTip="この行の後ろに追加"
+                                                    Command="{Binding DataContext.InsertSegmentAfterCommand,
+                                                              RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                    CommandParameter="{Binding}" />
+                                            <Button Content="削除" Padding="8,1" Margin="2"
+                                                    Command="{Binding DataContext.RemoveSegmentCommand,
+                                                              RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                    CommandParameter="{Binding}" />
+                                        </StackPanel>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>

@@ -29,14 +29,11 @@ public partial class WaveformEditorViewModel : ObservableObject
     public ObservableCollection<PulseRowViewModel> Pulses { get; } = new();
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(AddSegmentBeforeCommand))]
-    [NotifyCanExecuteChangedFor(nameof(AddSegmentAfterCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AddSegmentCommand))]
     private PulseRowViewModel? _selectedPulse;
 
-    /// <summary>表で選んでいるセグメント（追加するときの基準）</summary>
+    /// <summary>表で選んでいるセグメント（追加したセグメントを選んだ状態にするのに使う）</summary>
     [ObservableProperty] private SegmentRowViewModel? _selectedSegment;
-
-    partial void OnSelectedPulseChanged(PulseRowViewModel? value) => SelectedSegment = null;
 
     /// <summary>パルスを追加（最後に足して、それを選ぶ）</summary>
     [RelayCommand]
@@ -105,16 +102,19 @@ public partial class WaveformEditorViewModel : ObservableObject
     }
 
     /// <summary>選んでいるパルスにセグメントを追加</summary>
-    /// <summary>選んでいるセグメントの前に追加（選んでいなければ先頭）</summary>
+    /// <summary>最後に追加（表の上のボタン。セグメントが1つもないときもこれで足せる）</summary>
     [RelayCommand(CanExecute = nameof(CanAddSegment))]
-    private void AddSegmentBefore() => InsertSegment(SelectedSegment?.Index ?? 0);
-
-    /// <summary>選んでいるセグメントの後ろに追加（選んでいなければ最後）</summary>
-    [RelayCommand(CanExecute = nameof(CanAddSegment))]
-    private void AddSegmentAfter() =>
-        InsertSegment(SelectedSegment is { } s ? s.Index + 1 : SelectedPulse?.Segments.Count ?? 0);
+    private void AddSegment() => InsertSegment(SelectedPulse?.Segments.Count ?? 0);
 
     private bool CanAddSegment() => SelectedPulse is not null;
+
+    /// <summary>その行の前に追加（行の「↑追加」ボタンから、行そのものが渡される）</summary>
+    [RelayCommand]
+    private void InsertSegmentBefore(SegmentRowViewModel row) => InsertSegment(row.Index);
+
+    /// <summary>その行の後ろに追加（行の「↓追加」ボタンから、行そのものが渡される）</summary>
+    [RelayCommand]
+    private void InsertSegmentAfter(SegmentRowViewModel row) => InsertSegment(row.Index + 1);
 
     /// <summary>選んでいるパルスの index 番目にセグメントを入れて、それを選ぶ</summary>
     private void InsertSegment(int index)
