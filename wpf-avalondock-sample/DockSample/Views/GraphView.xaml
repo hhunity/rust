@@ -43,6 +43,11 @@
                                             Command="{Binding DataContext.RemovePulseCommand,
                                                       RelativeSource={RelativeSource AncestorType=ListBox}}"
                                             CommandParameter="{Binding}" />
+                                    <Button DockPanel.Dock="Right" Content="コピー" Padding="6,0" Margin="4,0,0,0"
+                                            ToolTip="すぐ下に同じ中身のパルスを入れる"
+                                            Command="{Binding DataContext.CopyPulseCommand,
+                                                      RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                            CommandParameter="{Binding}" />
                                     <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
                                                TextTrimming="CharacterEllipsis" />
                                 </DockPanel>
@@ -74,9 +79,10 @@
                             <DataGridTextColumn Header="#" Binding="{Binding Number, Mode=OneWay}" IsReadOnly="True" Width="Auto" />
                             <DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="2*" />
                             <!-- 数値の列はセルの編集を終えたとき（Enter・別のセルへ移動）に反映される -->
-                            <DataGridTextColumn Header="目標電圧" Binding="{Binding TargetVoltage}" Width="*" />
-                            <DataGridTextColumn Header="スルーレート" Binding="{Binding SlewRate}" Width="*" />
-                            <DataGridTextColumn Header="時間" Binding="{Binding Duration}" Width="*" />
+                            <DataGridTextColumn Header="目標電圧 (V)" Binding="{Binding TargetVoltage}" Width="*" />
+                            <DataGridTextColumn Header="スルーレート (V/µs)" Binding="{Binding SlewRate}" Width="*" />
+                            <!-- ファイルは ns、ここは µs で見せる（換算は SegmentRowViewModel.DurationUs） -->
+                            <DataGridTextColumn Header="時間 (µs)" Binding="{Binding DurationUs}" Width="*" />
                             <DataGridTemplateColumn Width="Auto" IsReadOnly="True">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>

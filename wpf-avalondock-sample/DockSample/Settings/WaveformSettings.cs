@@ -72,7 +72,10 @@ public class PulseData
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
-/// <summary>セグメント1つ</summary>
+/// <summary>
+/// セグメント1つ。単位：TargetVoltage は V、SlewRate は V/µs、Duration は ns（ファイルのまま）。
+/// 画面（グラフ・表）では時間を µs で見せる。換算は TimeUnit を使う
+/// </summary>
 public class SegmentData
 {
     [JsonPropertyName("name")]
@@ -88,6 +91,16 @@ public class SegmentData
     public double Duration { get; set; }
 
     [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>時間の単位の換算（ファイルは ns、画面は µs）</summary>
+public static class TimeUnit
+{
+    /// <summary>ns → µs（画面に見せるとき）</summary>
+    public static double NsToUs(double ns) => ns / 1000;
+
+    /// <summary>µs → ns（画面の値をファイルに書くとき。小数の計算誤差は丸める）</summary>
+    public static double UsToNs(double us) => Math.Round(us * 1000, 6);
 }
 
 /// <summary>デバイス名から、中身のクラスを決める。機種を増やしたらここに1行足す</summary>

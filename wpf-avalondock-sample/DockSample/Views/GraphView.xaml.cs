@@ -186,7 +186,7 @@ public partial class GraphView : UserControl
             dots.Color = ScottPlot.Color.FromHex("#E67E22");
         }
 
-        plot.XLabel("時間");
+        plot.XLabel("時間 (µs)");   // ファイルの Duration は ns だが、グラフは µs（換算は機種ごとの定義が行う）
         plot.YLabel(_vm.YLabel);
         if (keepView) plot.Axes.SetLimits(limits);   // 点を動かしたあとは、今の表示範囲のまま
         else plot.Axes.AutoScale();

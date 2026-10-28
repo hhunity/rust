@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using DockSample.Services;
 using DockSample.Settings;
 
 namespace DockSample.ViewModels;
@@ -40,6 +42,27 @@ public partial class WaveformEditorViewModel : ObservableObject
         Rebuild(index);
     }
 
+    /// <summary>パルスを複製（行の「コピー」ボタンから。すぐ下に同じ中身のパルスを入れて、それを選ぶ）</summary>
+    [RelayCommand]
+    private void CopyPulse(PulseRowViewModel row)
+    {
+        _owner.Write<WaveformData>(d =>
+        {
+            var copy = Clone(d.Pulses[row.Index]);
+            copy.Name = $"{copy.Name} のコピー";
+            d.Pulses.Insert(row.Index + 1, copy);
+        }, $"CopyPulse.{Guid.NewGuid()}");
+        Rebuild(row.Index + 1);
+    }
+
+    /// <summary>
+    /// パルスを丸ごと複製する（セグメントや、クラスにない項目 Extra も含めて）。
+    /// 同じオブジェクトを2か所に入れると片方の編集がもう片方にも効いてしまうので、JSON に書いて読み直して別物にする
+    /// </summary>
+    private static PulseData Clone(PulseData pulse) =>
+        JsonSerializer.Deserialize<PulseData>(JsonSerializer.Serialize(pulse, JsonSettingsService.JsonOptions),
+                                              JsonSettingsService.JsonOptions)!;
+
     /// <summary>パルスを削除（行の「削除」ボタンから、行そのものが渡される）</summary>
     [RelayCommand]
     private void RemovePulse(PulseRowViewModel row)
@@ -54,7 +77,7 @@ public partial class WaveformEditorViewModel : ObservableObject
     {
         if (SelectedPulse is not { } pulse) return;
         _owner.Write<WaveformData>(
-            d => d.Pulses[pulse.Index].Segments.Add(new SegmentData { Name = "segment", TargetVoltage = 5, SlewRate = 1, Duration = 1000 }),
+            d => d.Pulses[pulse.Index].Segments.Add(new SegmentData { Name = "segment", TargetVoltage = 5, SlewRate = 1, Duration = TimeUnit.UsToNs(10) }),
             $"AddSegment.{Guid.NewGuid()}");
         Rebuild(pulse.Index);
     }
@@ -152,10 +175,11 @@ public class SegmentRowViewModel : ObservableObject
         set => Set(SlewRate, value, s => s.SlewRate = value);
     }
 
-    public double Duration
+    /// <summary>時間（µs で見せる。ファイルには ns で書く）</summary>
+    public double DurationUs
     {
-        get => Segment?.Duration ?? 0;
-        set => Set(Duration, value, s => s.Duration = value);
+        get => TimeUnit.NsToUs(Segment?.Duration ?? 0);
+        set => Set(DurationUs, value, s => s.Duration = TimeUnit.UsToNs(value));
     }
 
     /// <summary>値が変わっていれば Current に書き込む（同じ行の同じ項目の続けての変更は1回分の Undo にまとまる）</summary>

@@ -57,20 +57,22 @@ public abstract class SeriesConverter<T> : ISeriesConverter where T : DeviceData
 /// パルスを持つ機種：パルスを順番につなげて、1本の波形にする。
 /// 次のパルスは、前のパルスが終わった時刻・電圧から続ける。
 ///
-/// 動かせる点：最初の (0, 0) 以外の全部の点。縦横とも 0.1 刻み。
+/// グラフの時間は µs（ファイルの Duration は ns なので換算する。SlewRate は V/µs のまま使える）。
+///
+/// 動かせる点：最初の (0, 0) 以外の全部の点。縦横とも 0.1 刻み（横は 0.1µs = 100ns、縦は 0.1V）。
 /// ・傾斜の終わりの点（Id "k.ramp"）と、セグメントの終わりの点（Id "k.end"）。k は全パルスを通したセグメントの通し番号
 /// ・動かすのはその点だけ。ほかの点の位置が変わらないように、前後のセグメントのスルーレート・時間を計算し直す
 ///   （ただし同じセグメントの「傾斜の終わり」と「終わり」は同じ電圧なので、縦に動かすと両方動く）
 /// </summary>
 public class WaveformSeriesConverter : SeriesConverter<WaveformData>
 {
-    /// <summary>縦横の刻み</summary>
+    /// <summary>縦横の刻み（横は µs、縦は V）</summary>
     private const double Step = 0.1;
 
     /// <summary>
-    /// セグメント1つ分の形（全パルスを通した時刻）。
+    /// セグメント1つ分の形（全パルスを通した時刻。単位は µs）。
     /// 0V（または前の終わりの電圧）の Start から、RampEnd まで傾斜し、End まで VEnd を保つ。
-    /// ※ 仮の解釈：SlewRate は 電圧/時間 の傾き（0 以下なら即座に変わる）、Duration はそのセグメントの長さ。
+    /// SlewRate は V/µs の傾き（0 以下なら即座に変わる）、Duration はそのセグメントの長さ（ファイルは ns）。
     ///   傾斜が Duration に収まらなければ途中で打ち切る（そのときは RampEnd == End、VEnd は途中の電圧）。
     /// </summary>
     private sealed record Shape(SegmentData Segment, double Start, double RampEnd, double End, double VStart, double VEnd)
@@ -85,7 +87,7 @@ public class WaveformSeriesConverter : SeriesConverter<WaveformData>
         double t = 0, v = 0;   // 今の時刻と電圧（パルスをまたいで引き継ぐ）
         foreach (var seg in data.Pulses.SelectMany(p => p.Segments))
         {
-            var end = t + Math.Max(0, seg.Duration);
+            var end = t + Math.Max(0, TimeUnit.NsToUs(seg.Duration));
             var diff = seg.TargetVoltage - v;
             var rampTime = seg.SlewRate > 0 ? Math.Abs(diff) / seg.SlewRate : 0;
 
@@ -162,14 +164,14 @@ public class WaveformSeriesConverter : SeriesConverter<WaveformData>
         {
             // セグメントの終わりを (x, y) に。傾斜の終わりの時刻はそのまま（打ち切りのときは終わりまで傾斜）
             var rampEnd = s.Truncated ? x : s.RampEnd;
-            s.Segment.Duration = Math.Round(x - s.Start, 10);
+            s.Segment.Duration = TimeUnit.UsToNs(x - s.Start);
             SetRamp(s.Segment, s.VStart, y, rampEnd - s.Start);
 
             if (next is not null)
             {
                 // 次のセグメントは、終わりの時刻と傾斜の終わりの時刻を保つ（そのぶん長さが縮む・伸びる）。
                 // 傾斜なし（即座に変わる）なら傾斜なしのまま
-                next.Segment.Duration = Math.Round(next.End - x, 10);
+                next.Segment.Duration = TimeUnit.UsToNs(next.End - x);
                 var nextRampEnd = next.Truncated ? next.End : HasRamp(next) ? next.RampEnd : x;
                 SetRamp(next.Segment, y, next.VEnd, nextRampEnd - x);
             }
@@ -179,7 +181,7 @@ public class WaveformSeriesConverter : SeriesConverter<WaveformData>
     /// <summary>傾斜があるか（傾斜なし＝セグメントの始まりで即座に変わる）</summary>
     private static bool HasRamp(Shape s) => s.RampEnd > s.Start;
 
-    /// <summary>vFrom から vTo まで rampTime かけて変化するように、目標電圧とスルーレートを決める</summary>
+    /// <summary>vFrom から vTo まで rampTime（µs）かけて変化するように、目標電圧とスルーレート（V/µs）を決める</summary>
     private static void SetRamp(SegmentData seg, double vFrom, double vTo, double rampTime)
     {
         seg.TargetVoltage = vTo;
@@ -188,7 +190,7 @@ public class WaveformSeriesConverter : SeriesConverter<WaveformData>
 }
 
 /// <summary>
-/// 電圧源：一定電圧の横線1本（時間の情報がないので、横幅は仮に 0〜1000）。
+/// 電圧源：一定電圧の横線1本（時間の情報がないので、横幅は仮に 0〜1000µs）。
 /// 動かせる点：線の真ん中の1点を縦にだけ（0.1 刻み）。電圧が変わる
 /// </summary>
 public class DcSourceSeriesConverter : SeriesConverter<DcSourceData>
