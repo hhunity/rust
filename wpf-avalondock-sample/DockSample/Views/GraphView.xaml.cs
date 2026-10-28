@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Windows;
 using System.Windows.Controls;
 using DockSample.ViewModels;
 
@@ -43,6 +44,31 @@ public partial class GraphView : UserControl
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(GraphViewModel.YLabel)) Redraw();
+    }
+
+    // ===== 拡大・縮小（表示範囲を変えるだけで、データは変えないので ViewModel は通さない） =====
+
+    /// <summary>1回押したときの倍率</summary>
+    private const double ZoomStep = 1.5;
+
+    /// <summary>拡大：今の表示の中心を保ったまま、縦横とも 1.5 倍に拡大</summary>
+    private void ZoomIn_Click(object sender, RoutedEventArgs e) => Zoom(ZoomStep);
+
+    /// <summary>縮小：今の表示の中心を保ったまま、縦横とも 1/1.5 に縮小</summary>
+    private void ZoomOut_Click(object sender, RoutedEventArgs e) => Zoom(1 / ZoomStep);
+
+    /// <summary>全体表示：データが全部入るように表示範囲を合わせ直す</summary>
+    private void ZoomFit_Click(object sender, RoutedEventArgs e)
+    {
+        Chart.Plot.Axes.AutoScale();
+        Chart.Refresh();
+    }
+
+    /// <summary>frac &gt; 1 で拡大、&lt; 1 で縮小</summary>
+    private void Zoom(double frac)
+    {
+        Chart.Plot.Axes.Zoom(frac, frac);
+        Chart.Refresh();
     }
 
     private void Redraw()

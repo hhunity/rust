@@ -175,6 +175,14 @@
 
             <ScottPlot:WpfPlot x:Name="Chart" Grid.Row="0" />
 
+            <!-- グラフの右上に重ねる：拡大・縮小・全体表示（見た目だけの操作なので、処理はコードビハインド） -->
+            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,6,6,0"
+                        HorizontalAlignment="Right" VerticalAlignment="Top">
+                <Button Content="＋" Width="28" Click="ZoomIn_Click" ToolTip="拡大" />
+                <Button Content="－" Width="28" Margin="2,0,0,0" Click="ZoomOut_Click" ToolTip="縮小" />
+                <Button Content="全体" Padding="6,0" Margin="2,0,0,0" Click="ZoomFit_Click" ToolTip="全体を表示" />
+            </StackPanel>
+
             <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
                           Background="#EEEEEE" ResizeBehavior="PreviousAndNext" />
 
