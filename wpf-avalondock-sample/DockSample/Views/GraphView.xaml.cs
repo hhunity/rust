@@ -35,6 +35,18 @@ public partial class GraphView : UserControl
     private static readonly ScottPlot.Color ZeroLineColor = ScottPlot.Color.FromHex("#555555");
     private static readonly ScottPlot.Color HighlightColor = ScottPlot.Color.FromHex("#E67E22");
 
+    /// <summary>
+    /// 波形の線の色（機種によって線が複数あるときは、この順に使う）。
+    /// 指定しないと ScottPlot が「足した順」に色を割り当てるので、補助線の数などで色が変わってしまう
+    /// </summary>
+    private static readonly ScottPlot.Color[] LineColors =
+    {
+        ScottPlot.Color.FromHex("#34495E"),   // 濃い紺
+        ScottPlot.Color.FromHex("#27AE60"),   // 緑
+        ScottPlot.Color.FromHex("#8E44AD"),   // 紫
+        ScottPlot.Color.FromHex("#C0392B"),   // 赤
+    };
+
     /// <summary>つまんでいる点（Handles の何番目か）と、今の位置（Snap 済み）</summary>
     private int? _dragging;
     private (double X, double Y) _dragTo;
@@ -205,9 +217,11 @@ public partial class GraphView : UserControl
         }
 
         // 波形：点同士を線でつなぐ（点の印は付けない。点は下の丸で描く）
-        foreach (var s in _vm.Lines)   // 選んだ uuid の線を全部描く（機種によっては複数本）
+        for (var n = 0; n < _vm.Lines.Count; n++)   // 選んだ uuid の線を全部描く（機種によっては複数本）
         {
+            var s = _vm.Lines[n];
             var line = plot.Add.Scatter(s.Xs, s.Ys);
+            line.Color = LineColors[n % LineColors.Length];
             line.LegendText = s.Name;   // 凡例に出す名前
             line.LineWidth = 2;
             line.MarkerSize = 0;
