@@ -13,7 +13,7 @@ namespace DockSample.Views;
 /// グラフ（ScottPlot）。WpfPlot はバインドで描けないので、ViewModel のデータを見てここで描く。
 /// ・表示されたら（Loaded）ViewModel のイベントにつなぎ、外れたら（Unloaded）外す
 ///   （外し忘れると、ずっと残る ViewModel が消えたはずの View を握ったままになる）
-/// ・動かせる点（ViewModel の Handles）を丸で描き、マウスでつまんで動かせる。
+/// ・動かせる点（ViewModel の Handles）を青い丸で描き、マウスでつまんで動かせる（動かせない点は灰色の四角）。
 ///   どの点をどう動かせるか（方向・刻み・範囲）は Handle が持っている（機種ごとの定義が決める）。
 ///   ドラッグ中は丸だけを動かし、離したときに1回だけ ViewModel に書き込む
 /// </summary>
@@ -28,12 +28,12 @@ public partial class GraphView : UserControl
     /// <summary>Handles の i 番目が、上の配列の何番目か（動かせない点は -1）</summary>
     private int[] _dotIndex = Array.Empty<int>();
 
-    /// <summary>色：動かせる点 / 動かせない点 / 軸への補助線 / 時間 0・電圧 0 の線 / 選んでいるセグメント</summary>
-    private static readonly ScottPlot.Color MovableColor = ScottPlot.Color.FromHex("#E67E22");
+    /// <summary>色：動かせる点（青） / 動かせない点（灰） / 軸への補助線 / 時間 0・電圧 0 の線 / 選んでいるセグメント（オレンジ）</summary>
+    private static readonly ScottPlot.Color MovableColor = ScottPlot.Color.FromHex("#2E86DE");
     private static readonly ScottPlot.Color FixedColor = ScottPlot.Color.FromHex("#888888");
     private static readonly ScottPlot.Color GuideColor = ScottPlot.Color.FromHex("#BBBBBB");
     private static readonly ScottPlot.Color ZeroLineColor = ScottPlot.Color.FromHex("#555555");
-    private static readonly ScottPlot.Color HighlightColor = ScottPlot.Color.FromHex("#2E86DE");
+    private static readonly ScottPlot.Color HighlightColor = ScottPlot.Color.FromHex("#E67E22");
 
     /// <summary>つまんでいる点（Handles の何番目か）と、今の位置（Snap 済み）</summary>
     private int? _dragging;
@@ -215,7 +215,7 @@ public partial class GraphView : UserControl
         if (_vm.Lines.Count > 0) plot.ShowLegend();
         else plot.HideLegend();
 
-        // 下の表で選んでいるセグメント：太い青い線と大きめの丸で重ねる（その上に普段の丸が乗るので、輪のように見える）
+        // 下の表で選んでいるセグメント：太いオレンジの線と大きめの丸で重ねる（その上に普段の点が乗るので、輪のように見える）
         foreach (var s in _vm.Highlight)
         {
             var hl = plot.Add.Scatter(s.Xs, s.Ys);
@@ -224,15 +224,12 @@ public partial class GraphView : UserControl
             hl.MarkerSize = 15;
         }
 
-        // 点を丸で描く（線なし。凡例には出さない）：動かせない点は灰色、動かせる点はオレンジ
+        // 点（線なし。凡例には出さない）：動かせない点は灰色の四角、動かせる点は青い丸
+        // ※ ScottPlot の散布図は1つにつき1色・1形なので、色・形ごとに1つずつ作る
         var fixedPoints = _vm.Handles.Where(h => h.IsFixed).ToArray();
         if (fixedPoints.Length > 0)
-        {
-            var fixedDots = plot.Add.Scatter(fixedPoints.Select(h => h.X).ToArray(), fixedPoints.Select(h => h.Y).ToArray());
-            fixedDots.LineWidth = 0;
-            fixedDots.MarkerSize = 9;
-            fixedDots.Color = FixedColor;
-        }
+            AddDots(plot, fixedPoints.Select(h => h.X).ToArray(), fixedPoints.Select(h => h.Y).ToArray(),
+                    FixedColor, ScottPlot.MarkerShape.FilledSquare);
 
         var movable = _vm.Handles.Where(h => !h.IsFixed).ToArray();
         _handleXs = movable.Select(h => h.X).ToArray();
@@ -241,18 +238,27 @@ public partial class GraphView : UserControl
         for (int i = 0, dot = 0; i < _vm.Handles.Count; i++)
             _dotIndex[i] = _vm.Handles[i].IsFixed ? -1 : dot++;
         if (_handleXs.Length > 0)
-        {
-            var dots = plot.Add.Scatter(_handleXs, _handleYs);
-            dots.LineWidth = 0;
-            dots.MarkerSize = 9;
-            dots.Color = MovableColor;
-        }
+            AddDots(plot, _handleXs, _handleYs, MovableColor, ScottPlot.MarkerShape.FilledCircle);
 
         plot.XLabel("時間 (µs)");   // ファイルの Duration は ns だが、グラフは µs（換算は機種ごとの定義が行う）
         plot.YLabel(_vm.YLabel);
         if (keepView) plot.Axes.SetLimits(limits);   // 点を動かしたあとは、今の表示範囲のまま
         else plot.Axes.AutoScale();
         Chart.Refresh();   // これを呼ばないと画面に出ない
+    }
+
+    /// <summary>
+    /// 点だけの散布図（線なし・凡例なし）を足す。
+    /// 渡した配列はそのまま使われるので、あとで中身を書き換えて Refresh すると点が動く（ドラッグ中の表示に使う）
+    /// </summary>
+    private static void AddDots(ScottPlot.Plot plot, double[] xs, double[] ys,
+                                ScottPlot.Color color, ScottPlot.MarkerShape shape, float size = 9)
+    {
+        var dots = plot.Add.Scatter(xs, ys);
+        dots.LineWidth = 0;
+        dots.MarkerSize = size;
+        dots.MarkerShape = shape;
+        dots.Color = color;
     }
 
     /// <summary>補助線（細い灰色の点線）を1本足す</summary>
