@@ -159,6 +159,8 @@ public partial class GraphViewModel : PaneViewModel
 
             var data = DeviceTypes.Create(device);   // 機種に合った型（WaveformData など）で作る
             data.Name = $"新しい波形 {byUuid.Count + 1}";
+            if (data is WaveformData waveform)
+                waveform.Pulses.Add(WaveformEditorViewModel.NewPulse());   // パルス（とセグメント）は必ず1つ以上
             byUuid[uuid] = data;
         });
 

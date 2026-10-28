@@ -42,7 +42,7 @@ public partial class WaveformEditorViewModel : ObservableObject
         var index = _owner.Data<WaveformData>()?.Pulses.Count ?? 0;
         _owner.Write<WaveformData>(d =>
         {
-            d.Pulses.Add(new PulseData());
+            d.Pulses.Add(NewPulse());
             Renumber(d);
         }, $"AddPulse.{Guid.NewGuid()}");   // 追加は毎回別の Undo にする
         Rebuild(index);
@@ -54,7 +54,7 @@ public partial class WaveformEditorViewModel : ObservableObject
     {
         _owner.Write<WaveformData>(d =>
         {
-            d.Pulses.Insert(0, new PulseData());
+            d.Pulses.Insert(0, NewPulse());
             Renumber(d);
         }, $"AddPulseFirst.{Guid.NewGuid()}");
         Rebuild(0);
@@ -89,8 +89,15 @@ public partial class WaveformEditorViewModel : ObservableObject
         JsonSerializer.Deserialize<PulseData>(JsonSerializer.Serialize(pulse, JsonSettingsService.JsonOptions),
                                               JsonSettingsService.JsonOptions)!;
 
-    /// <summary>パルスを削除（行の「削除」ボタンから、行そのものが渡される）</summary>
-    [RelayCommand]
+    /// <summary>新しいパルス（セグメントを1つ持った状態で作る。パルスにはセグメントが必ず1つ以上ある）</summary>
+    public static PulseData NewPulse() => new() { Segments = { NewSegment() } };
+
+    /// <summary>新しいセグメントの初期値</summary>
+    public static SegmentData NewSegment() =>
+        new() { Name = "segment", TargetVoltage = 5, SlewRate = 1, Duration = TimeUnit.UsToNs(10) };
+
+    /// <summary>パルスを削除（行の「削除」ボタンから、行そのものが渡される）。最後の1つは消せない</summary>
+    [RelayCommand(CanExecute = nameof(CanRemovePulse))]
     private void RemovePulse(PulseRowViewModel row)
     {
         _owner.Write<WaveformData>(d =>
@@ -100,6 +107,9 @@ public partial class WaveformEditorViewModel : ObservableObject
         }, $"RemovePulse.{Guid.NewGuid()}");
         Rebuild(Math.Max(0, row.Index - 1));
     }
+
+    /// <summary>パルスが2つ以上あるときだけ消せる（必ず1つは残す）</summary>
+    private bool CanRemovePulse(PulseRowViewModel? row) => Pulses.Count > 1;
 
     /// <summary>選んでいるパルスにセグメントを追加</summary>
     /// <summary>最後に追加（表の上のボタン。セグメントが1つもないときもこれで足せる）</summary>
@@ -123,20 +133,24 @@ public partial class WaveformEditorViewModel : ObservableObject
         _owner.Write<WaveformData>(
             d => d.Pulses[pulse.Index].Segments.Insert(
                 Math.Clamp(index, 0, d.Pulses[pulse.Index].Segments.Count),
-                new SegmentData { Name = "segment", TargetVoltage = 5, SlewRate = 1, Duration = TimeUnit.UsToNs(10) }),
+                NewSegment()),
             $"AddSegment.{Guid.NewGuid()}");
         Rebuild(pulse.Index);
         SelectedSegment = SelectedPulse?.Segments.ElementAtOrDefault(index);   // 入れたセグメントを選ぶ
     }
 
     /// <summary>セグメントを削除（行の「削除」ボタンから、行そのものが渡される）</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanRemoveSegment))]
     private void RemoveSegment(SegmentRowViewModel row)
     {
         _owner.Write<WaveformData>(d => d.Pulses[row.PulseIndex].Segments.RemoveAt(row.Index),
                                    $"RemoveSegment.{Guid.NewGuid()}");
         Rebuild(row.PulseIndex);
     }
+
+    /// <summary>そのパルスにセグメントが2つ以上あるときだけ消せる（必ず1つは残す）</summary>
+    private bool CanRemoveSegment(SegmentRowViewModel? row) =>
+        row is not null && Pulses.ElementAtOrDefault(row.PulseIndex)?.Segments.Count > 1;
 
     /// <summary>今の Current から行を作り直し、select 番目のパルスを選ぶ（番号がずれる追加・削除のあとに呼ぶ）</summary>
     private void Rebuild(int select)
@@ -146,6 +160,10 @@ public partial class WaveformEditorViewModel : ObservableObject
         for (var i = 0; i < (data?.Pulses.Count ?? 0); i++)
             Pulses.Add(new PulseRowViewModel(_owner, i));
         SelectedPulse = Pulses.ElementAtOrDefault(Math.Min(select, Pulses.Count - 1));
+
+        // 数が変わったので、削除ボタンを押せるかどうかを計算し直させる
+        RemovePulseCommand.NotifyCanExecuteChanged();
+        RemoveSegmentCommand.NotifyCanExecuteChanged();
     }
 }
 
