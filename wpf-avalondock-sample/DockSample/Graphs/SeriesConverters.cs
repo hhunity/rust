@@ -48,6 +48,12 @@ public interface ISeriesConverter
 
     /// <summary>選んでいるもの（SegmentSelection など）がグラフのどこかを、線（点付き）で返す。目立たせて描かれる</summary>
     IReadOnlyList<Series> GetHighlight(DeviceData data, object? selection);
+
+    /// <summary>
+    /// 書き換えたあとのデータを、その機種の決まりに合わせて直す（点が重ならないように最小の間隔を空ける など）。
+    /// GraphViewModel が書き換えるたびに、同じ Undo 1回分の中で呼ぶ
+    /// </summary>
+    void Normalize(DeviceData data);
 }
 
 /// <summary>型の判定とキャストをまとめた基底。派生クラスは T 版だけ書けばよい（動かせる点がない機種は Convert だけ）</summary>
@@ -58,11 +64,13 @@ public abstract class SeriesConverter<T> : ISeriesConverter where T : DeviceData
     public IReadOnlyList<Handle> GetHandles(DeviceData data) => GetHandles((T)data);
     public void Move(DeviceData data, Handle handle, double x, double y) => Move((T)data, handle, x, y);
     public IReadOnlyList<Series> GetHighlight(DeviceData data, object? selection) => GetHighlight((T)data, selection);
+    public void Normalize(DeviceData data) => Normalize((T)data);
 
     protected abstract IReadOnlyList<Series> Convert(T data);
     protected virtual IReadOnlyList<Handle> GetHandles(T data) => Array.Empty<Handle>();
     protected virtual void Move(T data, Handle handle, double x, double y) { }
     protected virtual IReadOnlyList<Series> GetHighlight(T data, object? selection) => Array.Empty<Series>();
+    protected virtual void Normalize(T data) { }
 }
 
 /// <summary>
@@ -73,6 +81,7 @@ public abstract class SeriesConverter<T> : ISeriesConverter where T : DeviceData
 ///
 /// 時間 0 の電圧は restingVoltage（最初のセグメントはそこから始まる）。
 /// 動かせる点：最初の点 (0, restingVoltage) 以外の全部の点。縦横とも 0.1 刻み（横は 0.1µs = 100ns、縦は 0.1V）。
+/// 点が重ならないように、隣り合う点の間は少なくとも 0.1µs 空ける（Normalize・ドラッグの範囲）。
 /// ・傾斜の終わりの点（Id "k.ramp"）と、セグメントの終わりの点（Id "k.end"）。k は全パルスを通したセグメントの通し番号
 /// ・動かすのはその点だけ。ほかの点の位置が変わらないように、前後のセグメントのスルーレート・時間を計算し直す
 ///   （ただし同じセグメントの「傾斜の終わり」と「終わり」は同じ電圧なので、縦に動かすと両方動く）
@@ -145,16 +154,19 @@ public class WaveformSeriesConverter : SeriesConverter<WaveformData>
         for (var k = 0; k < shapes.Count; k++)
         {
             var s = shapes[k];
-            // 次のセグメントの傾斜の終わりより右には行けない（追い越すと形が作れない）。
-            // 次が即座に変わる（傾斜なし）なら、次のセグメントの終わりまで動かせる（次は傾斜なしのまま）
+            // 隣の点とは少なくとも Step（0.1µs）空ける（重ならないように）。
+            // 次のセグメントの傾斜の終わりの手前まで。次に傾斜がない（電圧が変わらない）なら、次の終わりの 2 Step 手前まで
+            //（次の電圧が変わって傾斜ができたときに、傾斜と保持それぞれに Step 分の時間を残すため）
             var nextLimit = k + 1 >= shapes.Count ? double.MaxValue
-                          : HasRamp(shapes[k + 1]) ? shapes[k + 1].RampEnd
-                          : shapes[k + 1].End;
+                          : HasRamp(shapes[k + 1]) ? shapes[k + 1].RampEnd - Step
+                          : shapes[k + 1].End - 2 * Step;
 
-            if (!s.Truncated)
-                handles.Add(new Handle($"{k}.ramp", s.RampEnd, s.VEnd, new AxisRule(Step, s.Start, s.End), y));
-            handles.Add(new Handle($"{k}.end", s.End, s.VEnd,
-                                   new AxisRule(Step, s.Truncated ? s.Start : s.RampEnd, nextLimit), y));
+            // 傾斜の終わり：傾斜がある（電圧が変わる）ときだけ。始まり＋Step 〜 終わり－Step
+            if (!s.Truncated && HasRamp(s))
+                handles.Add(new Handle($"{k}.ramp", s.RampEnd, s.VEnd, XRule(s.Start + Step, s.End - Step, s.RampEnd), y));
+            // 終わり：傾斜の終わり（傾斜がなければ始まり）＋Step 〜 nextLimit
+            var endMin = (s.Truncated || !HasRamp(s) ? s.Start : s.RampEnd) + Step;
+            handles.Add(new Handle($"{k}.end", s.End, s.VEnd, XRule(endMin, nextLimit, s.End), y));
         }
         return handles;
     }
@@ -207,6 +219,43 @@ public class WaveformSeriesConverter : SeriesConverter<WaveformData>
         var ys = new List<double> { s.VStart, s.VEnd };
         if (!s.Truncated) { xs.Add(s.End); ys.Add(s.VEnd); }
         return new[] { new Series("選択中", xs.ToArray(), ys.ToArray()) };
+    }
+
+    /// <summary>横方向の決まり。範囲が作れない（最小 &gt; 最大）ほど詰まっているときは、今の位置から動かさない</summary>
+    private static AxisRule XRule(double min, double max, double current) =>
+        min <= max ? new AxisRule(Step, min, max) : new AxisRule(Step, current, current);
+
+    /// <summary>
+    /// 点が重ならないように、隣り合う点の間を少なくとも Step（0.1µs）空ける。
+    /// ・電圧が変わるセグメント：傾斜の時間を Step 以上にする（短すぎればスルーレートを下げる）。
+    ///   保持の時間（duration − 傾斜）も Step 以上にする（短すぎれば duration を伸ばす）
+    /// ・電圧が変わらないセグメント：duration を Step 以上にする
+    /// </summary>
+    protected override void Normalize(WaveformData data)
+    {
+        const double eps = 1e-9;
+        var v = data.RestingVoltage;
+        foreach (var seg in data.Pulses.SelectMany(p => p.Segments))
+        {
+            var dv = Math.Abs(seg.TargetVoltage - v);
+            var duration = Math.Max(0, TimeUnit.NsToUs(seg.Duration));
+            if (dv > eps)
+            {
+                var ramp = seg.SlewRate > 0 ? dv / seg.SlewRate : 0;
+                if (ramp < Step - eps)
+                {
+                    seg.SlewRate = dv / Step;   // 傾斜を Step にする（スルーレートを下げる）
+                    ramp = Step;
+                }
+                if (duration < ramp + Step - eps)
+                    seg.Duration = TimeUnit.UsToNs(Math.Round(ramp + Step, 10));   // 保持を Step 残す
+            }
+            else if (duration < Step - eps)
+            {
+                seg.Duration = TimeUnit.UsToNs(Step);
+            }
+            v = seg.TargetVoltage;
+        }
     }
 
     /// <summary>傾斜があるか（傾斜なし＝セグメントの始まりで即座に変わる）</summary>

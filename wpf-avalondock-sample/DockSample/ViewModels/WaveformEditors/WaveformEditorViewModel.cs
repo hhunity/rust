@@ -172,6 +172,17 @@ public partial class WaveformEditorViewModel : ObservableObject
         row is not null && Pulses.ElementAtOrDefault(row.PulseIndex)?.Segments.Count > 1;
 
     /// <summary>今の Current から行を作り直し、select 番目のパルスを選ぶ（番号がずれる追加・削除のあとに呼ぶ）</summary>
+    /// <summary>
+    /// 表示している値を全部読み直させる（データ側で値が直されたとき用。行は作り直さないので、選択や入力中の状態は残る）
+    /// </summary>
+    public void RefreshValues()
+    {
+        OnPropertyChanged(nameof(RestingVoltage));
+        foreach (var pulse in Pulses)
+            foreach (var segment in pulse.Segments)
+                segment.Refresh();
+    }
+
     private void Rebuild(int select)
     {
         Pulses.Clear();
@@ -255,6 +266,9 @@ public class SegmentRowViewModel : ObservableObject
         get => TimeUnit.NsToUs(Segment?.Duration ?? 0);
         set => Set(DurationUs, value, s => s.Duration = TimeUnit.UsToNs(value));
     }
+
+    /// <summary>全部の値を読み直させる（空の名前で通知すると、この行のバインドが全部読み直される）</summary>
+    public void Refresh() => OnPropertyChanged(string.Empty);
 
     /// <summary>値が変わっていれば Current に書き込む（同じ行の同じ項目の続けての変更は1回分の Undo にまとまる）</summary>
     private void Set<T>(T current, T value, Action<SegmentData> write, [CallerMemberName] string name = "")

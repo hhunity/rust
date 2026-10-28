@@ -319,8 +319,16 @@ public partial class GraphViewModel : PaneViewModel
     public void Write<T>(Action<T> write, string key) where T : DeviceData
     {
         if (CurrentData is not T data) return;
-        _settings.Edit($"Waveforms.{SelectedEntry!.Device}.{SelectedEntry.Uuid}.{key}", _ => write(data));
+        var converter = _converter;
+        _settings.Edit($"Waveforms.{SelectedEntry!.Device}.{SelectedEntry.Uuid}.{key}", _ =>
+        {
+            write(data);
+            converter?.Normalize(data);   // 機種の決まりに合わせて直す（点の間隔など）。Undo は書き換えと合わせて1回分
+        });
         UpdateSeries();
+
+        // 直した値（ほかの行の値も変わることがある）を下の表にも出す
+        (Editor as WaveformEditorViewModel)?.RefreshValues();
     }
 
     /// <summary>選んでいる機種に合った編集欄を作り直す</summary>
