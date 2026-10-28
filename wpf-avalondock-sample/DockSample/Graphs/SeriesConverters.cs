@@ -5,6 +5,9 @@ namespace DockSample.Graphs;
 /// <summary>グラフの線1本（ScottPlot の型は使わない）</summary>
 public record Series(string Name, double[] Xs, double[] Ys);
 
+/// <summary>下の編集欄で選んでいるセグメント（グラフで目立たせる）。Pulse は何番目のパルス、Segment はその中の何番目か</summary>
+public record SegmentSelection(int Pulse, int Segment);
+
 /// <summary>1方向（X または Y）の動かし方：刻みと範囲</summary>
 public record AxisRule(double Step, double Min = double.MinValue, double Max = double.MaxValue)
 {
@@ -42,6 +45,9 @@ public interface ISeriesConverter
 
     /// <summary>handle を (x, y) に動かした結果をデータに書き込む（x, y は Snap 済み）</summary>
     void Move(DeviceData data, Handle handle, double x, double y);
+
+    /// <summary>選んでいるもの（SegmentSelection など）がグラフのどこかを、線（点付き）で返す。目立たせて描かれる</summary>
+    IReadOnlyList<Series> GetHighlight(DeviceData data, object? selection);
 }
 
 /// <summary>型の判定とキャストをまとめた基底。派生クラスは T 版だけ書けばよい（動かせる点がない機種は Convert だけ）</summary>
@@ -51,10 +57,12 @@ public abstract class SeriesConverter<T> : ISeriesConverter where T : DeviceData
     public IReadOnlyList<Series> Convert(DeviceData data) => Convert((T)data);
     public IReadOnlyList<Handle> GetHandles(DeviceData data) => GetHandles((T)data);
     public void Move(DeviceData data, Handle handle, double x, double y) => Move((T)data, handle, x, y);
+    public IReadOnlyList<Series> GetHighlight(DeviceData data, object? selection) => GetHighlight((T)data, selection);
 
     protected abstract IReadOnlyList<Series> Convert(T data);
     protected virtual IReadOnlyList<Handle> GetHandles(T data) => Array.Empty<Handle>();
     protected virtual void Move(T data, Handle handle, double x, double y) { }
+    protected virtual IReadOnlyList<Series> GetHighlight(T data, object? selection) => Array.Empty<Series>();
 }
 
 /// <summary>
@@ -180,6 +188,23 @@ public class WaveformSeriesConverter : SeriesConverter<WaveformData>
                 SetRamp(next.Segment, y, next.VEnd, nextRampEnd - x);
             }
         }
+    }
+
+    /// <summary>選んでいるセグメントの部分（始まり → 傾斜の終わり → 終わり）</summary>
+    protected override IReadOnlyList<Series> GetHighlight(WaveformData data, object? selection)
+    {
+        if (selection is not SegmentSelection sel || sel.Pulse >= data.Pulses.Count) return Array.Empty<Series>();
+
+        // 全パルスを通した通し番号にする（Layout はパルスをまたいで並べているので）
+        var k = data.Pulses.Take(sel.Pulse).Sum(p => p.Segments.Count) + sel.Segment;
+        var shapes = Layout(data);
+        if (sel.Segment >= data.Pulses[sel.Pulse].Segments.Count || k >= shapes.Count) return Array.Empty<Series>();
+
+        var s = shapes[k];
+        var xs = new List<double> { s.Start, s.RampEnd };
+        var ys = new List<double> { s.VStart, s.VEnd };
+        if (!s.Truncated) { xs.Add(s.End); ys.Add(s.VEnd); }
+        return new[] { new Series("選択中", xs.ToArray(), ys.ToArray()) };
     }
 
     /// <summary>傾斜があるか（傾斜なし＝セグメントの始まりで即座に変わる）</summary>

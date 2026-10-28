@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using DockSample.Graphs;
 using DockSample.Services;
 using DockSample.Settings;
 
@@ -20,10 +21,11 @@ public partial class WaveformEditorViewModel : ObservableObject
 {
     private readonly GraphViewModel _owner;
 
-    public WaveformEditorViewModel(GraphViewModel owner, int? selectPulse)
+    public WaveformEditorViewModel(GraphViewModel owner, int? selectPulse, int? selectSegment = null)
     {
         _owner = owner;
         Rebuild(selectPulse ?? 0);
+        if (selectSegment is { } s) SelectedSegment = SelectedPulse?.Segments.ElementAtOrDefault(s);
     }
 
     public ObservableCollection<PulseRowViewModel> Pulses { get; } = new();
@@ -34,6 +36,10 @@ public partial class WaveformEditorViewModel : ObservableObject
 
     /// <summary>表で選んでいるセグメント（追加したセグメントを選んだ状態にするのに使う）</summary>
     [ObservableProperty] private SegmentRowViewModel? _selectedSegment;
+
+    /// <summary>選んだセグメントを、グラフで目立たせる</summary>
+    partial void OnSelectedSegmentChanged(SegmentRowViewModel? value) =>
+        _owner.SetSelection(value is null ? null : new SegmentSelection(value.PulseIndex, value.Index));
 
     /// <summary>パルスを追加（最後に足して、それを選ぶ）</summary>
     [RelayCommand]

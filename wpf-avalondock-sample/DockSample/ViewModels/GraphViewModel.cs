@@ -108,6 +108,28 @@ public partial class GraphViewModel : PaneViewModel
     /// <summary>線が変わった（View はこれを受けて描き直す）</summary>
     public event EventHandler? DataChanged;
 
+    /// <summary>下の編集欄で選んでいるもの（SegmentSelection など。グラフで目立たせる）</summary>
+    private object? _selection;
+
+    /// <summary>選んでいるものがグラフのどこか（機種ごとの定義が決める。何も選んでいなければ空）</summary>
+    public IReadOnlyList<Series> Highlight { get; private set; } = Array.Empty<Series>();
+
+    /// <summary>目立たせる部分だけが変わった（View は表示範囲を保ったまま描き直す）</summary>
+    public event EventHandler? HighlightChanged;
+
+    /// <summary>編集欄から：選んでいるものが変わった</summary>
+    public void SetSelection(object? selection)
+    {
+        _selection = selection;
+        UpdateHighlight();
+        HighlightChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void UpdateHighlight() =>
+        Highlight = CurrentData is { } data && _converter is not null
+            ? _converter.GetHighlight(data, _selection)
+            : Array.Empty<Series>();
+
     /// <summary>選んでいる uuid の今のデータ（毎回 Current から探す）</summary>
     public DeviceData? CurrentData =>
         SelectedEntry is { } e
@@ -126,7 +148,8 @@ public partial class GraphViewModel : PaneViewModel
     private void Load()
     {
         var selected = SelectedEntry;
-        var pulse = (Editor as WaveformEditorViewModel)?.SelectedPulse?.Index;   // 編集中のパルスも選び直す
+        var pulse = (Editor as WaveformEditorViewModel)?.SelectedPulse?.Index;     // 編集中のパルスと
+        var segment = (Editor as WaveformEditorViewModel)?.SelectedSegment?.Index; // セグメントも選び直す
 
         Entries.Clear();
         foreach (var (device, byUuid) in _settings.Current.Waveforms.Waveforms)
@@ -138,7 +161,7 @@ public partial class GraphViewModel : PaneViewModel
         SelectedEntry = same ?? Entries.FirstOrDefault();
 
         // 選び直した場所が同じでも、中身は変わっているかもしれないので作り直す
-        RebuildEditor(same is not null ? pulse : null);
+        RebuildEditor(same is not null ? pulse : null, same is not null ? segment : null);
         OnPropertyChanged(nameof(Name));
         UpdateSeries();
     }
@@ -301,13 +324,16 @@ public partial class GraphViewModel : PaneViewModel
     }
 
     /// <summary>選んでいる機種に合った編集欄を作り直す</summary>
-    private void RebuildEditor(int? keepPulse) =>
+    private void RebuildEditor(int? keepPulse, int? keepSegment = null)
+    {
+        _selection = null;   // 新しい編集欄で選び直されたら、また SetSelection が来る
         Editor = CurrentData switch
         {
-            WaveformData => new WaveformEditorViewModel(this, keepPulse),
+            WaveformData => new WaveformEditorViewModel(this, keepPulse, keepSegment),
             DcSourceData => new DcSourceEditorViewModel(this),
             _            => null,   // 編集欄のない機種（表にない機種など）
         };
+    }
 
     /// <summary>
     /// グラフ上の点を動かした（マウスを離したときに View から1回だけ呼ばれる。x, y は Snap 済み）。
@@ -319,7 +345,10 @@ public partial class GraphViewModel : PaneViewModel
         Write<DeviceData>(d => converter.Move(d, handle, x, y), $"Handle.{handle.Id}");
 
         // 下の編集欄の値も変わったので作り直す（選んでいたパルスはそのまま）
-        RebuildEditor((Editor as WaveformEditorViewModel)?.SelectedPulse?.Index);
+        var editor = Editor as WaveformEditorViewModel;
+        RebuildEditor(editor?.SelectedPulse?.Index, editor?.SelectedSegment?.Index);
+        UpdateHighlight();
+        HighlightChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void UpdateSeries()
@@ -328,6 +357,7 @@ public partial class GraphViewModel : PaneViewModel
         _converter = data is null ? null : _converters.FirstOrDefault(c => c.CanConvert(data));
         Lines = data is not null && _converter is not null ? _converter.Convert(data) : Array.Empty<Series>();
         Handles = data is not null && _converter is not null ? _converter.GetHandles(data) : Array.Empty<Handle>();
+        UpdateHighlight();
         OnPropertyChanged(nameof(HasNoSeries));
         DataChanged?.Invoke(this, EventArgs.Empty);
     }

@@ -28,10 +28,12 @@ public partial class GraphView : UserControl
     /// <summary>Handles の i 番目が、上の配列の何番目か（動かせない点は -1）</summary>
     private int[] _dotIndex = Array.Empty<int>();
 
-    /// <summary>点の色：動かせる点 / 動かせない点 / 軸への補助線</summary>
+    /// <summary>色：動かせる点 / 動かせない点 / 軸への補助線 / 時間 0・電圧 0 の線 / 選んでいるセグメント</summary>
     private static readonly ScottPlot.Color MovableColor = ScottPlot.Color.FromHex("#E67E22");
     private static readonly ScottPlot.Color FixedColor = ScottPlot.Color.FromHex("#888888");
     private static readonly ScottPlot.Color GuideColor = ScottPlot.Color.FromHex("#BBBBBB");
+    private static readonly ScottPlot.Color ZeroLineColor = ScottPlot.Color.FromHex("#555555");
+    private static readonly ScottPlot.Color HighlightColor = ScottPlot.Color.FromHex("#2E86DE");
 
     /// <summary>つまんでいる点（Handles の何番目か）と、今の位置（Snap 済み）</summary>
     private int? _dragging;
@@ -62,18 +64,27 @@ public partial class GraphView : UserControl
         if (_vm is not null)
         {
             _vm.DataChanged -= OnDataChanged;
+            _vm.HighlightChanged -= OnHighlightChanged;
             _vm.PropertyChanged -= OnVmPropertyChanged;
         }
         _vm = vm;
         if (_vm is not null)
         {
             _vm.DataChanged += OnDataChanged;
+            _vm.HighlightChanged += OnHighlightChanged;
             _vm.PropertyChanged += OnVmPropertyChanged;
             Redraw();
         }
     }
 
     private void OnDataChanged(object? sender, EventArgs e) => Redraw();
+
+    /// <summary>選んでいるセグメントが変わった：表示範囲はそのままで描き直す</summary>
+    private void OnHighlightChanged(object? sender, EventArgs e)
+    {
+        _keepView = true;
+        Redraw();
+    }
 
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
@@ -177,6 +188,15 @@ public partial class GraphView : UserControl
         var limits = plot.Axes.GetLimits();
         _keepView = false;
         plot.Clear();
+
+        // 時間 0（縦）と電圧 0（横）の線
+        var zeroX = plot.Add.VerticalLine(0);
+        zeroX.Color = ZeroLineColor;
+        zeroX.LineWidth = 1;
+        var zeroY = plot.Add.HorizontalLine(0);
+        zeroY.Color = ZeroLineColor;
+        zeroY.LineWidth = 1;
+
         // 点から軸（時間 0 の縦軸・電圧 0 の横軸）への補助線（点線）。一番下に描くので先に足す
         foreach (var h in _vm.Handles)
         {
@@ -194,6 +214,15 @@ public partial class GraphView : UserControl
         }
         if (_vm.Lines.Count > 0) plot.ShowLegend();
         else plot.HideLegend();
+
+        // 下の表で選んでいるセグメント：太い青い線と大きめの丸で重ねる（その上に普段の丸が乗るので、輪のように見える）
+        foreach (var s in _vm.Highlight)
+        {
+            var hl = plot.Add.Scatter(s.Xs, s.Ys);
+            hl.Color = HighlightColor;
+            hl.LineWidth = 5;
+            hl.MarkerSize = 15;
+        }
 
         // 点を丸で描く（線なし。凡例には出さない）：動かせない点は灰色、動かせる点はオレンジ
         var fixedPoints = _vm.Handles.Where(h => h.IsFixed).ToArray();
