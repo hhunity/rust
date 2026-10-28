@@ -1,4 +1,6 @@
+using System.Collections;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -48,7 +50,7 @@ public partial class DeviceEntry : ObservableObject
 /// ・編集欄（Editor）は機種ごとの ViewModel（ViewModels/WaveformEditors/。見た目は Views/WaveformEditors/）。値は持たず、毎回 Current を読み書きする
 /// ・グラフを描くのは View（GraphView のコードビハインド）。ここは描く線（Lines）だけを用意する
 /// </summary>
-public partial class GraphViewModel : PaneViewModel
+public partial class GraphViewModel : PaneViewModel, INotifyDataErrorInfo
 {
     private readonly ISettingsService _settings;
     private readonly IDialogService _dialogs;
@@ -81,16 +83,52 @@ public partial class GraphViewModel : PaneViewModel
     [ObservableProperty] private object? _editor;
 
     /// <summary>選んでいるものの表示名（どの機種にもある）</summary>
+    /// <remarks>
+    /// ほかの波形と同じ名前にはできない（エラーにして、設定には書かない）。
+    /// エラーは INotifyDataErrorInfo で出すので、入力欄に赤枠とメッセージが出る（Input.TextBox の ErrorTemplate）
+    /// </remarks>
     public string Name
     {
         get => CurrentData?.Name ?? "";
         set
         {
-            if (CurrentData is null || value == Name) return;
+            if (CurrentData is null) return;
+
+            SetNameError(IsNameUsed(value) ? $"「{value.Trim()}」はほかの波形で使われています" : null);
+            if (_nameError is not null || value == Name) return;   // 重なっているあいだは書き込まない
+
             Write<DeviceData>(d => d.Name = value, "Name");
             if (SelectedEntry is { } e) e.Name = value;   // コンボボックスの表示も変える
             OnPropertyChanged();
         }
+    }
+
+    /// <summary>選んでいる波形以外に、同じ名前の波形があるか（空の名前は重なってもよい）</summary>
+    private bool IsNameUsed(string name)
+    {
+        name = name.Trim();
+        return name.Length > 0 &&
+               Entries.Any(e => !e.IsSameLocation(SelectedEntry) && string.Equals(e.Name.Trim(), name, StringComparison.Ordinal));
+    }
+
+    // ===== 名前のエラー（INotifyDataErrorInfo） =====
+
+    private string? _nameError;
+
+    public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
+
+    /// <summary>エラーがあるか（上のボタンのエラーの印にも使われる）</summary>
+    public override bool HasErrors => _nameError is not null;
+
+    public IEnumerable GetErrors(string? propertyName) =>
+        propertyName == nameof(Name) && _nameError is not null ? new[] { _nameError } : Array.Empty<string>();
+
+    private void SetNameError(string? error)
+    {
+        if (_nameError == error) return;
+        _nameError = error;
+        ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(nameof(Name)));
+        OnPropertyChanged(nameof(HasErrors));
     }
 
     /// <summary>グラフに出す線（選んだ uuid の中身を変換したもの）</summary>
@@ -140,6 +178,7 @@ public partial class GraphViewModel : PaneViewModel
 
     partial void OnSelectedEntryChanged(DeviceEntry? value)
     {
+        SetNameError(null);   // 別の波形を選んだら、入力中だった名前のエラーは消す
         RebuildEditor(keepPulse: null);
         OnPropertyChanged(nameof(Name));
         UpdateSeries();
@@ -181,7 +220,11 @@ public partial class GraphViewModel : PaneViewModel
                 all[device] = byUuid = new Dictionary<string, DeviceData>();   // その機種が初めてなら辞書から作る
 
             var data = DeviceTypes.Create(device);   // 機種に合った型（WaveformData など）で作る
-            data.Name = $"新しい波形 {byUuid.Count + 1}";
+            // ほかの波形と重ならない名前にする（新しい波形 1, 2, ...）
+            var names = all.Values.SelectMany(d => d.Values).Select(d => d.Name).ToHashSet();
+            var number = 1;
+            while (names.Contains($"新しい波形 {number}")) number++;
+            data.Name = $"新しい波形 {number}";
             if (data is WaveformData waveform)
                 waveform.Pulses.Add(WaveformEditorViewModel.NewPulse());   // パルス（とセグメント）は必ず1つ以上
             byUuid[uuid] = data;
