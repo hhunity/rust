@@ -45,7 +45,7 @@ public partial class DeviceEntry : ObservableObject
 /// ・データ → 線 の変換は機種ごとの ISeriesConverter（Graphs/SeriesConverters.cs）。ここは機種を知らない
 /// ・設定は「元に戻す」「開く」で Current が丸ごと差し替わるので、データそのものは覚えておかず、
 ///   場所（デバイス名・uuid）で覚えて、使うたびに Current から探し直す（CurrentData）
-/// ・編集欄（Editor）は機種ごとの ViewModel（WaveformEditors.cs）。値は持たず、毎回 Current を読み書きする
+/// ・編集欄（Editor）は機種ごとの ViewModel（ViewModels/WaveformEditors/。見た目は Views/WaveformEditors/）。値は持たず、毎回 Current を読み書きする
 /// ・グラフを描くのは View（GraphView のコードビハインド）。ここは描く線（Lines）だけを用意する
 /// </summary>
 public partial class GraphViewModel : PaneViewModel

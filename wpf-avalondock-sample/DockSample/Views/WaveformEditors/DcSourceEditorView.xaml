@@ -1,0 +1,33 @@
+<UserControl x:Class="DockSample.Views.WaveformEditors.DcSourceEditorView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:DockSample.ViewModels"
+             xmlns:controls="clr-namespace:DockSample.Controls"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance Type=vm:DcSourceEditorViewModel}"
+             d:DesignWidth="700" d:DesignHeight="240">
+    <!-- 電圧源の編集欄：電圧と電流制限。
+         DataContext は GraphView.xaml の DataTemplate から DcSourceEditorViewModel が自動で入る -->
+
+    <Grid Margin="8" VerticalAlignment="Top" HorizontalAlignment="Left">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="電圧 (V)" Style="{StaticResource Text.FieldLabel}" />
+        <controls:NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding Voltage}"
+                                Minimum="-1000" Maximum="1000" Increment="0.1" DecimalPlaces="2"
+                                Width="120" Margin="0,0,0,6" Style="{StaticResource Input.Numeric}" />
+
+        <TextBlock Grid.Row="1" Text="電流制限 (A)" Style="{StaticResource Text.FieldLabel}" />
+        <controls:NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding LimitCurrent}"
+                                Minimum="0" Maximum="100" Increment="0.01" DecimalPlaces="2"
+                                Width="120" Margin="0,0,0,6" Style="{StaticResource Input.Numeric}" />
+    </Grid>
+</UserControl>

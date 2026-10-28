@@ -77,7 +77,8 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - 「エクスポート...」で選んでいる波形1つを別の JSON ファイルに書き出し、「インポート...」で JSON ファイルの波形を追加する
     - ファイルの形は waveforms.json の `"waveforms"` の中身と同じ（`{ "デバイス名": { "uuid": { ... } } }`、中身が1つだけ）。デバイス名も入るので、読み込むときに型が決まる。waveforms.json そのものもインポートできる
     - インポートで同じ機種に同じ uuid があれば、新しい uuid を付けて別のものとして足す。インポートも元に戻すで取り消せる
-  - 下の編集欄（`ViewModels/WaveformEditors.cs`）で中身を編集。機種ごとに編集欄の ViewModel と DataTemplate（`GraphView.xaml`）がある
+  - 下の編集欄で中身を編集。機種ごとに ViewModel（`ViewModels/WaveformEditors/`）と View（`Views/WaveformEditors/` の UserControl）が1組ずつあり、`GraphView.xaml` の DataTemplate で結び付ける
+    - 機種を増やすとき：データクラスと `DeviceTypes` の表 → グラフの定義（`SeriesConverter<T>`）と DI → 編集欄の ViewModel と `GraphViewModel.RebuildEditor` の1行 → 編集欄の UserControl と DataTemplate の1つ
     - 単位：ファイルの時間（duration）は ns、スルーレートは V/µs。グラフと表では時間を µs で見せる（換算は `TimeUnit`）
     - パルスを持つ機種：上に「初期電圧 (V)」（時間 0 での電圧。ファイルの `restingVoltage`。変えるとグラフの始まりの点が動く）、左にパルスの一覧（先頭に追加・最後に追加・コピー・削除。コピーはすぐ下に複製）。パルスもセグメントも必ず1つ以上（最後の1つは削除ボタンが押せない。新しいパルス・新しい波形はセグメントを1つ持った状態で作る）。パルスの名前は並び順で Pulse0, Pulse1, ... と自動で付き、追加・コピー・削除のたびに振り直す（画面からは変えられない）、右に選んだパルスの名前とセグメントの表（各行の「↑追加」「↓追加」でその行の前・後ろに追加、「＋ 最後に追加」、削除、値の編集）。数値のセルは編集中にマウスホイールで増減（ホイールで 1、Ctrl＋ホイールで 0.1。`Controls/NumericWheel`）
     - 電圧源：電圧と電流制限

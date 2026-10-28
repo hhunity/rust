@@ -9,7 +9,8 @@ using DockSample.Settings;
 
 namespace DockSample.ViewModels;
 
-// グラフペインの下の編集欄（機種ごと）。
+// グラフペインの下の編集欄（パルスを持つ機種）。見た目は Views/WaveformEditors/WaveformEditorView.xaml。
+// 機種ごとに ViewModel（このフォルダ）と View（Views/WaveformEditors）を1組ずつ作る。
 //
 // どれも値を自分では持たず、プロパティの get / set で毎回 GraphViewModel 経由で Current を読み書きする。
 // ・値を写して持たないので、画面と設定がずれない（読み込み中に書き戻さないための仕組みも要らない）
@@ -261,37 +262,5 @@ public class SegmentRowViewModel : ObservableObject
         if (Segment is null || EqualityComparer<T>.Default.Equals(current, value)) return;
         _owner.Write<WaveformData>(d => write(d.Pulses[PulseIndex].Segments[Index]), $"{PulseIndex}.{Index}.{name}");
         OnPropertyChanged(name);
-    }
-}
-
-/// <summary>電圧源の編集欄</summary>
-public class DcSourceEditorViewModel : ObservableObject
-{
-    private readonly GraphViewModel _owner;
-
-    public DcSourceEditorViewModel(GraphViewModel owner) => _owner = owner;
-
-    private DcSourceData? Data => _owner.Data<DcSourceData>();
-
-    public double Voltage
-    {
-        get => Data?.Voltage ?? 0;
-        set
-        {
-            if (Data is null || value == Voltage) return;
-            _owner.Write<DcSourceData>(d => d.Voltage = value, nameof(Voltage));
-            OnPropertyChanged();
-        }
-    }
-
-    public double LimitCurrent
-    {
-        get => Data?.LimitCurrent ?? 0;
-        set
-        {
-            if (Data is null || value == LimitCurrent) return;
-            _owner.Write<DcSourceData>(d => d.LimitCurrent = value, nameof(LimitCurrent));
-            OnPropertyChanged();
-        }
     }
 }
