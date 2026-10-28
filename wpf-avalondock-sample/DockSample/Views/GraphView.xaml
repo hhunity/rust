@@ -12,6 +12,18 @@
     <!-- DataContext は DataTemplate から GraphViewModel が自動で入る。グラフはコードビハインドで描く -->
 
     <UserControl.Resources>
+        <!-- セグメントの表の数値のセルを編集中の TextBox：フォーカスがあるときマウスホイールで増減（Controls/NumericWheel） -->
+        <!-- BasedOn：DataGrid が編集中のセルに使う既定の見た目（枠なし・余白なし）を引き継ぐ -->
+        <Style x:Key="SegmentNumberEditor" TargetType="TextBox"
+               BasedOn="{x:Static DataGridTextColumn.DefaultEditingElementStyle}">
+            <Setter Property="controls:NumericWheel.Increment" Value="0.1" />
+            <Setter Property="controls:NumericWheel.LargeIncrement" Value="1" />
+        </Style>
+        <!-- 0 未満にならない数値（スルーレート・時間） -->
+        <Style x:Key="SegmentPositiveNumberEditor" TargetType="TextBox" BasedOn="{StaticResource SegmentNumberEditor}">
+            <Setter Property="controls:NumericWheel.Minimum" Value="0" />
+        </Style>
+
         <!--
           下の編集欄：Editor の型ごとに表示を切り替える（ContentControl が型を見て選ぶ）。
           機種を増やして編集欄も作ったら、ここに DataTemplate を足す。
@@ -84,10 +96,14 @@
                             <DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="2*" />
                             <!-- 数値の列はセルの編集を終えたとき（Enter・別のセルへ移動）に反映される -->
                             <!-- 数値は小数2桁まで表示（足りなければ 0 で埋める：5 → 5.00）。StringFormat は見せ方だけで、値そのものは丸めない -->
-                            <DataGridTextColumn Header="目標電圧 (V)" Binding="{Binding TargetVoltage, StringFormat=F2}" Width="*" />
-                            <DataGridTextColumn Header="スルーレート (V/µs)" Binding="{Binding SlewRate, StringFormat=F2}" Width="*" />
+                            <!-- 編集中（セルの中で入力中）はマウスホイールで増減できる：ホイールで 1、Ctrl＋ホイールで 0.1 ずつ（NumericWheel） -->
+                            <DataGridTextColumn Header="目標電圧 (V)" Binding="{Binding TargetVoltage, StringFormat=F2}" Width="*"
+                                                EditingElementStyle="{StaticResource SegmentNumberEditor}" />
+                            <DataGridTextColumn Header="スルーレート (V/µs)" Binding="{Binding SlewRate, StringFormat=F2}" Width="*"
+                                                EditingElementStyle="{StaticResource SegmentPositiveNumberEditor}" />
                             <!-- ファイルは ns、ここは µs で見せる（換算は SegmentRowViewModel.DurationUs） -->
-                            <DataGridTextColumn Header="時間 (µs)" Binding="{Binding DurationUs, StringFormat=F2}" Width="*" />
+                            <DataGridTextColumn Header="時間 (µs)" Binding="{Binding DurationUs, StringFormat=F2}" Width="*"
+                                                EditingElementStyle="{StaticResource SegmentPositiveNumberEditor}" />
                             <DataGridTemplateColumn Width="Auto" IsReadOnly="True">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <!-- 行の DataContext はセグメントの行なので、表（DataGrid）の ViewModel のコマンドを辿って呼ぶ -->
