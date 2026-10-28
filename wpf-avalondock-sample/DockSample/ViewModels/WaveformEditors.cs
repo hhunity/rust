@@ -29,8 +29,14 @@ public partial class WaveformEditorViewModel : ObservableObject
     public ObservableCollection<PulseRowViewModel> Pulses { get; } = new();
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(AddSegmentCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AddSegmentBeforeCommand))]
+    [NotifyCanExecuteChangedFor(nameof(AddSegmentAfterCommand))]
     private PulseRowViewModel? _selectedPulse;
+
+    /// <summary>表で選んでいるセグメント（追加するときの基準）</summary>
+    [ObservableProperty] private SegmentRowViewModel? _selectedSegment;
+
+    partial void OnSelectedPulseChanged(PulseRowViewModel? value) => SelectedSegment = null;
 
     /// <summary>パルスを追加（最後に足して、それを選ぶ）</summary>
     [RelayCommand]
@@ -99,17 +105,29 @@ public partial class WaveformEditorViewModel : ObservableObject
     }
 
     /// <summary>選んでいるパルスにセグメントを追加</summary>
+    /// <summary>選んでいるセグメントの前に追加（選んでいなければ先頭）</summary>
     [RelayCommand(CanExecute = nameof(CanAddSegment))]
-    private void AddSegment()
+    private void AddSegmentBefore() => InsertSegment(SelectedSegment?.Index ?? 0);
+
+    /// <summary>選んでいるセグメントの後ろに追加（選んでいなければ最後）</summary>
+    [RelayCommand(CanExecute = nameof(CanAddSegment))]
+    private void AddSegmentAfter() =>
+        InsertSegment(SelectedSegment is { } s ? s.Index + 1 : SelectedPulse?.Segments.Count ?? 0);
+
+    private bool CanAddSegment() => SelectedPulse is not null;
+
+    /// <summary>選んでいるパルスの index 番目にセグメントを入れて、それを選ぶ</summary>
+    private void InsertSegment(int index)
     {
         if (SelectedPulse is not { } pulse) return;
         _owner.Write<WaveformData>(
-            d => d.Pulses[pulse.Index].Segments.Add(new SegmentData { Name = "segment", TargetVoltage = 5, SlewRate = 1, Duration = TimeUnit.UsToNs(10) }),
+            d => d.Pulses[pulse.Index].Segments.Insert(
+                Math.Clamp(index, 0, d.Pulses[pulse.Index].Segments.Count),
+                new SegmentData { Name = "segment", TargetVoltage = 5, SlewRate = 1, Duration = TimeUnit.UsToNs(10) }),
             $"AddSegment.{Guid.NewGuid()}");
         Rebuild(pulse.Index);
+        SelectedSegment = SelectedPulse?.Segments.ElementAtOrDefault(index);   // 入れたセグメントを選ぶ
     }
-
-    private bool CanAddSegment() => SelectedPulse is not null;
 
     /// <summary>セグメントを削除（行の「削除」ボタンから、行そのものが渡される）</summary>
     [RelayCommand]
