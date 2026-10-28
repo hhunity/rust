@@ -71,7 +71,8 @@ public abstract class SeriesConverter<T> : ISeriesConverter where T : DeviceData
 ///
 /// グラフの時間は µs（ファイルの Duration は ns なので換算する。SlewRate は V/µs のまま使える）。
 ///
-/// 動かせる点：最初の (0, 0) 以外の全部の点。縦横とも 0.1 刻み（横は 0.1µs = 100ns、縦は 0.1V）。
+/// 時間 0 の電圧は restingVoltage（最初のセグメントはそこから始まる）。
+/// 動かせる点：最初の点 (0, restingVoltage) 以外の全部の点。縦横とも 0.1 刻み（横は 0.1µs = 100ns、縦は 0.1V）。
 /// ・傾斜の終わりの点（Id "k.ramp"）と、セグメントの終わりの点（Id "k.end"）。k は全パルスを通したセグメントの通し番号
 /// ・動かすのはその点だけ。ほかの点の位置が変わらないように、前後のセグメントのスルーレート・時間を計算し直す
 ///   （ただし同じセグメントの「傾斜の終わり」と「終わり」は同じ電圧なので、縦に動かすと両方動く）
@@ -83,7 +84,7 @@ public class WaveformSeriesConverter : SeriesConverter<WaveformData>
 
     /// <summary>
     /// セグメント1つ分の形（全パルスを通した時刻。単位は µs）。
-    /// 0V（または前の終わりの電圧）の Start から、RampEnd まで傾斜し、End まで VEnd を保つ。
+    /// restingVoltage（または前の終わりの電圧）の Start から、RampEnd まで傾斜し、End まで VEnd を保つ。
     /// SlewRate は V/µs の傾き（0 以下なら即座に変わる）、Duration はそのセグメントの長さ（ファイルは ns）。
     ///   傾斜が Duration に収まらなければ途中で打ち切る（そのときは RampEnd == End、VEnd は途中の電圧）。
     /// </summary>
@@ -96,7 +97,7 @@ public class WaveformSeriesConverter : SeriesConverter<WaveformData>
     private static List<Shape> Layout(WaveformData data)
     {
         var list = new List<Shape>();
-        double t = 0, v = 0;   // 今の時刻と電圧（パルスをまたいで引き継ぐ）
+        double t = 0, v = data.RestingVoltage;   // 今の時刻と電圧（時間 0 は restingVoltage。パルスをまたいで引き継ぐ）
         foreach (var seg in data.Pulses.SelectMany(p => p.Segments))
         {
             var end = t + Math.Max(0, TimeUnit.NsToUs(seg.Duration));
@@ -125,7 +126,7 @@ public class WaveformSeriesConverter : SeriesConverter<WaveformData>
     protected override IReadOnlyList<Series> Convert(WaveformData data)
     {
         var xs = new List<double> { 0 };
-        var ys = new List<double> { 0 };
+        var ys = new List<double> { data.RestingVoltage };
         foreach (var s in Layout(data))
         {
             xs.Add(s.RampEnd); ys.Add(s.VEnd);                 // 傾斜の終わり
@@ -137,7 +138,8 @@ public class WaveformSeriesConverter : SeriesConverter<WaveformData>
     protected override IReadOnlyList<Handle> GetHandles(WaveformData data)
     {
         var shapes = Layout(data);
-        var handles = new List<Handle> { new("start", 0, 0, null, null) };   // 始まりの (0, 0)。動かせない
+        // 始まりの (0, restingVoltage)。グラフでは動かせない（値は編集欄の「初期電圧」で変える）
+        var handles = new List<Handle> { new("start", 0, data.RestingVoltage, null, null) };
         var y = new AxisRule(Step);   // 電圧：範囲の指定なし
 
         for (var k = 0; k < shapes.Count; k++)

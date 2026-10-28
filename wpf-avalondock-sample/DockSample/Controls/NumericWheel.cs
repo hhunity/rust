@@ -18,6 +18,7 @@ namespace DockSample.Controls;
 ///
 /// ・Increment を付けた TextBox だけが対象（0 以下なら何もしない）
 /// ・回すたびに値をすぐ反映する（バインド先に書き込む）。同じ項目の続けての変更なので、Undo は1回分にまとまる
+/// ・Enter でも入力を確定する
 /// </summary>
 public static class NumericWheel
 {
@@ -53,7 +54,19 @@ public static class NumericWheel
     {
         if (d is not TextBox box) return;
         box.PreviewMouseWheel -= OnMouseWheel;
-        if ((double)e.NewValue > 0) box.PreviewMouseWheel += OnMouseWheel;
+        box.PreviewKeyDown -= OnKeyDown;
+        if ((double)e.NewValue > 0)
+        {
+            box.PreviewMouseWheel += OnMouseWheel;
+            box.PreviewKeyDown += OnKeyDown;
+        }
+    }
+
+    /// <summary>Enter で入力を確定する（フォーカスが外れるのを待たずにバインド先に書き込む）</summary>
+    private static void OnKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+            ((TextBox)sender).GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
     }
 
     private static void OnMouseWheel(object sender, MouseWheelEventArgs e)

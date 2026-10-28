@@ -37,6 +37,18 @@ public partial class WaveformEditorViewModel : ObservableObject
     /// <summary>表で選んでいるセグメント（追加したセグメントを選んだ状態にするのに使う）</summary>
     [ObservableProperty] private SegmentRowViewModel? _selectedSegment;
 
+    /// <summary>時間 0 での電圧（restingVoltage）。変えるとグラフの始まりの点が動き、最初のセグメントはそこから始まる</summary>
+    public double RestingVoltage
+    {
+        get => _owner.Data<WaveformData>()?.RestingVoltage ?? 0;
+        set
+        {
+            if (_owner.Data<WaveformData>() is null || value == RestingVoltage) return;
+            _owner.Write<WaveformData>(d => d.RestingVoltage = value, nameof(RestingVoltage));
+            OnPropertyChanged();
+        }
+    }
+
     /// <summary>選んだセグメントを、グラフで目立たせる</summary>
     partial void OnSelectedSegmentChanged(SegmentRowViewModel? value) =>
         _owner.SetSelection(value is null ? null : new SegmentSelection(value.PulseIndex, value.Index));

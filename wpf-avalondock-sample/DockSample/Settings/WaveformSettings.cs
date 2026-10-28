@@ -46,6 +46,10 @@ public abstract class DeviceData
 /// <summary>パルスを持つ機種</summary>
 public class WaveformData : DeviceData
 {
+    /// <summary>時間 0 での電圧（V）。最初のセグメントはこの電圧から始まる</summary>
+    [JsonPropertyName("restingVoltage")]
+    public double RestingVoltage { get; set; }
+
     [JsonPropertyName("pulseCollection")]
     public List<PulseData> Pulses { get; set; } = new();
 }

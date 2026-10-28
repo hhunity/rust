@@ -31,6 +31,15 @@
 
         <!-- パルスを持つ機種：左にパルスの一覧、右に選んだパルスのセグメントの表 -->
         <DataTemplate DataType="{x:Type vm:WaveformEditorViewModel}">
+            <DockPanel>
+            <!-- 上：時間 0 での電圧（restingVoltage）。Enter・フォーカスが外れたとき・ホイールで反映され、グラフも描き直される -->
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4,4,4,0">
+                <TextBlock Text="初期電圧 (V)" Style="{StaticResource Text.Label}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <TextBox Width="90" Style="{StaticResource Input.TextBox}"
+                         Text="{Binding RestingVoltage, StringFormat=F2}"
+                         controls:NumericWheel.Increment="0.1" controls:NumericWheel.LargeIncrement="1"
+                         ToolTip="時間 0 での電圧。ホイールで 1、Ctrl＋ホイールで 0.1 ずつ増減" />
+            </StackPanel>
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="200" MinWidth="120" />
@@ -132,6 +141,7 @@
                     </DataGrid>
                 </DockPanel>
             </Grid>
+            </DockPanel>
         </DataTemplate>
 
         <!-- 電圧源 -->
