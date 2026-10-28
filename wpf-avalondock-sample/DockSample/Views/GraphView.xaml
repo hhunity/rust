@@ -85,8 +85,11 @@
                                    VerticalAlignment="Center" />
                     </DockPanel>
 
+                    <!-- 行をクリック・キーで移動したら、そのセグメントをグラフで目立たせる
+                         （SelectedItem のバインドに加えて、セルを移ったとき（CurrentCellChanged）も選び直す） -->
                     <DataGrid ItemsSource="{Binding SelectedPulse.Segments}"
-                              SelectedItem="{Binding SelectedSegment}"
+                              SelectedItem="{Binding SelectedSegment, Mode=TwoWay}"
+                              CurrentCellChanged="SegmentGrid_CurrentCellChanged"
                               AutoGenerateColumns="False"
                               CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False"
                               SelectionMode="Single" HeadersVisibility="Column"

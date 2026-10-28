@@ -86,6 +86,17 @@ public partial class GraphView : UserControl
         Redraw();
     }
 
+    /// <summary>
+    /// セグメントの表でセルを移った：その行を選んだことにする（グラフで目立たせる）。
+    /// クリックしたセルによっては行の選択（SelectedItem）が変わらないことがあるので、今いるセルの行からも拾う
+    /// </summary>
+    private void SegmentGrid_CurrentCellChanged(object? sender, EventArgs e)
+    {
+        if (sender is DataGrid { DataContext: WaveformEditorViewModel editor } grid &&
+            grid.CurrentItem is SegmentRowViewModel row && editor.SelectedSegment != row)
+            editor.SelectedSegment = row;
+    }
+
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(GraphViewModel.YLabel)) Redraw();
