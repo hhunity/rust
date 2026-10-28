@@ -45,6 +45,18 @@ public partial class WaveformEditorViewModel : ObservableObject
         Rebuild(index);
     }
 
+    /// <summary>パルスを先頭に追加して、それを選ぶ（後ろのパルスの番号は1つずつずれる）</summary>
+    [RelayCommand]
+    private void AddPulseFirst()
+    {
+        _owner.Write<WaveformData>(d =>
+        {
+            d.Pulses.Insert(0, new PulseData());
+            Renumber(d);
+        }, $"AddPulseFirst.{Guid.NewGuid()}");
+        Rebuild(0);
+    }
+
     /// <summary>パルスを複製（行の「コピー」ボタンから。すぐ下に同じ中身のパルスを入れて、それを選ぶ）</summary>
     [RelayCommand]
     private void CopyPulse(PulseRowViewModel row)

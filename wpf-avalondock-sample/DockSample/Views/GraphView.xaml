@@ -29,8 +29,11 @@
                 <!-- 左：パルスの一覧 -->
                 <DockPanel Grid.Column="0" Margin="4">
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                        <Button DockPanel.Dock="Right" Content="＋ 追加" Padding="8,1"
-                                Command="{Binding AddPulseCommand}" />
+                        <!-- DockPanel の右寄せは先に書いたものほど右端：右から「＋ 最後」「＋ 先頭」 -->
+                        <Button DockPanel.Dock="Right" Content="＋ 最後" Padding="8,1" Margin="4,0,0,0"
+                                ToolTip="最後にパルスを追加" Command="{Binding AddPulseCommand}" />
+                        <Button DockPanel.Dock="Right" Content="＋ 先頭" Padding="8,1"
+                                ToolTip="先頭にパルスを追加" Command="{Binding AddPulseFirstCommand}" />
                         <TextBlock Text="パルス" Style="{StaticResource Text.Label}" VerticalAlignment="Center" />
                     </DockPanel>
                     <ListBox ItemsSource="{Binding Pulses}" SelectedItem="{Binding SelectedPulse}"
