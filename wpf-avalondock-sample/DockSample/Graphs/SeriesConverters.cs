@@ -16,9 +16,13 @@ public record AxisRule(double Step, double Min = double.MinValue, double Max = d
 /// <summary>
 /// グラフ上の動かせる点（ハンドル）。
 /// Id はどのデータの点かを表す（機種ごとのクラスだけが意味を知っている）。XRule / YRule が null の方向には動かせない。
+/// 両方 null なら動かせない点（印だけ付ける。グラフでは灰色の丸）。
 /// </summary>
 public record Handle(string Id, double X, double Y, AxisRule? XRule, AxisRule? YRule)
 {
+    /// <summary>どちらの方向にも動かせない点か</summary>
+    public bool IsFixed => XRule is null && YRule is null;
+
     /// <summary>マウスの位置を、動かせる方向・刻み・範囲に合わせた位置にする（動かせない方向は元のまま）</summary>
     public (double X, double Y) Snap(double x, double y) =>
         (XRule?.Snap(x) ?? X, YRule?.Snap(y) ?? Y);
@@ -125,7 +129,7 @@ public class WaveformSeriesConverter : SeriesConverter<WaveformData>
     protected override IReadOnlyList<Handle> GetHandles(WaveformData data)
     {
         var shapes = Layout(data);
-        var handles = new List<Handle>();
+        var handles = new List<Handle> { new("start", 0, 0, null, null) };   // 始まりの (0, 0)。動かせない
         var y = new AxisRule(Step);   // 電圧：範囲の指定なし
 
         for (var k = 0; k < shapes.Count; k++)

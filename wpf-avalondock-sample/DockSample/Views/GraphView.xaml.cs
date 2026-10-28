@@ -25,6 +25,14 @@ public partial class GraphView : UserControl
     private double[] _handleXs = Array.Empty<double>();
     private double[] _handleYs = Array.Empty<double>();
 
+    /// <summary>Handles の i 番目が、上の配列の何番目か（動かせない点は -1）</summary>
+    private int[] _dotIndex = Array.Empty<int>();
+
+    /// <summary>点の色：動かせる点 / 動かせない点 / 軸への補助線</summary>
+    private static readonly ScottPlot.Color MovableColor = ScottPlot.Color.FromHex("#E67E22");
+    private static readonly ScottPlot.Color FixedColor = ScottPlot.Color.FromHex("#888888");
+    private static readonly ScottPlot.Color GuideColor = ScottPlot.Color.FromHex("#BBBBBB");
+
     /// <summary>つまんでいる点（Handles の何番目か）と、今の位置（Snap 済み）</summary>
     private int? _dragging;
     private (double X, double Y) _dragTo;
@@ -117,6 +125,7 @@ public partial class GraphView : UserControl
         for (var i = 0; i < _vm.Handles.Count; i++)
         {
             var h = _vm.Handles[i];
+            if (h.IsFixed) continue;   // 動かせない点はつまめない
             var px = Chart.Plot.GetPixel(new Coordinates(h.X, h.Y));
             var d = Math.Sqrt(Math.Pow(px.X - mouse.X, 2) + Math.Pow(px.Y - mouse.Y, 2));
             if (d <= best) { best = d; nearest = i; }
@@ -138,8 +147,9 @@ public partial class GraphView : UserControl
         _dragTo = _vm.Handles[i].Snap(c.X, c.Y);
 
         // 丸だけ動かす（データにはまだ書かない）
-        _handleXs[i] = _dragTo.X;
-        _handleYs[i] = _dragTo.Y;
+        var dot = _dotIndex[i];
+        _handleXs[dot] = _dragTo.X;
+        _handleYs[dot] = _dragTo.Y;
         Chart.Refresh();
         e.Handled = true;
     }
@@ -167,23 +177,46 @@ public partial class GraphView : UserControl
         var limits = plot.Axes.GetLimits();
         _keepView = false;
         plot.Clear();
+        // 点から軸（時間 0 の縦軸・電圧 0 の横軸）への補助線（点線）。一番下に描くので先に足す
+        foreach (var h in _vm.Handles)
+        {
+            if (h.Y != 0) AddGuide(plot, h.X, h.Y, h.X, 0);   // 下（横軸）へ
+            if (h.X != 0) AddGuide(plot, h.X, h.Y, 0, h.Y);   // 左（縦軸）へ
+        }
+
+        // 波形：点同士を線でつなぐ（点の印は付けない。点は下の丸で描く）
         foreach (var s in _vm.Lines)   // 選んだ uuid の線を全部描く（機種によっては複数本）
         {
             var line = plot.Add.Scatter(s.Xs, s.Ys);
             line.LegendText = s.Name;   // 凡例に出す名前
+            line.LineWidth = 2;
+            line.MarkerSize = 0;
         }
         if (_vm.Lines.Count > 0) plot.ShowLegend();
         else plot.HideLegend();
 
-        // 動かせる点を丸で描く（線なし。凡例には出さない）
-        _handleXs = _vm.Handles.Select(h => h.X).ToArray();
-        _handleYs = _vm.Handles.Select(h => h.Y).ToArray();
+        // 点を丸で描く（線なし。凡例には出さない）：動かせない点は灰色、動かせる点はオレンジ
+        var fixedPoints = _vm.Handles.Where(h => h.IsFixed).ToArray();
+        if (fixedPoints.Length > 0)
+        {
+            var fixedDots = plot.Add.Scatter(fixedPoints.Select(h => h.X).ToArray(), fixedPoints.Select(h => h.Y).ToArray());
+            fixedDots.LineWidth = 0;
+            fixedDots.MarkerSize = 9;
+            fixedDots.Color = FixedColor;
+        }
+
+        var movable = _vm.Handles.Where(h => !h.IsFixed).ToArray();
+        _handleXs = movable.Select(h => h.X).ToArray();
+        _handleYs = movable.Select(h => h.Y).ToArray();
+        _dotIndex = new int[_vm.Handles.Count];
+        for (int i = 0, dot = 0; i < _vm.Handles.Count; i++)
+            _dotIndex[i] = _vm.Handles[i].IsFixed ? -1 : dot++;
         if (_handleXs.Length > 0)
         {
             var dots = plot.Add.Scatter(_handleXs, _handleYs);
             dots.LineWidth = 0;
             dots.MarkerSize = 9;
-            dots.Color = ScottPlot.Color.FromHex("#E67E22");
+            dots.Color = MovableColor;
         }
 
         plot.XLabel("時間 (µs)");   // ファイルの Duration は ns だが、グラフは µs（換算は機種ごとの定義が行う）
@@ -191,5 +224,14 @@ public partial class GraphView : UserControl
         if (keepView) plot.Axes.SetLimits(limits);   // 点を動かしたあとは、今の表示範囲のまま
         else plot.Axes.AutoScale();
         Chart.Refresh();   // これを呼ばないと画面に出ない
+    }
+
+    /// <summary>補助線（細い灰色の点線）を1本足す</summary>
+    private static void AddGuide(ScottPlot.Plot plot, double x1, double y1, double x2, double y2)
+    {
+        var guide = plot.Add.Line(x1, y1, x2, y2);
+        guide.Color = GuideColor;
+        guide.LineWidth = 1;
+        guide.LinePattern = ScottPlot.LinePattern.Dotted;
     }
 }
