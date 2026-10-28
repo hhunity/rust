@@ -64,10 +64,9 @@
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                         <Button DockPanel.Dock="Right" Content="＋ セグメント追加" Padding="8,1" Margin="8,0,0,0"
                                 Command="{Binding AddSegmentCommand}" />
-                        <TextBlock Text="パルス名" Style="{StaticResource Text.Label}" VerticalAlignment="Center"
-                                   Margin="0,0,8,0" />
-                        <TextBox Text="{Binding SelectedPulse.Name, UpdateSourceTrigger=PropertyChanged}"
-                                 Style="{StaticResource Input.TextBox}" />
+                        <!-- パルスの名前は並び順で自動で付く（Pulse0, Pulse1, ...）ので、表示だけ -->
+                        <TextBlock Text="{Binding SelectedPulse.Name}" Style="{StaticResource Text.Label}"
+                                   VerticalAlignment="Center" />
                     </DockPanel>
 
                     <DataGrid ItemsSource="{Binding SelectedPulse.Segments}"

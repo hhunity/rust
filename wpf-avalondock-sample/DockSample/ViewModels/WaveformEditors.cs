@@ -37,8 +37,11 @@ public partial class WaveformEditorViewModel : ObservableObject
     private void AddPulse()
     {
         var index = _owner.Data<WaveformData>()?.Pulses.Count ?? 0;
-        _owner.Write<WaveformData>(d => d.Pulses.Add(new PulseData { Name = $"パルス{index}" }),
-                                   $"AddPulse.{Guid.NewGuid()}");   // 追加は毎回別の Undo にする
+        _owner.Write<WaveformData>(d =>
+        {
+            d.Pulses.Add(new PulseData());
+            Renumber(d);
+        }, $"AddPulse.{Guid.NewGuid()}");   // 追加は毎回別の Undo にする
         Rebuild(index);
     }
 
@@ -48,11 +51,19 @@ public partial class WaveformEditorViewModel : ObservableObject
     {
         _owner.Write<WaveformData>(d =>
         {
-            var copy = Clone(d.Pulses[row.Index]);
-            copy.Name = $"{copy.Name} のコピー";
-            d.Pulses.Insert(row.Index + 1, copy);
+            d.Pulses.Insert(row.Index + 1, Clone(d.Pulses[row.Index]));
+            Renumber(d);   // 後ろのパルスの番号が1つずつずれる
         }, $"CopyPulse.{Guid.NewGuid()}");
         Rebuild(row.Index + 1);
+    }
+
+    /// <summary>
+    /// パルスの名前を並び順に振り直す（Pulse0, Pulse1, ...）。名前は画面からは変えられず、追加・コピー・削除のたびにこれで決まる
+    /// </summary>
+    private static void Renumber(WaveformData data)
+    {
+        for (var i = 0; i < data.Pulses.Count; i++)
+            data.Pulses[i].Name = $"Pulse{i}";
     }
 
     /// <summary>
@@ -67,7 +78,11 @@ public partial class WaveformEditorViewModel : ObservableObject
     [RelayCommand]
     private void RemovePulse(PulseRowViewModel row)
     {
-        _owner.Write<WaveformData>(d => d.Pulses.RemoveAt(row.Index), $"RemovePulse.{Guid.NewGuid()}");
+        _owner.Write<WaveformData>(d =>
+        {
+            d.Pulses.RemoveAt(row.Index);
+            Renumber(d);   // 後ろのパルスの番号を詰める
+        }, $"RemovePulse.{Guid.NewGuid()}");
         Rebuild(Math.Max(0, row.Index - 1));
     }
 
@@ -124,16 +139,8 @@ public class PulseRowViewModel : ObservableObject
 
     private PulseData? Pulse => _owner.Data<WaveformData>()?.Pulses.ElementAtOrDefault(Index);
 
-    public string Name
-    {
-        get => Pulse?.Name ?? "";
-        set
-        {
-            if (Pulse is null || value == Name) return;
-            _owner.Write<WaveformData>(d => d.Pulses[Index].Name = value, $"{Index}.Name");
-            OnPropertyChanged();
-        }
-    }
+    /// <summary>名前（Pulse0, Pulse1, ... と並び順で自動で付く。画面からは変えられない）</summary>
+    public string Name => Pulse?.Name ?? "";
 }
 
 /// <summary>セグメント1つ（表の1行）</summary>

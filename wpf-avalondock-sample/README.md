@@ -77,7 +77,7 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
     - インポートで同じ機種に同じ uuid があれば、新しい uuid を付けて別のものとして足す。インポートも元に戻すで取り消せる
   - 下の編集欄（`ViewModels/WaveformEditors.cs`）で中身を編集。機種ごとに編集欄の ViewModel と DataTemplate（`GraphView.xaml`）がある
     - 単位：ファイルの時間（duration）は ns、スルーレートは V/µs。グラフと表では時間を µs で見せる（換算は `TimeUnit`）
-    - パルスを持つ機種：左にパルスの一覧（追加・コピー・削除。コピーはすぐ下に複製）、右に選んだパルスの名前とセグメントの表（追加・削除・値の編集）
+    - パルスを持つ機種：左にパルスの一覧（追加・コピー・削除。コピーはすぐ下に複製）。パルスの名前は並び順で Pulse0, Pulse1, ... と自動で付き、追加・コピー・削除のたびに振り直す（画面からは変えられない）、右に選んだパルスの名前とセグメントの表（追加・削除・値の編集）
     - 電圧源：電圧と電流制限
     - 編集欄は値を自分で持たず、get / set で毎回 `Current` を読み書きする（`GraphViewModel.Data<T>()` / `Write<T>()`）
     - 追加・削除・編集はどれも元に戻すで取り消せる。グラフも編集のたびに描き直す
