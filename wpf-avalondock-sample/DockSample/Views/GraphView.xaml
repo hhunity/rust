@@ -79,10 +79,11 @@
                             <DataGridTextColumn Header="#" Binding="{Binding Number, Mode=OneWay}" IsReadOnly="True" Width="Auto" />
                             <DataGridTextColumn Header="名前" Binding="{Binding Name}" Width="2*" />
                             <!-- 数値の列はセルの編集を終えたとき（Enter・別のセルへ移動）に反映される -->
-                            <DataGridTextColumn Header="目標電圧 (V)" Binding="{Binding TargetVoltage}" Width="*" />
-                            <DataGridTextColumn Header="スルーレート (V/µs)" Binding="{Binding SlewRate}" Width="*" />
+                            <!-- 数値は小数2桁まで表示（足りなければ 0 で埋める：5 → 5.00）。StringFormat は見せ方だけで、値そのものは丸めない -->
+                            <DataGridTextColumn Header="目標電圧 (V)" Binding="{Binding TargetVoltage, StringFormat=F2}" Width="*" />
+                            <DataGridTextColumn Header="スルーレート (V/µs)" Binding="{Binding SlewRate, StringFormat=F2}" Width="*" />
                             <!-- ファイルは ns、ここは µs で見せる（換算は SegmentRowViewModel.DurationUs） -->
-                            <DataGridTextColumn Header="時間 (µs)" Binding="{Binding DurationUs}" Width="*" />
+                            <DataGridTextColumn Header="時間 (µs)" Binding="{Binding DurationUs, StringFormat=F2}" Width="*" />
                             <DataGridTemplateColumn Width="Auto" IsReadOnly="True">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
@@ -117,7 +118,7 @@
 
                 <TextBlock Grid.Row="1" Text="電流制限 (A)" Style="{StaticResource Text.FieldLabel}" />
                 <controls:NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding LimitCurrent}"
-                                        Minimum="0" Maximum="100" Increment="0.01" DecimalPlaces="3"
+                                        Minimum="0" Maximum="100" Increment="0.01" DecimalPlaces="2"
                                         Width="120" Margin="0,0,0,6" Style="{StaticResource Input.Numeric}" />
             </Grid>
         </DataTemplate>
