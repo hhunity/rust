@@ -41,6 +41,9 @@
                                          IsSearchEnabled="False"
                                          Style="{StaticResource Input.DropDown}" />
                 <Button Content="削除" Padding="8,1" Margin="4,0,0,0" Command="{Binding RemoveWaveformCommand}" />
+                <!-- 元に戻す / やり直し（Ctrl+Z / Ctrl+Y。入力欄の中でも、文字単位ではなく設定全体の Undo になる） -->
+                <Button Content="↶" Padding="8,1" Margin="12,0,0,0" Command="{Binding UndoCommand}" ToolTip="元に戻す (Ctrl+Z)" />
+                <Button Content="↷" Padding="8,1" Margin="2,0,0,0" Command="{Binding RedoCommand}" ToolTip="やり直し (Ctrl+Y)" />
                 <Button Content="エクスポート..." Padding="8,1" Margin="4,0,0,0" Command="{Binding ExportWaveformCommand}"
                         ToolTip="選んでいる波形を、別の JSON ファイルに書き出す" />
                 <Button Content="インポート..." Padding="8,1" Margin="4,0,0,0" Command="{Binding ImportWaveformCommand}"

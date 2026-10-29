@@ -63,6 +63,17 @@ public partial class GraphViewModel : PaneViewModel, INotifyDataErrorInfo
         _dialogs = dialogs;
         _converters = converters.ToList();
         settings.Reloaded += (_, _) => Load();   // 元に戻す・開く → 一覧を作り直す
+
+        // Undo / Redo ができるかが変わったら、ボタンの有効・無効を更新する
+        settings.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(ISettingsService.CanUndo) or nameof(ISettingsService.CanRedo))
+            {
+                UndoCommand.NotifyCanExecuteChanged();
+                RedoCommand.NotifyCanExecuteChanged();
+            }
+        };
+
         Load();
     }
 
@@ -352,6 +363,16 @@ public partial class GraphViewModel : PaneViewModel, INotifyDataErrorInfo
         if (first is { } f)
             SelectedEntry = Entries.FirstOrDefault(x => x.Device == f.Device && x.Uuid == f.Uuid);
     }
+
+    // ===== 元に戻す / やり直し（設定ペイン・一覧ペインと同じ1つの履歴） =====
+
+    [RelayCommand(CanExecute = nameof(CanUndo))]
+    private void Undo() => _settings.Undo();
+    private bool CanUndo() => _settings.CanUndo;
+
+    [RelayCommand(CanExecute = nameof(CanRedo))]
+    private void Redo() => _settings.Redo();
+    private bool CanRedo() => _settings.CanRedo;
 
     // ===== 編集欄から使う =====
 

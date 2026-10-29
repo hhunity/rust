@@ -68,6 +68,26 @@ public partial class GraphView : UserControl
         Chart.PreviewMouseLeftButtonDown += Chart_MouseDown;
         Chart.PreviewMouseMove += Chart_MouseMove;
         Chart.PreviewMouseLeftButtonUp += Chart_MouseUp;
+
+        // Ctrl+Z / Ctrl+Y をこのペインのどこで押しても、設定全体の元に戻す / やり直しにする
+        PreviewKeyDown += OnPreviewKeyDown;
+    }
+
+    /// <summary>
+    /// Ctrl+Z（元に戻す）・Ctrl+Y / Ctrl+Shift+Z（やり直し）。
+    /// 入力欄（TextBox）は Ctrl+Z を自分の「文字の元に戻す」に使ってしまい、データ側の Undo に届かない。
+    /// しかも戻した文字がまた書き込まれて新しい変更になる。なので、入力欄より先（Preview）で受け取って横取りする
+    /// </summary>
+    private void OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_vm is null || !Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) return;
+
+        var redo = e.Key == Key.Y || (e.Key == Key.Z && Keyboard.Modifiers.HasFlag(ModifierKeys.Shift));
+        var command = redo ? _vm.RedoCommand : e.Key == Key.Z ? _vm.UndoCommand : null;
+        if (command is null) return;
+
+        if (command.CanExecute(null)) command.Execute(null);
+        e.Handled = true;
     }
 
     /// <summary>ViewModel のイベントを付け替える</summary>
