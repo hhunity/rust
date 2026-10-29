@@ -54,11 +54,48 @@ public class WaveformData : DeviceData
     public List<PulseData> Pulses { get; set; } = new();
 }
 
-/// <summary>別の機種の例（一定電圧を出すだけ）</summary>
+/// <summary>DC の機種：Hi / Low / Zero の信号を順に並べた矩形波</summary>
 public class DcSourceData : DeviceData
 {
+    /// <summary>信号の並び（先頭から順に出す）</summary>
+    [JsonPropertyName("signals")]
+    public List<DcSignal> Signals { get; set; } = new();
+
+    // 以下は最初に仮で作った項目（グラフには使っていない。編集欄で使っている）
     [JsonPropertyName("voltage")] public double Voltage { get; set; }
     [JsonPropertyName("limitCurrent")] public double LimitCurrent { get; set; }
+}
+
+/// <summary>
+/// DC の信号1つ：レベル（"Hi" / "Low" / "Zero" の文字）と、その長さ（ns）。
+/// レベルは文字のまま持つ（知らない文字が入っていても読み込みで失敗せず、そのまま書き戻せるように）。電圧への変換は DcLevel
+/// </summary>
+public class DcSignal
+{
+    [JsonPropertyName("level")]
+    public string Level { get; set; } = DcLevel.Zero;
+
+    /// <summary>長さ（ns。画面では µs で見せる）</summary>
+    [JsonPropertyName("duration")]
+    public double Duration { get; set; }
+
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>DC の信号のレベル（ファイルに書かれる文字）と電圧</summary>
+public static class DcLevel
+{
+    public const string Hi = "Hi";
+    public const string Low = "Low";
+    public const string Zero = "Zero";
+
+    /// <summary>レベルの文字 → 電圧（大文字小文字は区別しない。知らない文字は 0V）</summary>
+    public static double ToVoltage(string level) => level.Trim().ToLowerInvariant() switch
+    {
+        "hi" or "high" => 2,
+        "low" => -2,
+        _ => 0,   // "zero" と、知らない文字
+    };
 }
 
 /// <summary>表にないデバイス名の中身（項目は全部 Extra に入り、保存時にそのまま書き戻される）</summary>

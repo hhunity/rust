@@ -227,6 +227,8 @@ public partial class GraphViewModel : PaneViewModel, INotifyDataErrorInfo
             data.Name = $"新しい波形 {number}";
             if (data is WaveformData waveform)
                 waveform.Pulses.Add(WaveformEditorViewModel.NewPulse());   // パルス（とセグメント）は必ず1つ以上
+            if (data is DcSourceData dc)
+                dc.Signals.Add(new DcSignal { Level = DcLevel.Hi, Duration = TimeUnit.UsToNs(10) });   // 信号を1つ持った状態で作る
             byUuid[uuid] = data;
         });
 

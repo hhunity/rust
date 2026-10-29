@@ -270,18 +270,36 @@ public class WaveformSeriesConverter : SeriesConverter<WaveformData>
 }
 
 /// <summary>
-/// 電圧源：一定電圧の横線1本（時間の情報がないので、横幅は仮に 0〜1000µs）。
-/// 動かせる点：線の真ん中の1点を縦にだけ（0.1 刻み）。電圧が変わる
+/// DC の機種：信号（Hi = 2V / Low = −2V / Zero = 0V）を順に並べた矩形波。
+/// 各信号はその電圧を duration の間保ち、次の信号との境目で垂直に切り替わる。時間は µs（ファイルの duration は ns）。
+/// 今はグラフでは動かせない（点は印だけ。動かせない点として灰色の四角で出す）
 /// </summary>
 public class DcSourceSeriesConverter : SeriesConverter<DcSourceData>
 {
-    private const double Width = 1000;
+    protected override IReadOnlyList<Series> Convert(DcSourceData data)
+    {
+        var points = Corners(data);
+        if (points.Count == 0) return Array.Empty<Series>();
+        return new[] { new Series("信号", points.Select(p => p.X).ToArray(), points.Select(p => p.Y).ToArray()) };
+    }
 
-    protected override IReadOnlyList<Series> Convert(DcSourceData data) =>
-        new[] { new Series("出力", new[] { 0.0, Width }, new[] { data.Voltage, data.Voltage }) };
-
+    /// <summary>角の点に印を付ける（動かせない点）</summary>
     protected override IReadOnlyList<Handle> GetHandles(DcSourceData data) =>
-        new[] { new Handle("voltage", Width / 2, data.Voltage, XRule: null, YRule: new AxisRule(0.1)) };
+        Corners(data).Select((p, i) => new Handle($"corner{i}", p.X, p.Y, null, null)).ToList();
 
-    protected override void Move(DcSourceData data, Handle handle, double x, double y) => data.Voltage = y;
+    /// <summary>矩形波の角の点：信号ごとに (始まり, 電圧) と (終わり, 電圧)</summary>
+    private static List<(double X, double Y)> Corners(DcSourceData data)
+    {
+        var points = new List<(double X, double Y)>();
+        double t = 0;
+        foreach (var signal in data.Signals)
+        {
+            var v = DcLevel.ToVoltage(signal.Level);
+            var end = t + Math.Max(0, TimeUnit.NsToUs(signal.Duration));
+            points.Add((t, v));     // 始まり（前の信号の終わりと同じ時刻なので、そこで垂直に切り替わる）
+            points.Add((end, v));   // 終わり
+            t = end;
+        }
+        return points;
+    }
 }
