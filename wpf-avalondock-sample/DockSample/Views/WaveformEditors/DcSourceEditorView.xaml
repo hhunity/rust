@@ -8,26 +8,75 @@
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance Type=vm:DcSourceEditorViewModel}"
              d:DesignWidth="700" d:DesignHeight="240">
-    <!-- 電圧源の編集欄：電圧と電流制限。
+    <!-- DC の編集欄：信号（Hi / Low / Zero と時間）の表。行を選ぶと、グラフのその信号が目立つ。
          DataContext は GraphView.xaml の DataTemplate から DcSourceEditorViewModel が自動で入る -->
 
-    <Grid Margin="8" VerticalAlignment="Top" HorizontalAlignment="Left">
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+    <UserControl.Resources>
+        <!-- 時間のセルを編集中の TextBox：フォーカスがあるときマウスホイールで増減、0 未満にしない（Controls/NumericWheel） -->
+        <Style x:Key="DurationEditor" TargetType="TextBox"
+               BasedOn="{x:Static DataGridTextColumn.DefaultEditingElementStyle}">
+            <Setter Property="controls:NumericWheel.Increment" Value="0.1" />
+            <Setter Property="controls:NumericWheel.LargeIncrement" Value="1" />
+            <Setter Property="controls:NumericWheel.Minimum" Value="0" />
+        </Style>
+    </UserControl.Resources>
 
-        <TextBlock Grid.Row="0" Text="電圧 (V)" Style="{StaticResource Text.FieldLabel}" />
-        <controls:NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding Voltage}"
-                                Minimum="-1000" Maximum="1000" Increment="0.1" DecimalPlaces="2"
-                                Width="120" Margin="0,0,0,6" Style="{StaticResource Input.Numeric}" />
+    <DockPanel Margin="4">
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+            <!-- 最後に追加。途中に入れるのは各行の「↑追加」「↓追加」 -->
+            <Button DockPanel.Dock="Right" Content="＋ 最後に追加" Padding="8,1"
+                    Command="{Binding AddSignalCommand}" />
+            <TextBlock Text="信号（Hi = 2V / Low = −2V / Zero = 0V）" Style="{StaticResource Text.Label}"
+                       VerticalAlignment="Center" />
+        </DockPanel>
 
-        <TextBlock Grid.Row="1" Text="電流制限 (A)" Style="{StaticResource Text.FieldLabel}" />
-        <controls:NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding LimitCurrent}"
-                                Minimum="0" Maximum="100" Increment="0.01" DecimalPlaces="2"
-                                Width="120" Margin="0,0,0,6" Style="{StaticResource Input.Numeric}" />
-    </Grid>
+        <!-- 行をクリック・キーで移動したら、その信号をグラフで目立たせる -->
+        <DataGrid ItemsSource="{Binding Signals}"
+                  SelectedItem="{Binding SelectedSignal, Mode=TwoWay}"
+                  CurrentCellChanged="SignalGrid_CurrentCellChanged"
+                  AutoGenerateColumns="False"
+                  CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False"
+                  SelectionMode="Single" HeadersVisibility="Column"
+                  GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EEEEEE">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="#" Binding="{Binding Number, Mode=OneWay}" IsReadOnly="True" Width="Auto" />
+
+                <!-- レベル：選択肢は編集欄の ViewModel の Levels（行の DataContext は行なので、表の DataContext を辿る） -->
+                <DataGridTemplateColumn Header="レベル" Width="*">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ComboBox ItemsSource="{Binding DataContext.Levels, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                      SelectedItem="{Binding Level, UpdateSourceTrigger=PropertyChanged}"
+                                      Margin="2,1" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+
+                <!-- ファイルは ns、ここは µs で見せる。小数2桁で表示 -->
+                <DataGridTextColumn Header="時間 (µs)" Binding="{Binding DurationUs, StringFormat=F2}" Width="*"
+                                    EditingElementStyle="{StaticResource DurationEditor}" />
+
+                <DataGridTemplateColumn Width="Auto" IsReadOnly="True">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="↑追加" Padding="6,1" Margin="2" ToolTip="この行の前に追加"
+                                        Command="{Binding DataContext.InsertSignalBeforeCommand,
+                                                  RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                        CommandParameter="{Binding}" />
+                                <Button Content="↓追加" Padding="6,1" Margin="2" ToolTip="この行の後ろに追加"
+                                        Command="{Binding DataContext.InsertSignalAfterCommand,
+                                                  RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                        CommandParameter="{Binding}" />
+                                <Button Content="削除" Padding="8,1" Margin="2"
+                                        Command="{Binding DataContext.RemoveSignalCommand,
+                                                  RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                        CommandParameter="{Binding}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
 </UserControl>

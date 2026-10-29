@@ -212,7 +212,8 @@ public partial class GraphViewModel : PaneViewModel, INotifyDataErrorInfo
         // 選んでいた場所（選択が何かの拍子に空になっていても、最後に選んでいた場所を使う）
         var selected = SelectedEntry is { } s ? (s.Device, s.Uuid) : _lastSelected;
         var pulse = (Editor as WaveformEditorViewModel)?.SelectedPulse?.Index;     // 編集中のパルスと
-        var segment = (Editor as WaveformEditorViewModel)?.SelectedSegment?.Index; // セグメントも選び直す
+        var segment = (Editor as WaveformEditorViewModel)?.SelectedSegment?.Index; // セグメント（DC は信号）も選び直す
+        var signal = (Editor as DcSourceEditorViewModel)?.SelectedSignal?.Index;
 
         DeviceEntry? same;
         _reloadingEntries = true;
@@ -232,7 +233,7 @@ public partial class GraphViewModel : PaneViewModel, INotifyDataErrorInfo
         SetNameError(null);
 
         // 選び直した場所が同じでも、中身は変わっているかもしれないので作り直す
-        RebuildEditor(same is not null ? pulse : null, same is not null ? segment : null);
+        RebuildEditor(same is not null ? pulse : null, same is not null ? segment : null, same is not null ? signal : null);
         OnPropertyChanged(nameof(Name));
         UpdateSeries();
     }
@@ -422,16 +423,17 @@ public partial class GraphViewModel : PaneViewModel, INotifyDataErrorInfo
 
         // 直した値（ほかの行の値も変わることがある）を下の表にも出す
         (Editor as WaveformEditorViewModel)?.RefreshValues();
+        (Editor as DcSourceEditorViewModel)?.RefreshValues();
     }
 
     /// <summary>選んでいる機種に合った編集欄を作り直す</summary>
-    private void RebuildEditor(int? keepPulse, int? keepSegment = null)
+    private void RebuildEditor(int? keepPulse, int? keepSegment = null, int? keepSignal = null)
     {
         _selection = null;   // 新しい編集欄で選び直されたら、また SetSelection が来る
         Editor = CurrentData switch
         {
             WaveformData => new WaveformEditorViewModel(this, keepPulse, keepSegment),
-            DcSourceData => new DcSourceEditorViewModel(this),
+            DcSourceData => new DcSourceEditorViewModel(this, keepSignal),
             _            => null,   // 編集欄のない機種（表にない機種など）
         };
     }

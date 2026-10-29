@@ -8,6 +8,9 @@ public record Series(string Name, double[] Xs, double[] Ys);
 /// <summary>下の編集欄で選んでいるセグメント（グラフで目立たせる）。Pulse は何番目のパルス、Segment はその中の何番目か</summary>
 public record SegmentSelection(int Pulse, int Segment);
 
+/// <summary>DC の編集欄で選んでいる信号（グラフで目立たせる）。Index は何番目の信号か</summary>
+public record SignalSelection(int Index);
+
 /// <summary>1方向（X または Y）の動かし方：刻みと範囲</summary>
 public record AxisRule(double Step, double Min = double.MinValue, double Max = double.MaxValue)
 {
@@ -281,6 +284,28 @@ public class DcSourceSeriesConverter : SeriesConverter<DcSourceData>
         var points = Corners(data);
         if (points.Count == 0) return Array.Empty<Series>();
         return new[] { new Series("信号", points.Select(p => p.X).ToArray(), points.Select(p => p.Y).ToArray()) };
+    }
+
+    /// <summary>選んでいる信号の部分（始まり → 終わりの横線）</summary>
+    protected override IReadOnlyList<Series> GetHighlight(DcSourceData data, object? selection)
+    {
+        if (selection is not SignalSelection sel) return Array.Empty<Series>();
+        var points = Corners(data);   // 信号ごとに2点ずつ（始まり・終わり）
+        var i = sel.Index * 2;
+        if (i + 1 >= points.Count) return Array.Empty<Series>();
+        return new[]
+        {
+            new Series("選択中", new[] { points[i].X, points[i + 1].X }, new[] { points[i].Y, points[i + 1].Y }),
+        };
+    }
+
+    /// <summary>点が重ならないように、信号の時間を少なくとも 0.1µs にする</summary>
+    protected override void Normalize(DcSourceData data)
+    {
+        const double minUs = 0.1;
+        foreach (var signal in data.Signals)
+            if (TimeUnit.NsToUs(signal.Duration) < minUs - 1e-9)
+                signal.Duration = TimeUnit.UsToNs(minUs);
     }
 
     /// <summary>角の点に印を付ける（動かせない点）</summary>
