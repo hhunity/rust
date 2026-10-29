@@ -187,8 +187,20 @@ public partial class GraphViewModel : PaneViewModel, INotifyDataErrorInfo
             ? data
             : null;
 
+    /// <summary>一覧（Entries）を作り直している最中（このあいだに選択が一時的に空になっても、編集欄やグラフは作り直さない）</summary>
+    private bool _reloadingEntries;
+
+    /// <summary>最後に選んでいた場所（一覧を作り直すときに選び直すのに使う。選択が一時的に空になっても消さない）</summary>
+    private (string Device, string Uuid)? _lastSelected;
+
     partial void OnSelectedEntryChanged(DeviceEntry? value)
     {
+        if (value is not null) _lastSelected = (value.Device, value.Uuid);
+
+        // 一覧の作り直し中は、Clear でコンボボックスの選択が一時的に空になる（ここで編集欄を消すと、
+        // 入力中の欄がフォーカスを失って値を確定してしまうなど、余計なことが起きる）。最後に Load がまとめて作り直す
+        if (_reloadingEntries) return;
+
         SetNameError(null);   // 別の波形を選んだら、入力中だった名前のエラーは消す
         RebuildEditor(keepPulse: null);
         OnPropertyChanged(nameof(Name));
@@ -197,18 +209,27 @@ public partial class GraphViewModel : PaneViewModel, INotifyDataErrorInfo
 
     private void Load()
     {
-        var selected = SelectedEntry;
+        // 選んでいた場所（選択が何かの拍子に空になっていても、最後に選んでいた場所を使う）
+        var selected = SelectedEntry is { } s ? (s.Device, s.Uuid) : _lastSelected;
         var pulse = (Editor as WaveformEditorViewModel)?.SelectedPulse?.Index;     // 編集中のパルスと
         var segment = (Editor as WaveformEditorViewModel)?.SelectedSegment?.Index; // セグメントも選び直す
 
-        Entries.Clear();
-        foreach (var (device, byUuid) in _settings.Current.Waveforms.Waveforms)
-            foreach (var (uuid, data) in byUuid)
-                Entries.Add(new DeviceEntry(device, uuid, data.Name));
+        DeviceEntry? same;
+        _reloadingEntries = true;
+        try
+        {
+            Entries.Clear();
+            foreach (var (device, byUuid) in _settings.Current.Waveforms.Waveforms)
+                foreach (var (uuid, data) in byUuid)
+                    Entries.Add(new DeviceEntry(device, uuid, data.Name));
 
-        // 同じ場所があれば選び直す（名前が変わっていても、場所が同じなら同じもの）
-        var same = Entries.FirstOrDefault(e => e.IsSameLocation(selected));
-        SelectedEntry = same ?? Entries.FirstOrDefault();
+            // 同じ場所があれば選び直す（名前が変わっていても、場所が同じなら同じもの）
+            same = selected is { } loc ? Entries.FirstOrDefault(e => e.Device == loc.Device && e.Uuid == loc.Uuid) : null;
+            SelectedEntry = same ?? Entries.FirstOrDefault();
+        }
+        finally { _reloadingEntries = false; }
+
+        SetNameError(null);
 
         // 選び直した場所が同じでも、中身は変わっているかもしれないので作り直す
         RebuildEditor(same is not null ? pulse : null, same is not null ? segment : null);
