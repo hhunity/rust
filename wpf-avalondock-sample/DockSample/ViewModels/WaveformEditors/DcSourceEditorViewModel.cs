@@ -21,7 +21,7 @@ public class DcSourceEditorViewModel : ObservableObject
         set
         {
             if (Data is null || value == Voltage) return;
-            _owner.Write<DcSourceData>(d => d.Voltage = value, nameof(Voltage));
+            _owner.Write<DcSourceData>(d => d.Voltage = value, nameof(Voltage), this);
             OnPropertyChanged();
         }
     }
@@ -32,7 +32,7 @@ public class DcSourceEditorViewModel : ObservableObject
         set
         {
             if (Data is null || value == LimitCurrent) return;
-            _owner.Write<DcSourceData>(d => d.LimitCurrent = value, nameof(LimitCurrent));
+            _owner.Write<DcSourceData>(d => d.LimitCurrent = value, nameof(LimitCurrent), this);
             OnPropertyChanged();
         }
     }

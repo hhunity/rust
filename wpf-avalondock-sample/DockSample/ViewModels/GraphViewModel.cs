@@ -382,8 +382,14 @@ public partial class GraphViewModel : PaneViewModel, INotifyDataErrorInfo
     /// <summary>
     /// 画面 → 設定。選んでいる uuid の中身が T 型のときだけ書き換える（Undo・「未保存」は ISettingsService.Edit が扱う）
     /// </summary>
-    public void Write<T>(Action<T> write, string key) where T : DeviceData
+    /// <param name="from">
+    /// 書き込もうとしている編集欄。もう使われていない（作り直された）編集欄からの書き込みは無視する。
+    /// 元に戻すで編集欄を作り直すと、古い入力欄がフォーカスを失ったときに入力中の値を確定しようとして、
+    /// 戻したはずの値を書き戻してしまうため
+    /// </param>
+    public void Write<T>(Action<T> write, string key, object? from = null) where T : DeviceData
     {
+        if (from is not null && !ReferenceEquals(from, Editor)) return;
         if (CurrentData is not T data) return;
         var converter = _converter;
         _settings.Edit($"Waveforms.{SelectedEntry!.Device}.{SelectedEntry.Uuid}.{key}", _ =>

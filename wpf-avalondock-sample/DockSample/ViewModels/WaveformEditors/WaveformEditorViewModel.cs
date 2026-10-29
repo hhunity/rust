@@ -45,7 +45,7 @@ public partial class WaveformEditorViewModel : ObservableObject
         set
         {
             if (_owner.Data<WaveformData>() is null || value == RestingVoltage) return;
-            _owner.Write<WaveformData>(d => d.RestingVoltage = value, nameof(RestingVoltage));
+            _owner.Write<WaveformData>(d => d.RestingVoltage = value, nameof(RestingVoltage), this);
             OnPropertyChanged();
         }
     }
@@ -63,7 +63,7 @@ public partial class WaveformEditorViewModel : ObservableObject
         {
             d.Pulses.Add(NewPulse());
             Renumber(d);
-        }, $"AddPulse.{Guid.NewGuid()}");   // 追加は毎回別の Undo にする
+        }, $"AddPulse.{Guid.NewGuid()}", this);   // 追加は毎回別の Undo にする
         Rebuild(index);
     }
 
@@ -75,7 +75,7 @@ public partial class WaveformEditorViewModel : ObservableObject
         {
             d.Pulses.Insert(0, NewPulse());
             Renumber(d);
-        }, $"AddPulseFirst.{Guid.NewGuid()}");
+        }, $"AddPulseFirst.{Guid.NewGuid()}", this);
         Rebuild(0);
     }
 
@@ -87,7 +87,7 @@ public partial class WaveformEditorViewModel : ObservableObject
         {
             d.Pulses.Insert(row.Index + 1, Clone(d.Pulses[row.Index]));
             Renumber(d);   // 後ろのパルスの番号が1つずつずれる
-        }, $"CopyPulse.{Guid.NewGuid()}");
+        }, $"CopyPulse.{Guid.NewGuid()}", this);
         Rebuild(row.Index + 1);
     }
 
@@ -123,7 +123,7 @@ public partial class WaveformEditorViewModel : ObservableObject
         {
             d.Pulses.RemoveAt(row.Index);
             Renumber(d);   // 後ろのパルスの番号を詰める
-        }, $"RemovePulse.{Guid.NewGuid()}");
+        }, $"RemovePulse.{Guid.NewGuid()}", this);
         Rebuild(Math.Max(0, row.Index - 1));
     }
 
@@ -153,7 +153,7 @@ public partial class WaveformEditorViewModel : ObservableObject
             d => d.Pulses[pulse.Index].Segments.Insert(
                 Math.Clamp(index, 0, d.Pulses[pulse.Index].Segments.Count),
                 NewSegment()),
-            $"AddSegment.{Guid.NewGuid()}");
+            $"AddSegment.{Guid.NewGuid()}", this);
         Rebuild(pulse.Index);
         SelectedSegment = SelectedPulse?.Segments.ElementAtOrDefault(index);   // 入れたセグメントを選ぶ
     }
@@ -163,7 +163,7 @@ public partial class WaveformEditorViewModel : ObservableObject
     private void RemoveSegment(SegmentRowViewModel row)
     {
         _owner.Write<WaveformData>(d => d.Pulses[row.PulseIndex].Segments.RemoveAt(row.Index),
-                                   $"RemoveSegment.{Guid.NewGuid()}");
+                                   $"RemoveSegment.{Guid.NewGuid()}", this);
         Rebuild(row.PulseIndex);
     }
 
@@ -188,7 +188,7 @@ public partial class WaveformEditorViewModel : ObservableObject
         Pulses.Clear();
         var data = _owner.Data<WaveformData>();
         for (var i = 0; i < (data?.Pulses.Count ?? 0); i++)
-            Pulses.Add(new PulseRowViewModel(_owner, i));
+            Pulses.Add(new PulseRowViewModel(_owner, this, i));
         SelectedPulse = Pulses.ElementAtOrDefault(Math.Min(select, Pulses.Count - 1));
 
         // 数が変わったので、削除ボタンを押せるかどうかを計算し直させる
@@ -202,12 +202,12 @@ public class PulseRowViewModel : ObservableObject
 {
     private readonly GraphViewModel _owner;
 
-    public PulseRowViewModel(GraphViewModel owner, int index)
+    public PulseRowViewModel(GraphViewModel owner, WaveformEditorViewModel editor, int index)
     {
         _owner = owner;
         Index = index;
         for (var i = 0; i < (Pulse?.Segments.Count ?? 0); i++)
-            Segments.Add(new SegmentRowViewModel(owner, index, i));
+            Segments.Add(new SegmentRowViewModel(owner, editor, index, i));
     }
 
     /// <summary>何番目のパルスか</summary>
@@ -226,9 +226,13 @@ public class SegmentRowViewModel : ObservableObject
 {
     private readonly GraphViewModel _owner;
 
-    public SegmentRowViewModel(GraphViewModel owner, int pulseIndex, int index)
+    /// <summary>この行を作った編集欄（作り直されて使われなくなった編集欄の行からは書き込まない）</summary>
+    private readonly WaveformEditorViewModel _editor;
+
+    public SegmentRowViewModel(GraphViewModel owner, WaveformEditorViewModel editor, int pulseIndex, int index)
     {
         _owner = owner;
+        _editor = editor;
         PulseIndex = pulseIndex;
         Index = index;
     }
@@ -274,7 +278,7 @@ public class SegmentRowViewModel : ObservableObject
     private void Set<T>(T current, T value, Action<SegmentData> write, [CallerMemberName] string name = "")
     {
         if (Segment is null || EqualityComparer<T>.Default.Equals(current, value)) return;
-        _owner.Write<WaveformData>(d => write(d.Pulses[PulseIndex].Segments[Index]), $"{PulseIndex}.{Index}.{name}");
+        _owner.Write<WaveformData>(d => write(d.Pulses[PulseIndex].Segments[Index]), $"{PulseIndex}.{Index}.{name}", _editor);
         OnPropertyChanged(name);
     }
 }
