@@ -252,16 +252,12 @@ public partial class GraphViewModel : PaneViewModel, INotifyDataErrorInfo
             if (!all.TryGetValue(device, out var byUuid))
                 all[device] = byUuid = new Dictionary<string, DeviceData>();   // その機種が初めてなら辞書から作る
 
-            var data = DeviceTypes.Create(device);   // 機種に合った型（WaveformData など）で作る
+            var data = DeviceTypes.Create(device);   // 機種に合った型（WaveformData など）で、初期の中身入りで作る
             // ほかの波形と重ならない名前にする（新しい波形 1, 2, ...）
             var names = all.Values.SelectMany(d => d.Values).Select(d => d.Name).ToHashSet();
             var number = 1;
             while (names.Contains($"新しい波形 {number}")) number++;
             data.Name = $"新しい波形 {number}";
-            if (data is WaveformData waveform)
-                waveform.Pulses.Add(WaveformEditorViewModel.NewPulse());   // パルス（とセグメント）は必ず1つ以上
-            if (data is DcSourceData dc)
-                dc.Signals.Add(new DcSignal { Level = DcLevel.Hi, Duration = TimeUnit.UsToNs(10) });   // 信号を1つ持った状態で作る
             byUuid[uuid] = data;
         });
 

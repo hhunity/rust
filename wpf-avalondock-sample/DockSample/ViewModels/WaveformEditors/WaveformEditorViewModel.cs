@@ -61,7 +61,7 @@ public partial class WaveformEditorViewModel : ObservableObject
         var index = _owner.Data<WaveformData>()?.Pulses.Count ?? 0;
         _owner.Write<WaveformData>(d =>
         {
-            d.Pulses.Add(NewPulse());
+            d.Pulses.Add(PulseData.CreateNew());
             Renumber(d);
         }, $"AddPulse.{Guid.NewGuid()}", this);   // 追加は毎回別の Undo にする
         Rebuild(index);
@@ -73,7 +73,7 @@ public partial class WaveformEditorViewModel : ObservableObject
     {
         _owner.Write<WaveformData>(d =>
         {
-            d.Pulses.Insert(0, NewPulse());
+            d.Pulses.Insert(0, PulseData.CreateNew());
             Renumber(d);
         }, $"AddPulseFirst.{Guid.NewGuid()}", this);
         Rebuild(0);
@@ -107,13 +107,6 @@ public partial class WaveformEditorViewModel : ObservableObject
     private static PulseData Clone(PulseData pulse) =>
         JsonSerializer.Deserialize<PulseData>(JsonSerializer.Serialize(pulse, JsonSettingsService.JsonOptions),
                                               JsonSettingsService.JsonOptions)!;
-
-    /// <summary>新しいパルス（セグメントを1つ持った状態で作る。パルスにはセグメントが必ず1つ以上ある）</summary>
-    public static PulseData NewPulse() => new() { Segments = { NewSegment() } };
-
-    /// <summary>新しいセグメントの初期値</summary>
-    public static SegmentData NewSegment() =>
-        new() { Name = "segment", TargetVoltage = 5, SlewRate = 1, Duration = TimeUnit.UsToNs(10) };
 
     /// <summary>パルスを削除（行の「削除」ボタンから、行そのものが渡される）。最後の1つは消せない</summary>
     [RelayCommand(CanExecute = nameof(CanRemovePulse))]
@@ -152,7 +145,7 @@ public partial class WaveformEditorViewModel : ObservableObject
         _owner.Write<WaveformData>(
             d => d.Pulses[pulse.Index].Segments.Insert(
                 Math.Clamp(index, 0, d.Pulses[pulse.Index].Segments.Count),
-                NewSegment()),
+                SegmentData.CreateNew()),
             $"AddSegment.{Guid.NewGuid()}", this);
         Rebuild(pulse.Index);
         SelectedSegment = SelectedPulse?.Segments.ElementAtOrDefault(index);   // 入れたセグメントを選ぶ

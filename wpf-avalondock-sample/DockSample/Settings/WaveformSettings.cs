@@ -46,6 +46,9 @@ public abstract class DeviceData
 /// <summary>パルスを持つ機種</summary>
 public class WaveformData : DeviceData
 {
+    /// <summary>画面から新しく作るとき用：パルス1つ（セグメント1つ）を持った状態。読み込みでは使われない</summary>
+    public static WaveformData CreateNew() => new() { Pulses = { PulseData.CreateNew() } };
+
     /// <summary>時間 0 での電圧（V）。最初のセグメントはこの電圧から始まる</summary>
     [JsonPropertyName("restingVoltage")]
     public double RestingVoltage { get; set; }
@@ -57,6 +60,9 @@ public class WaveformData : DeviceData
 /// <summary>DC の機種：Hi / Low / Zero の信号を順に並べた矩形波</summary>
 public class DcSourceData : DeviceData
 {
+    /// <summary>画面から新しく作るとき用：信号1つを持った状態。読み込みでは使われない</summary>
+    public static DcSourceData CreateNew() => new() { Signals = { DcSignal.CreateNew() } };
+
     /// <summary>信号の並び（先頭から順に出す）</summary>
     [JsonPropertyName("signals")]
     public List<DcSignal> Signals { get; set; } = new();
@@ -72,6 +78,9 @@ public class DcSourceData : DeviceData
 /// </summary>
 public class DcSignal
 {
+    /// <summary>新しい信号の初期値（Hi・10µs）</summary>
+    public static DcSignal CreateNew() => new() { Level = DcLevel.Hi, Duration = TimeUnit.UsToNs(10) };
+
     [JsonPropertyName("level")]
     public string Level { get; set; } = DcLevel.Zero;
 
@@ -104,6 +113,9 @@ public class UnknownDeviceData : DeviceData { }
 /// <summary>パルス1つ（セグメントの並び）</summary>
 public class PulseData
 {
+    /// <summary>新しいパルス：セグメント1つを持った状態（パルスにはセグメントが必ず1つ以上ある）。名前は並び順で付け直される</summary>
+    public static PulseData CreateNew() => new() { Segments = { SegmentData.CreateNew() } };
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
@@ -119,6 +131,10 @@ public class PulseData
 /// </summary>
 public class SegmentData
 {
+    /// <summary>新しいセグメントの初期値（5V・スルーレート 1V/µs・10µs）</summary>
+    public static SegmentData CreateNew() =>
+        new() { Name = "segment", TargetVoltage = 5, SlewRate = 1, Duration = TimeUnit.UsToNs(10) };
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
@@ -147,10 +163,11 @@ public static class TimeUnit
 /// <summary>デバイス名から、中身のクラスを決める。機種を増やしたらここに1行足す</summary>
 public static class DeviceTypes
 {
-    private static readonly Dictionary<string, Type> Table = new()
+    /// <summary>デバイス名 → 中身の型と、新しく作るときの作り方（初期の中身入り）</summary>
+    private static readonly Dictionary<string, (Type Type, Func<DeviceData> CreateNew)> Table = new()
     {
-        ["PulseGen"] = typeof(WaveformData),
-        ["DcSource"] = typeof(DcSourceData),
+        ["PulseGen"] = (typeof(WaveformData), WaveformData.CreateNew),
+        ["DcSource"] = (typeof(DcSourceData), DcSourceData.CreateNew),
     };
 
     /// <summary>表にあるデバイス名（グラフペインの「追加 ▾」の一覧に出す）</summary>
@@ -158,11 +175,14 @@ public static class DeviceTypes
 
     /// <summary>このデバイス名の中身の型（表にない名前なら UnknownDeviceData＝中身をそのまま保持）</summary>
     public static Type For(string deviceName) =>
-        Table.GetValueOrDefault(deviceName, typeof(UnknownDeviceData));
+        Table.TryGetValue(deviceName, out var entry) ? entry.Type : typeof(UnknownDeviceData);
 
-    /// <summary>このデバイス名用の、空の中身を作る（新しく uuid を足すときは必ずこれで作る）</summary>
+    /// <summary>
+    /// このデバイス名用の中身を新しく作る（初期の中身入り：パルス1つ、信号1つ など）。新しく uuid を足すときは必ずこれで作る。
+    /// JSON からの読み込みはこれを通らない（ファイルに無い中身が増えることはない）
+    /// </summary>
     public static DeviceData Create(string deviceName) =>
-        (DeviceData)Activator.CreateInstance(For(deviceName))!;
+        Table.TryGetValue(deviceName, out var entry) ? entry.CreateNew() : new UnknownDeviceData();
 }
 
 /// <summary>

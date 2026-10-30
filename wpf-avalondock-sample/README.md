@@ -58,6 +58,7 @@ Dirkster.AvalonDock を MVVM (CommunityToolkit.Mvvm) と DI (Microsoft.Extension
   - 波形は設定の一部（`AppSettings.Waveforms` → 設定フォルダの `waveforms.json`）。保存・開く・元に戻すがそのまま効く
     - 形：`"waveforms"` → デバイス名 → uuid → `pulseCollection` → `segmentCollection`（`Settings/WaveformSettings.cs`）
     - どの機種の中身にも表示名 `name`（`DeviceData.Name`）があり、グラフペインの一覧には「デバイス名 / 表示名」で出る（空なら uuid）
+    - 「追加 ▾」で新しく作るときの初期の中身は、各データクラスの `CreateNew()`（`WaveformData` はパルス1つ・セグメント1つ、`DcSourceData` は信号1つ）。`DeviceTypes.Create` がデバイス名から選ぶ。読み込みでは使われない
     - 中身の型はデバイス名で決まる（`DeviceTypes` の表。表にない名前は `UnknownDeviceData` として中身をそのまま保持）
     - デバイス名ごとに型を選んで読み書きするのは `DeviceTableConverter`
     - クラスに書いていない項目も `[JsonExtensionData]` で保持し、保存時にそのまま書き戻す

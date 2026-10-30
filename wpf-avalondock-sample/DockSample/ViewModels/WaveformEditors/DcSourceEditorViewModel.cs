@@ -55,12 +55,11 @@ public partial class DcSourceEditorViewModel : ObservableObject
 
     private bool CanRemoveSignal(DcSignalRowViewModel? row) => Signals.Count > 1;
 
-    /// <summary>index 番目に新しい信号（Hi・10µs）を入れて、それを選ぶ</summary>
+    /// <summary>index 番目に新しい信号（初期値は DcSignal.CreateNew）を入れて、それを選ぶ</summary>
     private void InsertSignal(int index)
     {
         _owner.Write<DcSourceData>(
-            d => d.Signals.Insert(Math.Clamp(index, 0, d.Signals.Count),
-                                  new DcSignal { Level = DcLevel.Hi, Duration = TimeUnit.UsToNs(10) }),
+            d => d.Signals.Insert(Math.Clamp(index, 0, d.Signals.Count), DcSignal.CreateNew()),
             $"AddSignal.{Guid.NewGuid()}", this);   // 追加は毎回別の Undo にする
         Rebuild(index);
     }
