@@ -8,7 +8,15 @@
 import argparse
 from pathlib import Path
 
+import logging
+import warnings
+
 import matplotlib.pyplot as plt
+
+# フォントの設定は一切しない（matplotlib の標準フォントだけを使う）。
+# ファイル名などに日本語があると「Glyph … missing」の警告が出るので、それとフォント探しのログは表示しない
+logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", message="Glyph .* missing from")
 import numpy as np
 
 
@@ -65,7 +73,7 @@ def main():
     fig = plt.figure(figsize=(5.5 * n, 14))
     for i, p in enumerate(a.csv, start=1):
         plot_one(fig, i, n, *load(p))
-    fig.tight_layout()
+    fig.subplots_adjust(left=0.07, right=0.95, bottom=0.04, top=0.97, wspace=0.3, hspace=0.25)   # tight_layout は 3D グラフで警告が出るので使わない
     out = a.out or str(Path(a.csv[0]).with_suffix(".png"))
     fig.savefig(out, dpi=120)
     print(f"保存：{out}")
