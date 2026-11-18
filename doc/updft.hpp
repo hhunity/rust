@@ -1,3 +1,77 @@
+
+// preprocess_blocks.cuh
+// 画像から複数のブロックを切り出し、ブロックごとに「平均を引く → 窓を掛ける」を CUDA で行う（CPU 版 pocsub::preprocess と同じ）
+//
+//   1 つの CUDA ブロックが、1 つの画像ブロックを担当する
+//     1 回目のループ：ブロック内の画素の合計（double で足す）→ 共有メモリで合計 → 平均
+//     2 回目のループ：(画素 − 平均) × 窓 を、cuFFT（C2C）に渡す複素数（虚部 0）で書く
+//   平均を出すカーネルと書くカーネルを分けないので、起動は 1 回
+//
+// 入力：画像（デバイス、8bit / 16bit / float、行の間隔 pitch［要素数］）と、ブロックごとの左上の座標 (x0, y0)
+//       左右比較なら、基準ブロックと比較ブロックの座標を並べて渡す
+// 出力：B × Ny × Nx の float2（行優先）。そのまま cufftExecC2C（バッチ B）に渡せる
+#pragma once
+#include "hanning_window.cuh"
+
+#ifdef __CUDACC__
+#include <cuda_runtime.h>
+#endif
+
+namespace prep {
+
+// CPU テストと共通の 1 要素の計算
+#ifdef __CUDACC__
+__host__ __device__
+#endif
+inline float windowed(float v, float mean, int y, int x, int Ny, int Nx) { return (v - mean) * hw::hanning(y, x, Ny, Nx); }
+
+#ifdef __CUDACC__
+constexpr int kThreads = 256;
+
+// grid = B、block = kThreads
+template <class T>
+__global__ void kPreprocessBlocks(const T* img, int pitch, const int2* origin, int Ny, int Nx,
+                                  float2* out, float* meanOut /* 不要なら nullptr */)
+{
+    __shared__ double warpSum[kThreads / 32];
+    __shared__ float sMean;
+    const int b = blockIdx.x, t = threadIdx.x, n = Ny * Nx;
+    const int2 o = origin[b];
+
+    // 1. 合計（各スレッドが n / kThreads 画素を足す。足し合わせは double で、桁落ちを防ぐ）
+    double s = 0.0;
+    for (int i = t; i < n; i += kThreads)
+        s += static_cast<double>(img[static_cast<size_t>(o.y + i / Nx) * pitch + o.x + i % Nx]);
+    for (int off = 16; off > 0; off >>= 1) s += __shfl_down_sync(0xffffffffu, s, off);   // ワープ内で合計
+    if ((t & 31) == 0) warpSum[t >> 5] = s;
+    __syncthreads();
+    if (t == 0) {
+        double tot = 0.0;
+        for (int w = 0; w < kThreads / 32; ++w) tot += warpSum[w];
+        sMean = static_cast<float>(tot / n);
+        if (meanOut) meanOut[b] = sMean;
+    }
+    __syncthreads();
+
+    // 2. (画素 − 平均) × 窓 → 複素数（虚部 0）
+    const float m = sMean;
+    float2* ob = out + static_cast<size_t>(b) * n;
+    for (int i = t; i < n; i += kThreads) {
+        const int y = i / Nx, x = i % Nx;
+        const float v = static_cast<float>(img[static_cast<size_t>(o.y + y) * pitch + o.x + x]);
+        ob[i] = make_float2(windowed(v, m, y, x, Ny, Nx), 0.f);
+    }
+}
+
+template <class T>
+inline void preprocessBlocks(const T* img, int pitch, const int2* origin, int B, int Ny, int Nx,
+                             float2* out, float* meanOut = nullptr, cudaStream_t s = 0)
+{
+    kPreprocessBlocks<T><<<B, kThreads, 0, s>>>(img, pitch, origin, Ny, Nx, out, meanOut);
+}
+#endif
+
+
 // updft_refine.cuh
 // Upsampled DFT の「細かく求める部分」（行列 DFT）の CUDA 版。整数ピークを求めるところは既存のものを使う前提。
 //
